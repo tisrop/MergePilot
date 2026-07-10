@@ -9,7 +9,9 @@ pub async fn auth_login(
     token: String,
     custom_url: Option<String>,
 ) -> Result<User, String> {
-    use crate::platform::{github::GitHubAdapter, gitlab::GitLabAdapter, gitee::GiteeAdapter, GitPlatform};
+    use crate::platform::{
+        gitee::GiteeAdapter, github::GitHubAdapter, gitlab::GitLabAdapter, GitPlatform,
+    };
 
     let client = state.http_client.as_ref().clone();
 
@@ -46,12 +48,16 @@ pub async fn auth_login(
     let user = p.current_user().await.map_err(|e| e.to_string())?;
 
     // Store token
-    state.token_vault.store_token(&platform, &token)
+    state
+        .token_vault
+        .store_token(&platform, &token)
         .map_err(|e| e.to_string())?;
 
     // Store custom URL if provided
     if let Some(ref url) = custom_url {
-        state.token_vault.store_custom_url(&platform, url)
+        state
+            .token_vault
+            .store_custom_url(&platform, url)
             .map_err(|e| e.to_string())?;
     }
 
@@ -59,12 +65,15 @@ pub async fn auth_login(
 }
 
 #[tauri::command]
-pub async fn auth_logout(
-    state: State<'_, AppState>,
-    platform: String,
-) -> Result<(), String> {
-    state.token_vault.delete_token(&platform).map_err(|e| e.to_string())?;
-    state.token_vault.delete_custom_url(&platform).map_err(|e| e.to_string())?;
+pub async fn auth_logout(state: State<'_, AppState>, platform: String) -> Result<(), String> {
+    state
+        .token_vault
+        .delete_token(&platform)
+        .map_err(|e| e.to_string())?;
+    state
+        .token_vault
+        .delete_custom_url(&platform)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -99,9 +108,11 @@ pub(crate) fn build_platform(
     platform: &str,
     state: &AppState,
 ) -> Result<Box<dyn crate::platform::GitPlatform>, crate::error::AppError> {
-    use crate::platform::{github::GitHubAdapter, gitlab::GitLabAdapter, gitee::GiteeAdapter};
+    use crate::platform::{gitee::GiteeAdapter, github::GitHubAdapter, gitlab::GitLabAdapter};
 
-    let token = state.token_vault.get_token(platform)?
+    let token = state
+        .token_vault
+        .get_token(platform)?
         .ok_or_else(|| crate::error::AppError::NotAuthenticated(platform.to_string()))?;
     let client = state.http_client.as_ref().clone();
     let custom_url = state.token_vault.get_custom_url(platform);
@@ -131,6 +142,9 @@ pub(crate) fn build_platform(
                 adapter
             }))
         }
-        _ => Err(crate::error::AppError::Unknown(format!("Unknown platform: {}", platform))),
+        _ => Err(crate::error::AppError::Unknown(format!(
+            "Unknown platform: {}",
+            platform
+        ))),
     }
 }

@@ -1,9 +1,9 @@
 use futures::StreamExt;
 use serde_json::Value;
 
+use crate::ai::prompt;
 use crate::error::AppError;
 use crate::models::{AiReviewFocus, AiReviewResult, PrContext};
-use crate::ai::prompt;
 
 /// OpenAI-compatible chat client
 pub struct AiClient {
@@ -38,7 +38,8 @@ impl AiClient {
             "max_tokens": max_tokens,
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("User-Agent", "mergepilot")
@@ -86,7 +87,8 @@ impl AiClient {
             "stream": true,
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("User-Agent", "mergepilot")
@@ -210,11 +212,12 @@ impl AiClient {
         };
 
         let trimmed = json_str.trim();
-        let result: AiReviewResult = serde_json::from_str(trimmed)
-            .map_err(|e| AppError::Ai(format!(
+        let result: AiReviewResult = serde_json::from_str(trimmed).map_err(|e| {
+            AppError::Ai(format!(
                 "Failed to parse AI response: {}\n\nRaw response: {}",
                 e, response
-            )))?;
+            ))
+        })?;
 
         Ok(result)
     }
@@ -224,7 +227,8 @@ impl AiClient {
     pub async fn list_models(&self) -> Result<Vec<String>, AppError> {
         let url = format!("{}/models", self.endpoint);
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("User-Agent", "mergepilot")
@@ -248,7 +252,13 @@ impl AiClient {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|m| m["id"].as_str().map(String::from))
-                    .filter(|id| !id.contains("dall-e") && !id.contains("whisper") && !id.contains("tts") && !id.contains("embedding") && !id.contains("moderation"))
+                    .filter(|id| {
+                        !id.contains("dall-e")
+                            && !id.contains("whisper")
+                            && !id.contains("tts")
+                            && !id.contains("embedding")
+                            && !id.contains("moderation")
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -258,9 +268,8 @@ impl AiClient {
 
     /// Test the API connection with a simple request
     pub async fn test_connection(&self) -> Result<bool, AppError> {
-        let messages = vec![
-            serde_json::json!({"role": "user", "content": "Hello, respond with just 'ok'."}),
-        ];
+        let messages =
+            vec![serde_json::json!({"role": "user", "content": "Hello, respond with just 'ok'."})];
 
         match self.chat(&messages, 0.0, 50).await {
             Ok(_) => Ok(true),

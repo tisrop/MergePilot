@@ -72,7 +72,8 @@ impl AiConfigManager {
     /// Decrypt and return the API key from the config file.
     pub fn get_api_key(&self) -> Result<String, AppError> {
         let config = self.get_config()?;
-        let encrypted = config.api_key_encrypted
+        let encrypted = config
+            .api_key_encrypted
             .ok_or_else(|| AppError::Ai("No API key configured".to_string()))?;
 
         crypto::decrypt(&encrypted)

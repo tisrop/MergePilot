@@ -12,10 +12,7 @@ pub async fn ai_get_config(state: State<'_, AppState>) -> Result<AiConfig, Strin
 }
 
 #[tauri::command]
-pub async fn ai_save_config(
-    state: State<'_, AppState>,
-    config: AiConfig,
-) -> Result<(), String> {
+pub async fn ai_save_config(state: State<'_, AppState>, config: AiConfig) -> Result<(), String> {
     // Merge: preserve encrypted key from existing config
     let existing = state.ai_config.get_config().unwrap_or_default();
     let mut merged = config;
@@ -24,15 +21,19 @@ pub async fn ai_save_config(
         merged.api_key_encrypted = encrypted_key.clone();
         merged.api_key_configured = encrypted_key.is_some();
     }
-    state.ai_config.save_config(&merged).map_err(|e| e.to_string())
+    state
+        .ai_config
+        .save_config(&merged)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn ai_save_api_key(
-    state: State<'_, AppState>,
-    api_key: String,
-) -> Result<(), String> {
-    state.ai_config.save_api_key(&api_key).map_err(|e| e.to_string()).map(|_| ())
+pub async fn ai_save_api_key(state: State<'_, AppState>, api_key: String) -> Result<(), String> {
+    state
+        .ai_config
+        .save_api_key(&api_key)
+        .map_err(|e| e.to_string())
+        .map(|_| ())
 }
 
 #[tauri::command]
@@ -104,7 +105,10 @@ pub async fn ai_review_stream(
 }
 
 #[tauri::command]
-pub async fn ai_list_models(state: State<'_, AppState>, endpoint: String) -> Result<Vec<String>, String> {
+pub async fn ai_list_models(
+    state: State<'_, AppState>,
+    endpoint: String,
+) -> Result<Vec<String>, String> {
     let api_key = state.ai_config.get_api_key().map_err(|e| e.to_string())?;
 
     // Use a dummy model name — list_models doesn't need a model
