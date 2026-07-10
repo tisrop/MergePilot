@@ -8,6 +8,7 @@ use async_trait::async_trait;
 
 /// Common interface for all Git platforms (GitHub, GitLab, Gitee)
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait GitPlatform: Send + Sync {
     fn name(&self) -> &'static str;
 

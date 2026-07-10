@@ -27,6 +27,7 @@ impl GitLabAdapter {
         self
     }
 
+    #[allow(dead_code)]
     fn auth_header(&self) -> String {
         format!("PRIVATE-TOKEN: {}", self.token)
     }

@@ -196,7 +196,7 @@ impl GitPlatform for GiteeAdapter {
             .iter()
             .map(|pr| {
                 let state_str = pr["state"].as_str().unwrap_or("");
-                let merged = pr["merged_at"].is_null() == false;
+                let merged = !pr["merged_at"].is_null();
                 PrSummary {
                     number: pr["number"].as_u64().unwrap_or(0),
                     title: pr["title"].as_str().unwrap_or("").to_string(),
@@ -261,7 +261,7 @@ impl GitPlatform for GiteeAdapter {
             author: Self::map_user(&json["user"]),
             state: {
                 let st = json["state"].as_str().unwrap_or("");
-                let merged = json["merged_at"].is_null() == false;
+                let merged = !json["merged_at"].is_null();
                 if merged {
                     PrState::Merged
                 } else if st == "closed" {

@@ -10,6 +10,12 @@ pub struct AiConfigManager {
     config_dir: PathBuf,
 }
 
+impl Default for AiConfigManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AiConfigManager {
     pub fn new() -> Self {
         let config_dir = directories::ProjectDirs::from("com", "mergepilot", "MergePilot")

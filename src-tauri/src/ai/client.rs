@@ -168,6 +168,7 @@ impl AiClient {
 
     /// Perform a streaming code review.
     /// Calls `on_token` with each text delta, and returns the final parsed result.
+    #[allow(clippy::too_many_arguments)]
     pub async fn review_stream<F>(
         &self,
         diff: &str,

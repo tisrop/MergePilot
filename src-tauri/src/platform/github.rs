@@ -263,7 +263,7 @@ impl GitPlatform for GitHubAdapter {
                 author: Self::map_user(&pr["user"]),
                 state: Self::map_pr_state(
                     pr["state"].as_str().unwrap_or(""),
-                    pr["merged_at"].is_null() == false,
+                    !pr["merged_at"].is_null(),
                 ),
                 created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
                 updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
@@ -317,7 +317,7 @@ impl GitPlatform for GitHubAdapter {
             author: Self::map_user(&json["user"]),
             state: Self::map_pr_state(
                 json["state"].as_str().unwrap_or(""),
-                json["merged_at"].is_null() == false,
+                !json["merged_at"].is_null(),
             ),
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
