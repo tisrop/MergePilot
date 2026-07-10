@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import type { Platform, RepoSummary, Paginated } from "@/types";
 import { repoList } from "@/api";
+import { useAuthStore } from "./useAuthStore";
 
 export interface ForkContext {
   upstreamFullName: string | null;
@@ -11,10 +12,19 @@ export interface ForkContext {
 }
 
 export const useRepoStore = defineStore("repo", () => {
-  const repos = ref<RepoSummary[]>([]);
+  const reposCache = ref<Record<Platform, RepoSummary[]>>({
+    github: [],
+    gitlab: [],
+    gitee: [],
+  });
   const activeRepo = ref<{ owner: string; repo: string } | null>(null);
   const loading = ref(false);
   const forkContext = ref<ForkContext | null>(null);
+
+  const repos = computed(() => {
+    const auth = useAuthStore();
+    return reposCache.value[auth.activePlatform] ?? [];
+  });
 
   const activeFullName = computed(() => {
     if (!activeRepo.value) return null;
@@ -32,11 +42,17 @@ export const useRepoStore = defineStore("repo", () => {
     return !!(forkContext.value?.upstreamFullName && forkContext.value?.upstreamOwner);
   });
 
+  function refreshRepos(platform: Platform) {
+    reposCache.value = { ...reposCache.value, [platform]: [] };
+    return fetchRepos(platform);
+  }
+
   async function fetchRepos(platform: Platform, page: number = 1) {
+    reposCache.value = { ...reposCache.value, [platform]: [] };
     loading.value = true;
     try {
       const result: Paginated<RepoSummary> = await repoList(platform, page);
-      repos.value = result.items;
+      reposCache.value = { ...reposCache.value, [platform]: result.items };
     } finally {
       loading.value = false;
     }
@@ -64,6 +80,7 @@ export const useRepoStore = defineStore("repo", () => {
 
   return {
     repos,
+    reposCache,
     activeRepo,
     activeFullName,
     forkContext,
@@ -71,6 +88,7 @@ export const useRepoStore = defineStore("repo", () => {
     hasUpstreamInfo,
     loading,
     fetchRepos,
+    refreshRepos,
     setActiveRepo,
     setForkContext,
     switchForkView,
