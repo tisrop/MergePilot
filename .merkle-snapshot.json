@@ -1,0 +1,562 @@
+{
+  "rootHash": "c02c122b2ec4959582e0b82bb1a25bd0578a67d27509a085cbd1d023496dd51f",
+  "timestamp": 1783600938880,
+  "fileCount": 31,
+  "files": [
+    {
+      "path": "vite.config.ts",
+      "hash": "f98b7617f32e6fb791189b8e266a08209d3fac5b8f44757978f3494a98f1c190",
+      "size": 569,
+      "modified": 1783586467864.655
+    },
+    {
+      "path": "src/App.vue",
+      "hash": "7075c5a19908bf1864f9e209f7d8dc2967ec55735c8aec02e82250eeb03fab50",
+      "size": 117,
+      "modified": 1783585715140.1646
+    },
+    {
+      "path": "src/main.ts",
+      "hash": "5f8976c3e701c3770d0643356fe6f801be8784b01339455a6b0fcc617a076a82",
+      "size": 243,
+      "modified": 1783585715138.9863
+    },
+    {
+      "path": "src/vite-env.d.ts",
+      "hash": "64bae9af75943fc47eb51e8d39edf156b4ba949e254b62d65afa989d33e71a0d",
+      "size": 189,
+      "modified": 1783585715139.8123
+    },
+    {
+      "path": "src/router/index.ts",
+      "hash": "a9400f58e2704aa05a45004eeed9d759b8fa704d462b4250f16c55c87c148b69",
+      "size": 1198,
+      "modified": 1783585715140.9473
+    },
+    {
+      "path": "src/pages/LoginPage.vue",
+      "hash": "aafef5945a573efcc72a4a05782e6d1e8b9a1adaa99b1c1608908460b7e78415",
+      "size": 5091,
+      "modified": 1783587697659.0054
+    },
+    {
+      "path": "src/pages/IssueListPage.vue",
+      "hash": "5935cb2dd35f2f8e6a5a622b3ff0d896e7615ffe27151e4156e9df885608cf3c",
+      "size": 1903,
+      "modified": 1783585769062.5073
+    },
+    {
+      "path": "src/pages/PrDetailPage.vue",
+      "hash": "f6643ae566575978ac3effc4ef9d85a5eba964637afaf4d1d7f66016f2db714d",
+      "size": 4270,
+      "modified": 1783586949260.074
+    },
+    {
+      "path": "src/pages/SettingsPage.vue",
+      "hash": "e25c8329248417ebfeb263c27ce90fe3b124f95473a22051bee9750ba0bb917c",
+      "size": 645,
+      "modified": 1783585769063.5608
+    },
+    {
+      "path": "src/pages/PrListPage.vue",
+      "hash": "a8d4810645f5613db831197aed70ee00e9e8ff1ac7664fcd6073408f7c25cf02",
+      "size": 2203,
+      "modified": 1783590195597.2732
+    },
+    {
+      "path": "src/pages/IssueNewPage.vue",
+      "hash": "aea2236dd211dc6cce50f5f5003ba51a5c64c3e44faa4e98615c435ea5785561",
+      "size": 1416,
+      "modified": 1783585769063.1733
+    },
+    {
+      "path": "src/api/index.ts",
+      "hash": "cc2158c812588d684d0f84844748ac2e110935f2ceb080419553236bafe27ef2",
+      "size": 3705,
+      "modified": 1783587865785.0264
+    },
+    {
+      "path": "src/components/review/ReviewList.vue",
+      "hash": "e14061a5cda24c4be3ec4a9f8ac01b79de3c3953c21075573549609a7c03cead",
+      "size": 2285,
+      "modified": 1783585856150.5198
+    },
+    {
+      "path": "src/components/review/InlineComment.vue",
+      "hash": "8e37b71dd69603aa00342c3f7079913959a844b205d1fcbd1f35610d6baf9892",
+      "size": 3007,
+      "modified": 1783586903850.8625
+    },
+    {
+      "path": "src/components/review/ReviewForm.vue",
+      "hash": "a5855a9922a7f7bf48dc5a2d0c72416cb13a4565ab845652028e5eefbee731b5",
+      "size": 3077,
+      "modified": 1783585856119.639
+    },
+    {
+      "path": "src/components/ai/AiSettings.vue",
+      "hash": "18cdd380e211992d1c677e62bcb004ac440eda64b874a1c01525b339c038d420",
+      "size": 11590,
+      "modified": 1783588772712.0708
+    },
+    {
+      "path": "src/components/ai/AiReviewPanel.vue",
+      "hash": "bddddae1affbd5b1f288dc7b3b9f9651f26ab348066c226be951c76e29b4ddb2",
+      "size": 7370,
+      "modified": 1783587069159.4905
+    },
+    {
+      "path": "src/components/ai/AiSuggestionCard.vue",
+      "hash": "cadfdf15335d07bbf9acd7082f82432fa7a9868e72b4c669efac0f144b24e076",
+      "size": 3626,
+      "modified": 1783585893860.6826
+    },
+    {
+      "path": "src/components/issue/IssueCard.vue",
+      "hash": "20cbd208d0bf38ab56cb4ab826d185ab4b55d4b812c380f5031f1bc84332785d",
+      "size": 1692,
+      "modified": 1783585856154.3472
+    },
+    {
+      "path": "src/components/issue/IssueForm.vue",
+      "hash": "7075e8c361ce004d7899b5a4b3946b3bdbd63d08b6012a1d54ca804a48ba7f19",
+      "size": 3366,
+      "modified": 1783585856155.7004
+    },
+    {
+      "path": "src/components/pr/PrCard.vue",
+      "hash": "0555e58c63ce5a742f538c47b9b5d0c090c58e81967f23232313c63ba880424d",
+      "size": 1894,
+      "modified": 1783585822272.455
+    },
+    {
+      "path": "src/components/pr/PrFilterBar.vue",
+      "hash": "81a3871383741476a2d89d4465c858d2acdd533fcaf94fee42fa0d04024bd777",
+      "size": 1195,
+      "modified": 1783585822272.7898
+    },
+    {
+      "path": "src/components/diff/DiffLine.vue",
+      "hash": "5e71876255d3b97eec389bc908129f66f3e62ec51dd518bbcde23fd179dd8d3b",
+      "size": 2316,
+      "modified": 1783585822272.0303
+    },
+    {
+      "path": "src/components/diff/DiffFile.vue",
+      "hash": "c0dca79668c6f22574f589111e74c88afd7de9c5d26ccb80e9651d1fa479ec31",
+      "size": 2951,
+      "modified": 1783585822271.566
+    },
+    {
+      "path": "src/components/diff/DiffViewer.vue",
+      "hash": "ebd70fc470bb842dfd727d176ac0105bd34961fc99732f9ab5102bcbfbe9e08d",
+      "size": 4606,
+      "modified": 1783586928896.5547
+    },
+    {
+      "path": "src/components/layout/AppLayout.vue",
+      "hash": "f154be7d4f2502181fae80ca4912870b2817f7f962b8794a5822236744a0aacc",
+      "size": 734,
+      "modified": 1783585822250.8948
+    },
+    {
+      "path": "src/components/layout/Sidebar.vue",
+      "hash": "9eea8defc93dc800f446e98d107042f4b94e2043e8dcbd3879e999e3a40b17ee",
+      "size": 7518,
+      "modified": 1783590144894.4084
+    },
+    {
+      "path": "src/stores/useRepoStore.ts",
+      "hash": "5a5c3493bc32a3da2b5449255d8227e5a512565891f6086c9f277065389fe0d4",
+      "size": 1014,
+      "modified": 1783585727730.2002
+    },
+    {
+      "path": "src/stores/useAuthStore.ts",
+      "hash": "6b558a8b3aef137d93f3f5f405e3fa07798c67b3ecc2bdf9b9d32f13cefd5897",
+      "size": 1679,
+      "modified": 1783585727728.829
+    },
+    {
+      "path": "src/stores/usePrStore.ts",
+      "hash": "e835dada29bb0a3506399593e6dafdd7303d011a4720de27963ab66fae7da1ff",
+      "size": 1686,
+      "modified": 1783585727730.95
+    },
+    {
+      "path": "src/types/index.ts",
+      "hash": "d0f8e2a2a69b7b63d26a2cc4a573981bf99823fbb04bfbdb76b54382d5a2ad28",
+      "size": 3487,
+      "modified": 1783589047784.202
+    }
+  ],
+  "tree": {
+    "hash": "c02c122b2ec4959582e0b82bb1a25bd0578a67d27509a085cbd1d023496dd51f",
+    "left": {
+      "hash": "0599de057e3bde63e2fca4f4824c37b0a7838ef9ffef112b75a48fc347105b6c",
+      "left": {
+        "hash": "c4cc4a88914f36897f51a8f5e682db241de2286d1a62324053a76691d61496cf",
+        "left": {
+          "hash": "5d07ebbd8b746fdd049d240e79b5cce30b754087df68c0e6d37867799d94b89a",
+          "left": {
+            "hash": "4ce3a5865016b9a2f803f64280ed0464f21d11e22f99f6ce61898fbb3b5b037f",
+            "left": {
+              "hash": "cc2158c812588d684d0f84844748ac2e110935f2ceb080419553236bafe27ef2",
+              "file": {
+                "path": "src/api/index.ts",
+                "hash": "cc2158c812588d684d0f84844748ac2e110935f2ceb080419553236bafe27ef2",
+                "size": 3705,
+                "modified": 1783587865785.0264
+              }
+            },
+            "right": {
+              "hash": "7075c5a19908bf1864f9e209f7d8dc2967ec55735c8aec02e82250eeb03fab50",
+              "file": {
+                "path": "src/App.vue",
+                "hash": "7075c5a19908bf1864f9e209f7d8dc2967ec55735c8aec02e82250eeb03fab50",
+                "size": 117,
+                "modified": 1783585715140.1646
+              }
+            }
+          },
+          "right": {
+            "hash": "229220a7cf52067becf0dd6064ec6a572caeaf63c5c644dd00db2cbb9121026c",
+            "left": {
+              "hash": "bddddae1affbd5b1f288dc7b3b9f9651f26ab348066c226be951c76e29b4ddb2",
+              "file": {
+                "path": "src/components/ai/AiReviewPanel.vue",
+                "hash": "bddddae1affbd5b1f288dc7b3b9f9651f26ab348066c226be951c76e29b4ddb2",
+                "size": 7370,
+                "modified": 1783587069159.4905
+              }
+            },
+            "right": {
+              "hash": "18cdd380e211992d1c677e62bcb004ac440eda64b874a1c01525b339c038d420",
+              "file": {
+                "path": "src/components/ai/AiSettings.vue",
+                "hash": "18cdd380e211992d1c677e62bcb004ac440eda64b874a1c01525b339c038d420",
+                "size": 11590,
+                "modified": 1783588772712.0708
+              }
+            }
+          }
+        },
+        "right": {
+          "hash": "ee99fcce15fb6a1ed48273cd4663e585010b502474cc59333397be9996944989",
+          "left": {
+            "hash": "9b461910bdfb373e45d87b160e4df913bf20b31134264ba28ac328852159dd9e",
+            "left": {
+              "hash": "cadfdf15335d07bbf9acd7082f82432fa7a9868e72b4c669efac0f144b24e076",
+              "file": {
+                "path": "src/components/ai/AiSuggestionCard.vue",
+                "hash": "cadfdf15335d07bbf9acd7082f82432fa7a9868e72b4c669efac0f144b24e076",
+                "size": 3626,
+                "modified": 1783585893860.6826
+              }
+            },
+            "right": {
+              "hash": "c0dca79668c6f22574f589111e74c88afd7de9c5d26ccb80e9651d1fa479ec31",
+              "file": {
+                "path": "src/components/diff/DiffFile.vue",
+                "hash": "c0dca79668c6f22574f589111e74c88afd7de9c5d26ccb80e9651d1fa479ec31",
+                "size": 2951,
+                "modified": 1783585822271.566
+              }
+            }
+          },
+          "right": {
+            "hash": "4a87c615a84d1435ada1fa60c689c536dfacff170446a4fafaa5f4a27fc2957c",
+            "left": {
+              "hash": "5e71876255d3b97eec389bc908129f66f3e62ec51dd518bbcde23fd179dd8d3b",
+              "file": {
+                "path": "src/components/diff/DiffLine.vue",
+                "hash": "5e71876255d3b97eec389bc908129f66f3e62ec51dd518bbcde23fd179dd8d3b",
+                "size": 2316,
+                "modified": 1783585822272.0303
+              }
+            },
+            "right": {
+              "hash": "ebd70fc470bb842dfd727d176ac0105bd34961fc99732f9ab5102bcbfbe9e08d",
+              "file": {
+                "path": "src/components/diff/DiffViewer.vue",
+                "hash": "ebd70fc470bb842dfd727d176ac0105bd34961fc99732f9ab5102bcbfbe9e08d",
+                "size": 4606,
+                "modified": 1783586928896.5547
+              }
+            }
+          }
+        }
+      },
+      "right": {
+        "hash": "8e8f9b561431c842ad05610f8a40b578474c26f4123dc201c72b94f70afac1f8",
+        "left": {
+          "hash": "4dbddbb1e0d168d1e53e0830f4287558c56fa967e626620a0c7725f5879b7db3",
+          "left": {
+            "hash": "ae0a0a396890c7ec61764a0f24224a961e19746710017bd72298e2bf20b5c4a1",
+            "left": {
+              "hash": "20cbd208d0bf38ab56cb4ab826d185ab4b55d4b812c380f5031f1bc84332785d",
+              "file": {
+                "path": "src/components/issue/IssueCard.vue",
+                "hash": "20cbd208d0bf38ab56cb4ab826d185ab4b55d4b812c380f5031f1bc84332785d",
+                "size": 1692,
+                "modified": 1783585856154.3472
+              }
+            },
+            "right": {
+              "hash": "7075e8c361ce004d7899b5a4b3946b3bdbd63d08b6012a1d54ca804a48ba7f19",
+              "file": {
+                "path": "src/components/issue/IssueForm.vue",
+                "hash": "7075e8c361ce004d7899b5a4b3946b3bdbd63d08b6012a1d54ca804a48ba7f19",
+                "size": 3366,
+                "modified": 1783585856155.7004
+              }
+            }
+          },
+          "right": {
+            "hash": "ecd675a80f8f5c0e1b17285d7b7a0c683c8b4e58001bfa3fcfa7fb5d81c231a4",
+            "left": {
+              "hash": "f154be7d4f2502181fae80ca4912870b2817f7f962b8794a5822236744a0aacc",
+              "file": {
+                "path": "src/components/layout/AppLayout.vue",
+                "hash": "f154be7d4f2502181fae80ca4912870b2817f7f962b8794a5822236744a0aacc",
+                "size": 734,
+                "modified": 1783585822250.8948
+              }
+            },
+            "right": {
+              "hash": "9eea8defc93dc800f446e98d107042f4b94e2043e8dcbd3879e999e3a40b17ee",
+              "file": {
+                "path": "src/components/layout/Sidebar.vue",
+                "hash": "9eea8defc93dc800f446e98d107042f4b94e2043e8dcbd3879e999e3a40b17ee",
+                "size": 7518,
+                "modified": 1783590144894.4084
+              }
+            }
+          }
+        },
+        "right": {
+          "hash": "151f7d9deceb9ff393735e0d89b7c8b4ebdea46070275d9b6e891d03429bfce1",
+          "left": {
+            "hash": "ee9c9e464eb909dd8c3284eef1fe60e262171d552cfe8ba6fea284c63250a83d",
+            "left": {
+              "hash": "0555e58c63ce5a742f538c47b9b5d0c090c58e81967f23232313c63ba880424d",
+              "file": {
+                "path": "src/components/pr/PrCard.vue",
+                "hash": "0555e58c63ce5a742f538c47b9b5d0c090c58e81967f23232313c63ba880424d",
+                "size": 1894,
+                "modified": 1783585822272.455
+              }
+            },
+            "right": {
+              "hash": "81a3871383741476a2d89d4465c858d2acdd533fcaf94fee42fa0d04024bd777",
+              "file": {
+                "path": "src/components/pr/PrFilterBar.vue",
+                "hash": "81a3871383741476a2d89d4465c858d2acdd533fcaf94fee42fa0d04024bd777",
+                "size": 1195,
+                "modified": 1783585822272.7898
+              }
+            }
+          },
+          "right": {
+            "hash": "7beaac363dda3dd2efec00bd38f3718f49532ff2d116bafc20c09c5a2cac5c48",
+            "left": {
+              "hash": "8e37b71dd69603aa00342c3f7079913959a844b205d1fcbd1f35610d6baf9892",
+              "file": {
+                "path": "src/components/review/InlineComment.vue",
+                "hash": "8e37b71dd69603aa00342c3f7079913959a844b205d1fcbd1f35610d6baf9892",
+                "size": 3007,
+                "modified": 1783586903850.8625
+              }
+            },
+            "right": {
+              "hash": "a5855a9922a7f7bf48dc5a2d0c72416cb13a4565ab845652028e5eefbee731b5",
+              "file": {
+                "path": "src/components/review/ReviewForm.vue",
+                "hash": "a5855a9922a7f7bf48dc5a2d0c72416cb13a4565ab845652028e5eefbee731b5",
+                "size": 3077,
+                "modified": 1783585856119.639
+              }
+            }
+          }
+        }
+      }
+    },
+    "right": {
+      "hash": "02c217fc713a496b418398fa990fb49bcbad20e3c035bfa969d282a148f8b71e",
+      "left": {
+        "hash": "63b096eacb820b81cf27e97bc570631e039d29aafc42eecaeb2c46c1e1802539",
+        "left": {
+          "hash": "fcf124aae41d07d9f61ec86090d6aece975538357819e93c05d3c9325450fa16",
+          "left": {
+            "hash": "6bb6818383e8f3b07b1c13dc525c95a7a5181248b09c29157b0f0d2e1b08480b",
+            "left": {
+              "hash": "e14061a5cda24c4be3ec4a9f8ac01b79de3c3953c21075573549609a7c03cead",
+              "file": {
+                "path": "src/components/review/ReviewList.vue",
+                "hash": "e14061a5cda24c4be3ec4a9f8ac01b79de3c3953c21075573549609a7c03cead",
+                "size": 2285,
+                "modified": 1783585856150.5198
+              }
+            },
+            "right": {
+              "hash": "5f8976c3e701c3770d0643356fe6f801be8784b01339455a6b0fcc617a076a82",
+              "file": {
+                "path": "src/main.ts",
+                "hash": "5f8976c3e701c3770d0643356fe6f801be8784b01339455a6b0fcc617a076a82",
+                "size": 243,
+                "modified": 1783585715138.9863
+              }
+            }
+          },
+          "right": {
+            "hash": "42343a2ea4b8c4748b0ccbb696ae7d737b6c9ddbecdd57cca08f844d137644d5",
+            "left": {
+              "hash": "5935cb2dd35f2f8e6a5a622b3ff0d896e7615ffe27151e4156e9df885608cf3c",
+              "file": {
+                "path": "src/pages/IssueListPage.vue",
+                "hash": "5935cb2dd35f2f8e6a5a622b3ff0d896e7615ffe27151e4156e9df885608cf3c",
+                "size": 1903,
+                "modified": 1783585769062.5073
+              }
+            },
+            "right": {
+              "hash": "aea2236dd211dc6cce50f5f5003ba51a5c64c3e44faa4e98615c435ea5785561",
+              "file": {
+                "path": "src/pages/IssueNewPage.vue",
+                "hash": "aea2236dd211dc6cce50f5f5003ba51a5c64c3e44faa4e98615c435ea5785561",
+                "size": 1416,
+                "modified": 1783585769063.1733
+              }
+            }
+          }
+        },
+        "right": {
+          "hash": "75d7f3a09b5cf67a3fd611398c24bac86df3e3a766edd813dd09d94488e9303c",
+          "left": {
+            "hash": "dd2bf15f03c7650340f0d82aab53e9ff099b981f0e5360558e8acd82ce1ca18d",
+            "left": {
+              "hash": "aafef5945a573efcc72a4a05782e6d1e8b9a1adaa99b1c1608908460b7e78415",
+              "file": {
+                "path": "src/pages/LoginPage.vue",
+                "hash": "aafef5945a573efcc72a4a05782e6d1e8b9a1adaa99b1c1608908460b7e78415",
+                "size": 5091,
+                "modified": 1783587697659.0054
+              }
+            },
+            "right": {
+              "hash": "f6643ae566575978ac3effc4ef9d85a5eba964637afaf4d1d7f66016f2db714d",
+              "file": {
+                "path": "src/pages/PrDetailPage.vue",
+                "hash": "f6643ae566575978ac3effc4ef9d85a5eba964637afaf4d1d7f66016f2db714d",
+                "size": 4270,
+                "modified": 1783586949260.074
+              }
+            }
+          },
+          "right": {
+            "hash": "d72ec6d7451011d964295f970a54dbfdb87314ea4b6ab0f7ca762d5a2615238b",
+            "left": {
+              "hash": "a8d4810645f5613db831197aed70ee00e9e8ff1ac7664fcd6073408f7c25cf02",
+              "file": {
+                "path": "src/pages/PrListPage.vue",
+                "hash": "a8d4810645f5613db831197aed70ee00e9e8ff1ac7664fcd6073408f7c25cf02",
+                "size": 2203,
+                "modified": 1783590195597.2732
+              }
+            },
+            "right": {
+              "hash": "e25c8329248417ebfeb263c27ce90fe3b124f95473a22051bee9750ba0bb917c",
+              "file": {
+                "path": "src/pages/SettingsPage.vue",
+                "hash": "e25c8329248417ebfeb263c27ce90fe3b124f95473a22051bee9750ba0bb917c",
+                "size": 645,
+                "modified": 1783585769063.5608
+              }
+            }
+          }
+        }
+      },
+      "right": {
+        "hash": "f569a9f04ce6755ccb3f037f4b1b4c513b7ea12c28adbb0ec36cfd49b58a3d34",
+        "left": {
+          "hash": "9a00cd4969cc9f6c97512972762db40b31f0794334a84e6f7c5fa7d26ac4bc37",
+          "left": {
+            "hash": "a52feb59685e9a7059418944257934e0466c8775aad1d69ceeaee340225687ff",
+            "left": {
+              "hash": "a9400f58e2704aa05a45004eeed9d759b8fa704d462b4250f16c55c87c148b69",
+              "file": {
+                "path": "src/router/index.ts",
+                "hash": "a9400f58e2704aa05a45004eeed9d759b8fa704d462b4250f16c55c87c148b69",
+                "size": 1198,
+                "modified": 1783585715140.9473
+              }
+            },
+            "right": {
+              "hash": "6b558a8b3aef137d93f3f5f405e3fa07798c67b3ecc2bdf9b9d32f13cefd5897",
+              "file": {
+                "path": "src/stores/useAuthStore.ts",
+                "hash": "6b558a8b3aef137d93f3f5f405e3fa07798c67b3ecc2bdf9b9d32f13cefd5897",
+                "size": 1679,
+                "modified": 1783585727728.829
+              }
+            }
+          },
+          "right": {
+            "hash": "b1a62dfece96cf9bdcefd654963c6c64e761233d54fa7bbe1979063b65ecd94a",
+            "left": {
+              "hash": "e835dada29bb0a3506399593e6dafdd7303d011a4720de27963ab66fae7da1ff",
+              "file": {
+                "path": "src/stores/usePrStore.ts",
+                "hash": "e835dada29bb0a3506399593e6dafdd7303d011a4720de27963ab66fae7da1ff",
+                "size": 1686,
+                "modified": 1783585727730.95
+              }
+            },
+            "right": {
+              "hash": "5a5c3493bc32a3da2b5449255d8227e5a512565891f6086c9f277065389fe0d4",
+              "file": {
+                "path": "src/stores/useRepoStore.ts",
+                "hash": "5a5c3493bc32a3da2b5449255d8227e5a512565891f6086c9f277065389fe0d4",
+                "size": 1014,
+                "modified": 1783585727730.2002
+              }
+            }
+          }
+        },
+        "right": {
+          "hash": "ef41936f4f0976aad2ee33c1cd4e6cb397a2a875219e91ddace68e99e8368491",
+          "left": {
+            "hash": "1c87108c07d05108afb791d96de231ea2f2c6200bbef538c3a76bdfc001163c5",
+            "left": {
+              "hash": "d0f8e2a2a69b7b63d26a2cc4a573981bf99823fbb04bfbdb76b54382d5a2ad28",
+              "file": {
+                "path": "src/types/index.ts",
+                "hash": "d0f8e2a2a69b7b63d26a2cc4a573981bf99823fbb04bfbdb76b54382d5a2ad28",
+                "size": 3487,
+                "modified": 1783589047784.202
+              }
+            },
+            "right": {
+              "hash": "64bae9af75943fc47eb51e8d39edf156b4ba949e254b62d65afa989d33e71a0d",
+              "file": {
+                "path": "src/vite-env.d.ts",
+                "hash": "64bae9af75943fc47eb51e8d39edf156b4ba949e254b62d65afa989d33e71a0d",
+                "size": 189,
+                "modified": 1783585715139.8123
+              }
+            }
+          },
+          "right": {
+            "hash": "f98b7617f32e6fb791189b8e266a08209d3fac5b8f44757978f3494a98f1c190",
+            "file": {
+              "path": "vite.config.ts",
+              "hash": "f98b7617f32e6fb791189b8e266a08209d3fac5b8f44757978f3494a98f1c190",
+              "size": 569,
+              "modified": 1783586467864.655
+            }
+          }
+        }
+      }
+    }
+  }
+}

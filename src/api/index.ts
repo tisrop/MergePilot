@@ -1,0 +1,162 @@
+import { invoke } from "@tauri-apps/api/core";
+import type {
+  Platform,
+  PrComment,
+  PrState,
+  PrSummary,
+  PrDetail,
+  DiffResult,
+  CreateReviewRequest,
+  Review,
+  ReviewCommentPosition,
+  IssueState,
+  IssueSummary,
+  Issue,
+  CreateIssueRequest,
+  Paginated,
+  RepoSummary,
+  User,
+  AiConfig,
+  AiReviewRequest,
+  AiReviewResult,
+} from "@/types";
+
+// ============================================================
+// Tauri IPC 封装 —— 所有后端调用统一入口
+// ============================================================
+
+// ── Auth ──
+export async function authLogin(platform: Platform, token: string, customUrl?: string): Promise<User> {
+  return invoke("auth_login", { platform, token, customUrl: customUrl ?? null });
+}
+
+export async function authLogout(platform: Platform): Promise<void> {
+  return invoke("auth_logout", { platform });
+}
+
+export async function authCheck(platform: Platform): Promise<User | null> {
+  return invoke("auth_check", { platform });
+}
+
+// ── Repo ──
+export async function repoList(platform: Platform, page: number = 1): Promise<Paginated<RepoSummary>> {
+  return invoke("repo_list", { platform, page });
+}
+
+// ── PR ──
+export async function prList(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  state: PrState = "open",
+  page: number = 1,
+  perPage: number = 20,
+): Promise<Paginated<PrSummary>> {
+  return invoke("pr_list", { platform, owner, repo, stateFilter: state, page, perPage });
+}
+
+export async function prDetail(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PrDetail> {
+  return invoke("pr_detail", { platform, owner, repo, number });
+}
+
+export async function prDiff(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<DiffResult> {
+  return invoke("pr_diff", { platform, owner, repo, number });
+}
+
+// ── Review ──
+export async function reviewSubmit(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  body: string,
+  event: string,
+  comments: ReviewCommentPosition[],
+): Promise<Review> {
+  return invoke("review_submit", { platform, owner, repo, prNumber, body, event, comments });
+}
+
+export async function reviewList(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<Review[]> {
+  return invoke("review_list", { platform, owner, repo, prNumber });
+}
+
+export async function reviewCommentsList(platform: Platform, owner: string, repo: string, prNumber: number): Promise<PrComment[]> { return invoke("review_comments_list", { platform, owner, repo, prNumber }); }
+
+export async function reviewCommentAdd(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  commitId: string,
+  path: string,
+  line: number,
+  body: string,
+): Promise<void> {
+  return invoke("review_comment_add", { platform, owner, repo, prNumber, commitId, path, line, body });
+}
+
+// ── Issue ──
+export async function issueList(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  state: IssueState = "open",
+  page: number = 1,
+): Promise<Paginated<IssueSummary>> {
+  return invoke("issue_list", { platform, owner, repo, stateFilter: state, page });
+}
+
+export async function issueCreate(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  title: string,
+  body: string,
+  labels: string[],
+): Promise<Issue> {
+  return invoke("issue_create", { platform, owner, repo, title, body, labels });
+}
+
+// ── AI ──
+export async function aiGetConfig(): Promise<AiConfig> {
+  return invoke("ai_get_config");
+}
+
+export async function aiSaveConfig(config: AiConfig): Promise<void> {
+  return invoke("ai_save_config", { config });
+}
+
+export async function aiSaveApiKey(apiKey: string): Promise<void> {
+  return invoke("ai_save_api_key", { apiKey });
+}
+
+export async function aiReview(request: AiReviewRequest): Promise<AiReviewResult> {
+  return invoke("ai_review", { request });
+}
+
+export async function aiReviewStream(request: AiReviewRequest): Promise<void> {
+  return invoke("ai_review_stream", { request });
+}
+
+export async function aiListModels(endpoint: string): Promise<string[]> {
+  return invoke("ai_list_models", { endpoint });
+}
+
+export async function aiTestConnection(): Promise<boolean> {
+  return invoke("ai_test_connection");
+}
