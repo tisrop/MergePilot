@@ -7,6 +7,7 @@ import { usePrStore } from "@/stores/usePrStore";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import PrFilterBar from "@/components/pr/PrFilterBar.vue";
 import PrCard from "@/components/pr/PrCard.vue";
+import AppSelect from "@/components/shared/AppSelect.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -58,8 +59,9 @@ function onSelectPr(prNumber: number) {
         <span v-if="repo.activeFullName" class="repo-name">{{ repo.activeFullName }}</span>
       </div>
       <div v-if="repo.forkContext" class="fork-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/></svg>
         <template v-if="!repo.hasUpstreamInfo">
-          ⚠ 这是一个 Fork 仓库，但未获取到上游仓库信息
+          这是一个 Fork 仓库，但未获取到上游仓库信息
           （请确认 Token 有足够的仓库权限，或检查终端日志中的 parent 数据）
         </template>
         <template v-else-if="repo.viewingUpstream">
@@ -74,20 +76,28 @@ function onSelectPr(prNumber: number) {
       <PrFilterBar />
     </template>
 
-    <div v-if="pr.loading" class="loading">加载中...</div>
+    <!-- Loading skeleton -->
+    <div v-if="pr.loading" class="loading-skeleton">
+      <div class="skeleton skeleton-card" v-for="i in 5" :key="i" />
+    </div>
 
     <div v-else-if="pr.error" class="error-box">
-      <p class="error-title">获取 PR 列表失败</p>
+      <p class="error-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        获取 PR 列表失败
+      </p>
       <p class="error-msg">{{ pr.error }}</p>
     </div>
 
-    <div v-else-if="!repo.activeRepo" class="empty">
+    <div v-else-if="!repo.activeRepo" class="empty-state">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13 12H3"/></svg>
       <p>请先在左侧选择一个仓库</p>
     </div>
 
-    <div v-else-if="pr.list.length === 0" class="empty">
+    <div v-else-if="pr.list.length === 0" class="empty-state">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M18 15V9"/><path d="M6 9v9"/><path d="M13 6h3a2 2 0 0 1 2 2v3"/></svg>
       <p>暂无 Pull Request</p>
-      <p v-if="repo.activeFullName" class="empty-repo">当前仓库：{{ repo.activeFullName }}</p>
+      <p v-if="repo.activeFullName" class="empty-repo text-secondary font-mono">当前仓库：{{ repo.activeFullName }}</p>
     </div>
 
     <div v-else class="pr-list">
@@ -100,12 +110,21 @@ function onSelectPr(prNumber: number) {
     </div>
 
     <div v-if="pr.list.length > 0 && pr.totalPages > 1" class="pagination">
-      <button :disabled="pr.filters.page <= 1" @click="pr.prevPage()">← 上一页</button>
+      <button class="btn btn-sm" :disabled="pr.filters.page <= 1" @click="pr.prevPage()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        上一页
+      </button>
       <span class="page-info">{{ pr.filters.page }} / {{ pr.totalPages }}</span>
-      <button :disabled="pr.filters.page >= pr.totalPages" @click="pr.nextPage()">下一页 →</button>
-      <select class="page-size-select" :value="pr.perPage" @change="pr.setPerPage(Number(($event.target as HTMLSelectElement).value))">
-        <option v-for="s in pr.pageSizes" :key="s" :value="s">{{ s }} 条/页</option>
-      </select>
+      <button class="btn btn-sm" :disabled="pr.filters.page >= pr.totalPages" @click="pr.nextPage()">
+        下一页
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      <AppSelect
+        size="sm"
+        :modelValue="String(pr.perPage)"
+        :options="pr.pageSizes.map((s: number) => ({ value: String(s), label: s + ' 条/页' }))"
+        @update:modelValue="(v: string) => pr.setPerPage(Number(v))"
+      />
     </div>
   </AppLayout>
 </template>
@@ -114,99 +133,129 @@ function onSelectPr(prNumber: number) {
 .header-row {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-2);
+}
+
+.header-row h2 {
+  font-size: 20px;
+  font-weight: 700;
 }
 
 .repo-name {
   font-size: 13px;
   color: var(--color-text-secondary);
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .fork-banner {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  margin-top: 4px;
-  background: #f0f7ff;
-  border: 1px solid #b3d8ff;
-  border-radius: 6px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-1);
+  background: var(--color-primary-light);
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-md);
   font-size: 13px;
-  color: #3a6fa0;
+  color: var(--color-primary);
 }
 
 .fork-switch {
   padding: 2px 8px;
-  border: 1px solid #b3d8ff;
-  border-radius: 4px;
-  background: #fff;
-  color: #3a6fa0;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-primary);
   font-size: 12px;
   cursor: pointer;
+  transition: background var(--transition-fast);
 }
 
-.fork-switch:hover { background: #e6f2ff; }
+.fork-switch:hover {
+  background: var(--color-primary-light);
+}
 
-.loading, .empty {
+/* Loading skeleton */
+.loading-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.skeleton-card {
+  height: 76px;
+  border-radius: var(--radius-lg);
+}
+
+/* Empty state */
+.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 200px;
-  color: var(--color-text-secondary);
+  height: 240px;
+  gap: var(--space-3);
+  color: var(--color-text-tertiary);
+}
+
+.empty-state p {
+  font-size: 14px;
+}
+
+.empty-state svg {
+  opacity: 0.4;
 }
 
 .empty-repo {
-  margin-top: 4px;
+  margin-top: var(--space-1);
   font-size: 11px;
-  font-family: monospace;
-  color: var(--color-text-tertiary, #999);
 }
 
+/* Error box */
 .error-box {
-  margin: 12px 0;
-  padding: 12px 16px;
-  background: #fff0f0;
-  border: 1px solid #ffcccc;
-  border-radius: 6px;
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-danger-light);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-lg);
 }
 
-.error-title { font-weight: 600; color: #cc0000; margin: 0 0 4px 0; font-size: 14px; }
-.error-msg { color: #660000; margin: 0; font-size: 12px; word-break: break-all; }
+.error-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  color: var(--color-danger);
+  margin: 0 0 var(--space-1) 0;
+  font-size: 14px;
+}
 
-.pr-list { display: flex; flex-direction: column; gap: 8px; }
+.error-msg {
+  color: var(--color-danger);
+  margin: 0;
+  font-size: 12px;
+  word-break: break-all;
+  opacity: 0.8;
+}
+
+.pr-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
 
 .pagination {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 20px 0;
+  gap: var(--space-3);
+  padding: var(--space-5) 0;
 }
 
-.pagination button {
-  padding: 6px 16px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-surface);
+.page-info {
   font-size: 13px;
-  cursor: pointer;
-}
-
-.pagination button:hover:not(:disabled) { background: #f0f0f0; }
-.pagination button:disabled { opacity: 0.35; cursor: default; }
-
-.page-info { font-size: 13px; color: var(--color-text-secondary); }
-
-.page-size-select {
-  margin-left: 12px;
-  padding: 5px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-surface);
-  font-size: 12px;
   color: var(--color-text-secondary);
-  cursor: pointer;
 }
+
+
 </style>

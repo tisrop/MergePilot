@@ -4,6 +4,7 @@ import type { Platform, AiReviewFocus, AiReviewResult, PrContext, AiSuggestionAc
 import { aiReview, aiReviewStream } from "@/api";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import AiSuggestionCard from "./AiSuggestionCard.vue";
+import AppSelect from "@/components/shared/AppSelect.vue";
 
 const props = defineProps<{
   platform: Platform;
@@ -15,13 +16,12 @@ const props = defineProps<{
 }>();
 
 const focus = ref<AiReviewFocus>("all");
-const useStreaming = ref(true); // toggle for streaming vs non-streaming
+const useStreaming = ref(true);
 const loading = ref(false);
 const error = ref("");
 const result = ref<AiReviewResult | null>(null);
 
-// Streaming state
-const streamText = ref(""); // accumulated raw streaming text
+const streamText = ref("");
 let unlistenChunk: UnlistenFn | null = null;
 let unlistenDone: UnlistenFn | null = null;
 let unlistenError: UnlistenFn | null = null;
@@ -68,28 +68,23 @@ async function startNonStreamingReview() {
 }
 
 async function startStreamingReview() {
-  // Listen for streaming events
   try {
-    // Listen for chunk events (each token)
     unlistenChunk = await listen<string>("ai-review-chunk", (event) => {
       streamText.value += event.payload;
     });
 
-    // Listen for done event (final result)
     unlistenDone = await listen<AiReviewResult>("ai-review-done", (event) => {
       result.value = event.payload;
       loading.value = false;
       cleanupListeners();
     });
 
-    // Listen for error event
     unlistenError = await listen<string>("ai-review-error", (event) => {
       error.value = event.payload;
       loading.value = false;
       cleanupListeners();
     });
 
-    // Start the streaming review (returns immediately)
     await aiReviewStream({
       diff: props.diff,
       context: props.context,
@@ -127,11 +122,7 @@ function onAction(index: number, action: AiSuggestionAction) {
     <div class="ai-toolbar">
       <div class="focus-select">
         <label>聚焦:</label>
-        <select v-model="focus">
-          <option v-for="f in foci" :key="f.value" :value="f.value">
-            {{ f.label }}
-          </option>
-        </select>
+        <AppSelect v-model="focus" :options="foci" />
       </div>
 
       <label class="stream-toggle">
@@ -139,37 +130,46 @@ function onAction(index: number, action: AiSuggestionAction) {
         流式输出
       </label>
 
-      <button class="start-btn" :disabled="loading || !diff" @click="startReview">
-        {{ loading ? "评审中..." : "▶ 开始 AI 评审" }}
+      <button class="btn btn-primary" :disabled="loading || !diff" @click="startReview">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        {{ loading ? "评审中..." : "开始 AI 评审" }}
       </button>
     </div>
 
     <!-- Streaming live preview -->
     <div v-if="loading && useStreaming && streamText" class="stream-preview">
-      <div class="stream-label">🔄 实时输出中...</div>
+      <div class="stream-label">
+        <span class="stream-dot" />
+        实时输出中...
+      </div>
       <pre class="stream-content">{{ streamText }}</pre>
     </div>
 
     <!-- Non-streaming loading -->
-    <div v-if="loading && !useStreaming && !streamText" class="loading">
+    <div v-if="loading && !useStreaming && !streamText" class="loading-state">
+      <div class="spinner" />
       <p>AI 正在分析代码变更，请稍候...</p>
     </div>
 
     <!-- Streaming loading without content yet -->
-    <div v-if="loading && useStreaming && !streamText" class="loading">
+    <div v-if="loading && useStreaming && !streamText" class="loading-state">
+      <div class="spinner" />
       <p>AI 正在连接，请稍候...</p>
     </div>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="error" class="error-box">
+      {{ error }}
+    </div>
 
     <div v-if="result" class="ai-result">
-      <!-- Summary -->
       <div class="summary-card">
-        <h4>📊 AI 评审总览</h4>
+        <h4>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 2-2 4-4 4s-4-2-4-4a4 4 0 0 1 4-4z"/><path d="M12 14c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/></svg>
+          AI 评审总览
+        </h4>
         <p>{{ result.summary }}</p>
       </div>
 
-      <!-- Suggestions -->
       <div v-if="result.suggestions.length > 0" class="suggestions">
         <h4>发现 {{ result.suggestions.length }} 个问题</h4>
         <AiSuggestionCard
@@ -181,7 +181,8 @@ function onAction(index: number, action: AiSuggestionAction) {
       </div>
 
       <div v-else class="no-issues">
-        <p>✅ AI 未发现明显问题</p>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        <p>AI 未发现明显问题</p>
       </div>
     </div>
   </div>
@@ -189,135 +190,161 @@ function onAction(index: number, action: AiSuggestionAction) {
 
 <style scoped>
 .ai-panel {
-  padding: 4px 0;
+  padding: var(--space-1) 0;
 }
 
 .ai-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 12px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .focus-select {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   font-size: 13px;
 }
 
-.focus-select select {
-  padding: 6px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font-size: 13px;
-}
+
 
 .stream-toggle {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   font-size: 12px;
   color: var(--color-text-secondary);
   cursor: pointer;
+  user-select: none;
 }
 
-.start-btn {
-  margin-left: auto;
-  padding: 8px 20px;
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-10);
+  color: var(--color-text-tertiary);
 }
 
-.start-btn:disabled {
-  opacity: 0.5;
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
 
-.loading {
-  text-align: center;
-  padding: 40px;
-  color: var(--color-text-secondary);
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
-/* Streaming live preview */
 .stream-preview {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
 .stream-label {
-  padding: 8px 12px;
-  background: #f6f8fa;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-hover);
   font-size: 12px;
   color: var(--color-text-secondary);
   border-bottom: 1px solid var(--color-border);
-  animation: pulse 1.5s infinite;
 }
 
-@keyframes pulse {
+.stream-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.3; }
 }
 
 .stream-content {
-  padding: 16px;
-  font-family: "SF Mono", "Fira Code", monospace;
+  padding: var(--space-4);
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 400px;
   overflow-y: auto;
-  background: #fafbfc;
+  background: var(--color-surface-hover);
+  margin: 0;
+  color: var(--color-text);
 }
 
-.error {
-  padding: 12px;
-  background: #ffeaea;
+.error-box {
+  padding: var(--space-3);
+  background: var(--color-danger-light);
   color: var(--color-danger);
-  border-radius: 6px;
-  margin-bottom: 16px;
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+  font-size: 13px;
 }
 
 .ai-result {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .summary-card {
-  padding: 16px;
+  padding: var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .summary-card h4 {
-  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .summary-card p {
   font-size: 14px;
   line-height: 1.6;
+  color: var(--color-text-secondary);
 }
 
 .suggestions h4 {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .no-issues {
-  text-align: center;
-  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-10);
   color: var(--color-success);
   font-size: 15px;
+}
+
+.no-issues svg {
+  opacity: 0.6;
 }
 </style>

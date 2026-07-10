@@ -75,8 +75,13 @@ function needsExpand(body: string) {
   <div class="review-list">
     <h4>评审意见 ({{ items.length }})</h4>
 
-    <div v-if="loading" class="loading">加载中...</div>
-    <div v-else-if="items.length === 0" class="empty">暂无评审意见</div>
+    <div v-if="loading" class="loading-state">
+      <div class="skeleton skeleton-review" v-for="i in 3" :key="i" />
+    </div>
+    <div v-else-if="items.length === 0" class="empty-state">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <p>暂无评审意见</p>
+    </div>
 
     <div v-else class="reviews">
       <div
@@ -104,33 +109,57 @@ function needsExpand(body: string) {
 </template>
 
 <style scoped>
-.review-list { padding: 16px 0; }
-h4 { margin-bottom: 16px; }
-.loading, .empty { text-align: center; padding: 40px; color: var(--color-text-secondary); }
-.reviews { display: flex; flex-direction: column; gap: 12px; }
+.review-list { padding: var(--space-4) 0; }
+h4 { margin-bottom: var(--space-4); font-size: 15px; font-weight: 600; }
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.skeleton-review {
+  height: 80px;
+  border-radius: var(--radius-lg);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-10);
+  color: var(--color-text-tertiary);
+}
+
+.reviews { display: flex; flex-direction: column; gap: var(--space-3); }
 
 .review-item {
-  padding: 14px;
+  padding: var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
 }
-.review-item:hover { border-color: var(--color-primary); }
+
+.review-item:hover {
+  border-color: var(--color-primary-border);
+  box-shadow: var(--shadow-sm);
+}
 
 .review-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .avatar { width: 20px; height: 20px; border-radius: 50%; }
 .review-author { font-weight: 600; font-size: 13px; }
-.review-kind { font-size: 11px; padding: 1px 6px; background: #e8f0fe; color: var(--color-primary); border-radius: 4px; }
-.review-path { font-size: 11px; font-family: monospace; color: var(--color-text-secondary); }
-.review-time { margin-left: auto; font-size: 11px; color: var(--color-text-secondary); }
+.review-kind { font-size: 11px; padding: 1px 6px; background: var(--color-primary-light); color: var(--color-primary); border-radius: var(--radius-sm); }
+.review-path { font-size: 11px; font-family: var(--font-mono); color: var(--color-text-secondary); }
+.review-time { margin-left: auto; font-size: 11px; color: var(--color-text-tertiary); }
 
 .review-body {
   font-size: 13px;
@@ -145,6 +174,7 @@ h4 { margin-bottom: 16px; }
 .expand-hint {
   font-size: 11px;
   color: var(--color-primary);
-  margin-top: 4px;
+  margin-top: var(--space-1);
+  font-weight: 500;
 }
 </style>

@@ -22,7 +22,6 @@ const number = Number(route.params.number);
 
 const activeTab = ref<"diff" | "reviews" | "ai">("diff");
 
-// Collect inline comments from the diff viewer
 const inlineComments = ref<ReviewCommentPosition[]>([]);
 
 async function handleAddComment(path: string, startLine: number, endLine: number, _side: string, body?: string) {
@@ -46,15 +45,27 @@ onMounted(async () => {
   <AppLayout>
     <template #header>
       <div class="pr-header">
-        <h2 v-if="pr.currentPr">{{ pr.currentPr.summary.title }}</h2>
+        <div class="pr-header-top">
+          <h2 v-if="pr.currentPr">{{ pr.currentPr.summary.title }}</h2>
+          <div class="pr-header-skeleton" v-else>
+            <div class="skeleton skeleton-title" />
+            <div class="skeleton skeleton-subtitle" />
+          </div>
+        </div>
         <div class="pr-meta" v-if="pr.currentPr">
-          <span class="branch">{{ pr.currentPr.source_branch }} → {{ pr.currentPr.target_branch }}</span>
+          <span class="branch">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/></svg>
+            {{ pr.currentPr.source_branch }} → {{ pr.currentPr.target_branch }}
+          </span>
           <span class="author">by {{ pr.currentPr.summary.author.login }}</span>
         </div>
       </div>
     </template>
 
-    <div v-if="pr.loading" class="loading">加载中...</div>
+    <div v-if="pr.loading" class="loading-state">
+      <div class="skeleton skeleton-tabs" />
+      <div class="skeleton skeleton-content" />
+    </div>
 
     <div v-else-if="pr.currentPr" class="pr-detail">
       <div class="tabs">
@@ -62,18 +73,21 @@ onMounted(async () => {
           :class="{ active: activeTab === 'diff' }"
           @click="activeTab = 'diff'"
         >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/></svg>
           Diff
         </button>
         <button
           :class="{ active: activeTab === 'reviews' }"
           @click="activeTab = 'reviews'"
         >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           评审意见
         </button>
         <button
           :class="{ active: activeTab === 'ai' }"
           @click="activeTab = 'ai'"
         >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 2-2 4-4 4s-4-2-4-4a4 4 0 0 1 4-4z"/><path d="M12 14c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/></svg>
           AI 评审
         </button>
       </div>
@@ -115,39 +129,83 @@ onMounted(async () => {
 .pr-header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
+}
+
+.pr-header-top h2 {
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .pr-meta {
   font-size: 12px;
   color: var(--color-text-secondary);
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
+  align-items: center;
 }
 
-.loading {
+.branch {
   display: flex;
   align-items: center;
-  justify-content: center;
-  height: 200px;
-  color: var(--color-text-secondary);
+  gap: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.skeleton-tabs {
+  height: 40px;
+  border-radius: var(--radius-md);
+}
+
+.skeleton-content {
+  height: 400px;
+  border-radius: var(--radius-lg);
+}
+
+.pr-header-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.skeleton-title {
+  height: 24px;
+  width: 60%;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-subtitle {
+  height: 16px;
+  width: 40%;
+  border-radius: var(--radius-sm);
 }
 
 .tabs {
   display: flex;
   gap: 0;
   border-bottom: 1px solid var(--color-border);
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 .tabs button {
-  padding: 10px 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-5);
   border: none;
   background: none;
   font-size: 14px;
+  font-weight: 500;
   color: var(--color-text-secondary);
   border-bottom: 2px solid transparent;
-  transition: all 0.2s;
+  transition: all var(--transition-fast);
 }
 
 .tabs button.active {
@@ -157,5 +215,6 @@ onMounted(async () => {
 
 .tabs button:hover:not(.active) {
   color: var(--color-text);
+  background: var(--color-surface-hover);
 }
 </style>

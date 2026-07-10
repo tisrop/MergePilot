@@ -32,21 +32,23 @@ const states: { value: PrState; label: string }[] = [
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
+  padding: var(--space-2) 0;
 }
 
 .filters {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .filters button {
   padding: 6px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font-size: 13px;
-  transition: all 0.15s;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
 }
 
 .filters button.active {
@@ -56,6 +58,7 @@ const states: { value: PrState; label: string }[] = [
 }
 
 .filters button:hover:not(.active) {
-  background: #f0f0f0;
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 </style>

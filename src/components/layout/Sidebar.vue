@@ -17,11 +17,9 @@ const platforms: { value: Platform; label: string }[] = [
 ];
 
 onMounted(async () => {
-  // try to restore auth from keychain on startup
   for (const p of platforms) {
     await auth.checkAuth(p.value);
   }
-  // Only fetch repos if not already loaded (avoids flicker on page switches)
   if (auth.isLoggedIn && auth.activePlatform && repo.repos.length === 0) {
     repo.fetchRepos(auth.activePlatform);
   }
@@ -34,7 +32,6 @@ function selectPlatform(p: Platform) {
 
 function selectRepo(r: { owner: string; repo: string }) {
   repo.setActiveRepo(r.owner, r.repo);
-  // Force navigation even if already on /pr (adds query param to trigger watch)
   router.push({ path: "/pr", query: { _t: Date.now().toString() } });
 }
 
@@ -47,7 +44,6 @@ function getRepoOwner(fullName: string): { owner: string; repo: string } {
   return { owner: parts[0], repo: parts.slice(1).join("/") };
 }
 
-/** For a fork repo, return its upstream; otherwise return the repo itself */
 function effectiveRepo(r: RepoSummary): { owner: string; repo: string } {
   if (r.fork && r.parent_full_name && r.parent_owner) {
     return { owner: r.parent_owner, repo: r.parent_full_name.split("/").slice(1).join("/") };
@@ -55,13 +51,11 @@ function effectiveRepo(r: RepoSummary): { owner: string; repo: string } {
   return getRepoOwner(r.full_name);
 }
 
-/** Handle click on a fork repo or its upstream entry */
 function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   const target = useUpstream ? effectiveRepo(r) : getRepoOwner(r.full_name);
   selectRepo(target);
   const forkInfo = getRepoOwner(r.full_name);
   if (r.fork) {
-    // Always set forkContext for fork repos, even if parent info is missing
     repo.setForkContext({
       upstreamFullName: r.parent_full_name ?? null,
       upstreamOwner: r.parent_owner ?? null,
@@ -80,7 +74,6 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
       <router-link to="/" class="logo">MergePilot</router-link>
     </div>
 
-    <!-- Platform selector -->
     <div class="platform-selector">
       <button
         v-for="p in platforms"
@@ -104,29 +97,38 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
     <!-- Navigation -->
     <nav class="nav">
       <router-link to="/pr" :class="{ active: isActive('pr') }">
-        📋 Pull Requests
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M18 15V9"/><path d="M6 9v9"/><path d="M13 6h3a2 2 0 0 1 2 2v3"/></svg>
+        Pull Requests
       </router-link>
       <router-link to="/issue" :class="{ active: isActive('issue') }">
-        🐛 Issues
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Issues
+      </router-link>
+      <router-link to="/settings" :class="{ active: isActive('settings') }">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        设置
       </router-link>
     </nav>
 
     <!-- Repo list -->
     <div class="repo-section" v-if="auth.isLoggedIn">
       <h4>仓库</h4>
-      <div v-if="repo.loading && repo.repos.length === 0" class="repo-loading">加载中...</div>
+      <div v-if="repo.loading && repo.repos.length === 0" class="skeleton repo-loading-skeleton">
+        <div class="skeleton-line" />
+        <div class="skeleton-line" />
+        <div class="skeleton-line" />
+      </div>
       <div v-else class="repo-list">
         <template v-for="r in repo.repos" :key="r.id">
-          <!-- Fork repo: fork icon ⑂ + name, upstream info in PR page banner -->
           <button
             v-if="r.fork"
             :class="{ active: repo.activeFullName === r.parent_full_name || repo.activeFullName === r.full_name, 'is-fork': true }"
-            :title="r.parent_full_name ? '⑂ Fork 仓库，默认查看上游 ' + r.parent_full_name + ' 的 PR' : r.full_name"
+            :title="r.parent_full_name ? 'Fork from ' + r.parent_full_name : r.full_name"
             @click="selectForkRepo(r, true)"
           >
-            <span class="fork-icon">⑂</span> {{ r.full_name }}
+            <svg class="fork-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/></svg>
+            {{ r.full_name }}
           </button>
-          <!-- Normal (non-fork) repo -->
           <button
             v-else
             :class="{ active: repo.activeFullName === r.full_name }"
@@ -143,7 +145,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 
 <style scoped>
 .sidebar {
-  width: 240px;
+  width: var(--sidebar-width);
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   display: flex;
@@ -153,7 +155,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 }
 
 .sidebar-header {
-  padding: 16px 16px 12px;
+  padding: var(--space-4) var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -161,22 +163,24 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   font-size: 18px;
   font-weight: 700;
   color: var(--color-text);
+  letter-spacing: -0.02em;
 }
 
 .platform-selector {
   display: flex;
-  padding: 8px;
-  gap: 4px;
+  padding: var(--space-2);
+  gap: var(--space-1);
 }
 
 .platform-selector button {
   flex: 1;
   padding: 6px 4px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font-size: 11px;
-  transition: all 0.2s;
+  font-weight: 500;
+  transition: all var(--transition-fast);
 }
 
 .platform-selector button.active {
@@ -185,11 +189,15 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   border-color: var(--color-primary);
 }
 
+.platform-selector button:hover:not(.active) {
+  background: var(--color-surface-hover);
+}
+
 .auth-status {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -211,24 +219,29 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 .nav {
   display: flex;
   flex-direction: column;
-  padding: 8px;
+  padding: var(--space-2);
   gap: 2px;
 }
 
 .nav a {
-  padding: 8px 12px;
-  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   font-size: 13px;
-  color: var(--color-text);
-  transition: background 0.15s;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
 }
 
 .nav a:hover {
-  background: #f0f0f0;
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
 .nav a.active {
-  background: #e8f0fe;
+  background: var(--color-primary-light);
   color: var(--color-primary);
   font-weight: 600;
 }
@@ -238,20 +251,40 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 8px;
+  padding: var(--space-2);
 }
 
 .repo-section h4 {
   font-size: 11px;
   text-transform: uppercase;
-  color: var(--color-text-secondary);
-  padding: 8px 4px 4px;
+  color: var(--color-text-tertiary);
+  padding: var(--space-2) var(--space-1) var(--space-1);
+  letter-spacing: 0.05em;
+  font-weight: 600;
 }
 
-.repo-loading {
-  padding: 16px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+.repo-loading-skeleton {
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.skeleton-line {
+  height: 28px;
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-sm);
+}
+
+.repo-loading-skeleton .skeleton-line {
+  background: linear-gradient(90deg, var(--color-surface-hover) 25%, var(--color-border-light) 50%, var(--color-surface-hover) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .repo-list {
@@ -263,38 +296,39 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 }
 
 .repo-list button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   text-align: left;
-  padding: 6px 8px;
+  padding: 6px var(--space-2);
   border: none;
   background: none;
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background 0.15s;
+  transition: background var(--transition-fast);
   cursor: pointer;
 }
 
 .repo-list button:hover {
-  background: #f0f0f0;
+  background: var(--color-surface-hover);
 }
 
 .repo-list button.active {
-  background: #e8f0fe;
+  background: var(--color-primary-light);
   color: var(--color-primary);
+  font-weight: 600;
 }
 
-/* Fork repos: indent slightly, marked with fork icon */
 .repo-list button.is-fork {
-  padding: 6px 8px;
   font-size: 12px;
-  color: var(--color-text);
+  color: var(--color-text-secondary);
 }
 
 .fork-icon {
-  font-size: 11px;
-  margin-right: 2px;
+  flex-shrink: 0;
 }
 </style>

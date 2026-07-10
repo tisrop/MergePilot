@@ -8,12 +8,12 @@ defineProps<{
 
 <template>
   <div class="issue-card">
-    <div class="issue-header">
-      <span class="issue-number">#{{ issue.number }}</span>
+    <div class="issue-card-top">
       <span class="issue-title">{{ issue.title }}</span>
-      <span class="issue-state" :class="issue.state">{{ issue.state }}</span>
+      <span class="badge" :class="`badge-${issue.state}`">{{ issue.state }}</span>
     </div>
     <div class="issue-meta">
+      <span class="issue-number">#{{ issue.number }}</span>
       <span>{{ issue.author.login }}</span>
       <span>{{ new Date(issue.created_at).toLocaleDateString() }}</span>
       <span v-if="issue.labels.length" class="issue-labels">
@@ -31,64 +31,58 @@ defineProps<{
 
 <style scoped>
 .issue-card {
-  padding: 14px 16px;
+  padding: var(--space-4) var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
+  transition: box-shadow var(--transition-base), border-color var(--transition-base);
 }
 
-.issue-header {
+.issue-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary-border);
+}
+
+.issue-card-top {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.issue-number {
-  color: var(--color-text-secondary);
-  font-size: 13px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .issue-title {
   flex: 1;
   font-weight: 600;
   font-size: 15px;
-}
-
-.issue-state {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.open {
-  background: #d1f5e0;
-  color: #116329;
-}
-
-.closed {
-  background: #ffdce0;
-  color: #86181d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .issue-meta {
   display: flex;
-  gap: 12px;
+  align-items: center;
+  gap: var(--space-3);
   font-size: 12px;
   color: var(--color-text-secondary);
 }
 
+.issue-number {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 .issue-labels {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .label-tag {
   padding: 1px 6px;
-  background: #f0f0f0;
-  border-radius: 4px;
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-sm);
   font-size: 11px;
+  color: var(--color-text-secondary);
 }
 </style>

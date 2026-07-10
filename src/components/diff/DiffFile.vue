@@ -1,120 +1,56 @@
 <script setup lang="ts">
-import type { PrFile } from "@/types";
-import DiffLine from "./DiffLine.vue";
-
-const props = defineProps<{
-  file: PrFile;
+defineProps<{
+  newName: string;
+  additions: number;
+  deletions: number;
 }>();
-
-interface ParsedLine {
-  type: "add" | "remove" | "context" | "header";
-  content: string;
-  oldLine: number | null;
-  newLine: number | null;
-}
-
-function parsePatch(patch: string): ParsedLine[] {
-  if (!patch) return [];
-
-  const lines = patch.split("\n");
-  const result: ParsedLine[] = [];
-  let oldLineNum = 0;
-  let newLineNum = 0;
-
-  for (const line of lines) {
-    if (line.startsWith("@@")) {
-      result.push({ type: "header", content: line, oldLine: null, newLine: null });
-      // Parse hunk header for line numbers
-      const match = line.match(/@@ -(\d+),\d+ \+(\d+),\d+ @@/);
-      if (match) {
-        oldLineNum = parseInt(match[1]) - 1;
-        newLineNum = parseInt(match[2]) - 1;
-      }
-    } else if (line.startsWith("+")) {
-      newLineNum++;
-      result.push({ type: "add", content: line, oldLine: null, newLine: newLineNum });
-    } else if (line.startsWith("-")) {
-      oldLineNum++;
-      result.push({ type: "remove", content: line, oldLine: oldLineNum, newLine: null });
-    } else {
-      oldLineNum++;
-      newLineNum++;
-      result.push({ type: "context", content: line, oldLine: oldLineNum, newLine: newLineNum });
-    }
-  }
-
-  return result;
-}
-
-const parsedLines = parsePatch(props.file.patch);
 </script>
 
 <template>
   <div class="diff-file">
-    <div class="file-header" :class="`status-${file.status}`">
-      <span class="file-icon">
-        {{ file.status === "added" ? "+" : file.status === "removed" ? "-" : "~" }}
-      </span>
-      <span class="file-name">{{ file.filename }}</span>
-      <span class="file-stats">
-        <span class="add">+{{ file.additions }}</span>
-        <span class="del">-{{ file.deletions }}</span>
-      </span>
+    <div class="file-header">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <span class="file-name">{{ newName }}</span>
     </div>
-
-    <div class="file-diff">
-      <DiffLine
-        v-for="(line, idx) in parsedLines"
-        :key="idx"
-        :line="line"
-      />
+    <div class="file-stats">
+      <span class="stat-add">+{{ additions }}</span>
+      <span class="stat-del">-{{ deletions }}</span>
     </div>
   </div>
 </template>
 
 <style scoped>
 .diff-file {
-  border-bottom: 1px solid var(--color-border);
-}
-
-.diff-file:last-child {
-  border-bottom: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
 }
 
 .file-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: #f6f8fa;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-hover);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.file-name {
+  font-family: var(--font-mono);
   font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
+  font-weight: 500;
 }
-
-.file-icon {
-  width: 18px;
-  text-align: center;
-}
-
-.status-added .file-icon { color: var(--color-success); }
-.status-removed .file-icon { color: var(--color-danger); }
-.status-modified .file-icon { color: var(--color-warning); }
-.status-renamed .file-icon { color: var(--color-warning); }
 
 .file-stats {
-  margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
   font-size: 12px;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
-.file-stats .add { color: var(--color-success); }
-.file-stats .del { color: var(--color-danger); }
-
-.file-diff {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  overflow-x: auto;
-}
+.stat-add { color: var(--color-success); }
+.stat-del { color: var(--color-danger); }
 </style>

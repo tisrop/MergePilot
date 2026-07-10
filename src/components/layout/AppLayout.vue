@@ -27,10 +27,11 @@ import Sidebar from "./Sidebar.vue";
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--color-bg);
 }
 
 .content-header {
-  padding: 16px 24px;
+  padding: var(--space-4) var(--space-6);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
@@ -39,6 +40,6 @@ import Sidebar from "./Sidebar.vue";
 .content-body {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: var(--space-6);
 }
 </style>

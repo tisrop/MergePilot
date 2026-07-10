@@ -3,6 +3,7 @@ import { computed, ref, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { html } from "diff2html";
 import "diff2html/bundles/css/diff2html.min.css";
 import type { DiffResult } from "@/types";
+import AppSelect from "@/components/shared/AppSelect.vue";
 
 const props = defineProps<{
   diff: DiffResult | null;
@@ -24,7 +25,6 @@ const diffHtml = computed(() => {
   });
 });
 
-// ── Quick comment popup state ──
 const quickComment = ref<{
   x: number;
   y: number;
@@ -50,7 +50,6 @@ const categoryLabels: Record<string, string> = {
   logic: "逻辑类", security: "安全类", performance: "性能类", style: "代码风格类", log: "日志类",
 };
 
-// ── Get file wrapper from a DOM node ──
 function getFileFromNode(node: Node): HTMLElement | null {
   let el: HTMLElement | null =
     node.nodeType === Node.ELEMENT_NODE
@@ -59,9 +58,7 @@ function getFileFromNode(node: Node): HTMLElement | null {
   while (el) {
     const cls = el.classList;
     if (cls.contains("d2h-file-wrapper") || cls.contains("d2h-wrapper")) return el;
-    // In side-by-side mode, file names may be inside .d2h-file-name-wrapper
     if (cls.contains("d2h-files-diff") || cls.contains("d2h-file-side-diff")) {
-      // Walk up to find the .d2h-file-wrapper parent
       let p = el.parentElement;
       while (p) {
         if (p.classList.contains("d2h-file-wrapper")) return p;
@@ -73,7 +70,6 @@ function getFileFromNode(node: Node): HTMLElement | null {
   return null;
 }
 
-// ── Extract file/line range from text selection ──
 function getSelectionRange(): {
   path: string;
   startLine: number;
@@ -87,31 +83,25 @@ function getSelectionRange(): {
   const range = sel.getRangeAt(0);
   if (!range) return null;
 
-  // Walk up from selection endpoints to find the file wrapper
   const startFile = getFileFromNode(range.startContainer);
   const endFile = getFileFromNode(range.endContainer);
   if (!startFile || startFile !== endFile) return null;
 
-  // Find file path
   const fileNameEl = startFile.querySelector(".d2h-file-name") || startFile.querySelector(".d2h-file-name-wrapper .d2h-file-name");
   const filePath = fileNameEl?.textContent?.trim() || "";
   if (!filePath) return null;
 
-  // Collect line numbers from all rows that intersect the selection range
   const lines: number[] = [];
   let side: "left" | "right" | null = null;
 
   startFile.querySelectorAll("tr").forEach((row) => {
     if (!range.intersectsNode(row)) return;
-    // In side-by-side mode, line numbers use d2h-code-side-linenumber
-    // In unified mode, they use d2h-code-linenumber
     const lnEls = row.querySelectorAll(".d2h-code-side-linenumber, .d2h-code-linenumber");
     lnEls.forEach((el) => {
       const num = parseInt((el as HTMLElement).textContent || "0", 10);
       if (!num) return;
       lines.push(num);
       if (!side) {
-        // Determine side: walk up to d2h-file-side-diff and check order
         let p: HTMLElement | null = el as HTMLElement;
         while (p && !p.classList.contains("d2h-file-side-diff")) p = p.parentElement;
         if (p) {
@@ -132,8 +122,6 @@ function getSelectionRange(): {
     side,
   };
 }
-
-// ── Handlers ──
 
 function handleContextMenu(event: MouseEvent) {
   const target = event.target as HTMLElement;
@@ -191,7 +179,6 @@ function handleQuickKeydown(e: KeyboardEvent) {
   if (e.key === "Escape") quickComment.value = null;
 }
 
-// Auto-focus textarea when popup appears
 watch(quickComment, async (val) => {
   if (val) {
     await nextTick();
@@ -221,7 +208,6 @@ onUnmounted(() => {
 
     <div v-else class="diff-empty">暂无 diff 数据</div>
 
-    <!-- Quick comment popup -->
     <Teleport to="body">
       <div
         v-if="quickComment"
@@ -235,23 +221,27 @@ onUnmounted(() => {
             {{ quickComment.path.split('/').pop() }}:L{{ quickComment.startLine
             }}{{ quickComment.endLine !== quickComment.startLine ? '-L' + quickComment.endLine : '' }}
           </span>
-          <button class="close-btn" @click="quickComment = null">×</button>
+          <button class="close-btn" @click="quickComment = null">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
         <pre v-if="quickComment.selectedText" class="selected-code">{{ quickComment.selectedText }}</pre>
 
         <div class="popup-category">
-          <select v-model="quickCategory" class="category-select" @change="quickSubCategory = ''">
-            <option v-for="(label, key) in categoryLabels" :key="key" :value="key">{{ label }}</option>
-          </select>
-          <select
+          <AppSelect
+            v-model="quickCategory"
+            :options="Object.entries(categoryLabels).map(([value, label]) => ({ value, label }))"
+            @update:model-value="quickSubCategory = ''"
+          />
+          <AppSelect
             v-if="categories[quickCategory]"
             v-model="quickSubCategory"
-            class="category-select"
-            @change="onSubCategoryChange"
-          >
-            <option value="">-- 二级分类 --</option>
-            <option v-for="sub in categories[quickCategory]" :key="sub" :value="sub">{{ sub }}</option>
-          </select>
+            :options="[
+              { value: '', label: '-- 二级分类 --' },
+              ...categories[quickCategory].map((sub: string) => ({ value: sub, label: sub })),
+            ]"
+            @update:model-value="onSubCategoryChange"
+          />
         </div>
 
         <textarea
@@ -261,9 +251,9 @@ onUnmounted(() => {
           rows="3"
         />
         <div class="popup-actions">
-          <button class="cancel-btn" @click="quickComment = null">取消</button>
+          <button class="btn btn-sm" @click="quickComment = null">取消</button>
           <button
-            class="submit-btn"
+            class="btn btn-sm btn-primary"
             :disabled="!quickBody.trim() || quickSubmitting"
             @click="submitQuickComment"
           >
@@ -282,13 +272,13 @@ onUnmounted(() => {
 
 .diff2html-container :deep(.d2h-file-wrapper) {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  margin-bottom: 12px;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-3);
   overflow: hidden;
 }
 
 .diff2html-container :deep(.d2h-file-header) {
-  background: #f6f8fa;
+  background: var(--color-surface-hover);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -301,20 +291,19 @@ onUnmounted(() => {
 }
 
 .diff-empty {
-  padding: 40px;
+  padding: var(--space-10);
   text-align: center;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
 }
 
-/* ── Quick comment popup ── */
 .quick-comment-popup {
   position: fixed;
   z-index: 10000;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
-  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  padding: var(--space-2) var(--space-3);
   min-width: 300px;
   max-width: 420px;
 }
@@ -323,36 +312,43 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .file-ref {
   font-size: 11px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   color: var(--color-text-secondary);
-  background: #f6f8fa;
+  background: var(--color-surface-hover);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .close-btn {
   border: none;
   background: none;
-  font-size: 16px;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
   cursor: pointer;
-  padding: 0 2px;
+  padding: 2px;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.close-btn:hover {
+  background: var(--color-surface-hover);
 }
 
 .selected-code {
-  margin: 0 0 8px 0;
-  padding: 6px 8px;
-  background: #f6f8fa;
+  margin: 0 0 var(--space-2) 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface-hover);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   line-height: 1.4;
   max-height: 120px;
   overflow-y: auto;
@@ -363,73 +359,35 @@ onUnmounted(() => {
 
 .quick-comment-textarea {
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 13px;
   font-family: inherit;
   resize: vertical;
   outline: none;
   min-height: 60px;
   box-sizing: border-box;
+  background: var(--color-surface);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .quick-comment-textarea:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+  box-shadow: 0 0 0 2px var(--color-primary-light);
 }
 
 .popup-category {
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.category-select {
-  padding: 4px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--color-text);
-  background: var(--color-surface);
-  margin-bottom: 6px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .popup-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.popup-actions button {
-  padding: 5px 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.cancel-btn {
-  background: none;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-}
-
-.cancel-btn:hover {
-  background: #f0f0f0;
-}
-
-.submit-btn {
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-}
-
-.submit-btn:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-}
-
-.submit-btn:disabled {
-  opacity: 0.5;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
 }
 </style>

@@ -33,6 +33,7 @@ function removeLabel(label: string) {
     <div class="field">
       <label>标题</label>
       <input
+        class="input"
         :value="title"
         @input="emit('update:title', ($event.target as HTMLInputElement).value)"
         placeholder="Issue 标题"
@@ -42,6 +43,7 @@ function removeLabel(label: string) {
     <div class="field">
       <label>描述</label>
       <textarea
+        class="input"
         :value="body"
         @input="emit('update:body', ($event.target as HTMLTextAreaElement).value)"
         placeholder="详细描述..."
@@ -59,10 +61,14 @@ function removeLabel(label: string) {
             class="label-chip"
           >
             {{ label }}
-            <button @click="removeLabel(label)">×</button>
+            <button type="button" @click="removeLabel(label)">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </span>
         </div>
         <input
+          class="input"
+          style="border: none; padding: 4px 6px;"
           placeholder="输入标签后回车"
           @keyup.enter="
             addLabel(($event.target as HTMLInputElement).value);
@@ -75,7 +81,7 @@ function removeLabel(label: string) {
     <div v-if="error" class="error">{{ error }}</div>
 
     <div class="form-actions">
-      <button :disabled="submitting || !title.trim()" @click="emit('submit')">
+      <button class="btn btn-success" :disabled="submitting || !title.trim()" @click="emit('submit')">
         {{ submitting ? "提交中..." : "创建 Issue" }}
       </button>
     </div>
@@ -88,40 +94,33 @@ function removeLabel(label: string) {
 }
 
 .field {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 label {
   display: block;
   font-weight: 600;
-  margin-bottom: 6px;
-}
-
-input, textarea {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 14px;
-  font-family: inherit;
-  outline: none;
-}
-
-input:focus, textarea:focus {
-  border-color: var(--color-primary);
+  margin-bottom: var(--space-1);
+  font-size: 13px;
 }
 
 .labels-input {
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 6px;
+  border-radius: var(--radius-md);
+  padding: var(--space-1);
+  transition: border-color var(--transition-fast);
+}
+
+.labels-input:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-light);
 }
 
 .labels-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 4px;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
 }
 
 .label-chip {
@@ -129,47 +128,30 @@ input:focus, textarea:focus {
   align-items: center;
   gap: 2px;
   padding: 2px 8px;
-  background: #e8f0fe;
+  background: var(--color-primary-light);
   color: var(--color-primary);
-  border-radius: 12px;
+  border-radius: 999px;
   font-size: 12px;
 }
 
 .label-chip button {
   border: none;
   background: none;
-  font-size: 14px;
   color: var(--color-primary);
   cursor: pointer;
   padding: 0;
   line-height: 1;
-}
-
-.labels-input input {
-  border: none;
-  padding: 4px 6px;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
 }
 
 .error {
-  padding: 10px;
-  background: #ffeaea;
+  padding: var(--space-2);
+  background: var(--color-danger-light);
   color: var(--color-danger);
-  border-radius: 6px;
-  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
   font-size: 13px;
-}
-
-.form-actions button {
-  padding: 10px 24px;
-  background: var(--color-success);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.form-actions button:disabled {
-  opacity: 0.5;
+  border: 1px solid var(--color-danger-border);
 }
 </style>

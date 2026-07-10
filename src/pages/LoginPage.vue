@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useRepoStore } from "@/stores/useRepoStore";
 import type { Platform } from "@/types";
+import AppSelect from "@/components/shared/AppSelect.vue";
 import { authLogin } from "@/api";
 
 const router = useRouter();
@@ -30,7 +31,6 @@ function getCustomUrl(): string | undefined {
   if (!needsCustomUrl.value) return undefined;
   const url = gitlabUrl.value.trim();
   if (!url) return undefined;
-  // Auto-prepend https:// if missing
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     return `https://${url}`;
   }
@@ -61,54 +61,54 @@ async function handleLogin() {
 <template>
   <div class="login-page">
     <div class="login-card">
-      <h1>MergePilot</h1>
+      <div class="login-brand">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="6" x2="6" y2="15"/></svg>
+        <h1>MergePilot</h1>
+      </div>
       <p class="subtitle">跨平台 Code Merge 工具</p>
 
       <div class="form-group">
         <label>平台</label>
-        <select v-model="platform">
-          <option v-for="p in platforms" :key="p.value" :value="p.value">
-            {{ p.label }}
-          </option>
-        </select>
+        <AppSelect v-model="platform" :options="platforms" />
       </div>
 
-      <!-- Custom URL for self-hosted instances -->
       <div v-if="needsCustomUrl" class="form-group">
         <label>服务器地址（可选）</label>
         <input
           v-model="gitlabUrl"
+          class="input"
           type="text"
           :placeholder="platform === 'gitlab' ? 'https://gitlab.com（留空使用官方）' : 'https://gitee.com（留空使用官方）'"
         />
-        <p class="hint">
-          私有化部署请填写完整地址，如 https://gitlab.example.com
-        </p>
+        <p class="hint">私有化部署请填写完整地址，如 https://gitlab.example.com</p>
       </div>
 
       <div class="form-group">
         <label>Personal Access Token</label>
         <input
           v-model="token"
+          class="input"
           type="password"
           placeholder="输入你的 Token..."
           @keyup.enter="handleLogin"
         />
-        <p class="hint">
-          你的 Token 将被安全存储，不会上传到任何第三方。
-        </p>
+        <p class="hint">你的 Token 将被安全存储，不会上传到任何第三方。</p>
       </div>
 
-      <div v-if="error" class="error">{{ error }}</div>
+      <div v-if="error" class="error-box">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        {{ error }}
+      </div>
 
-      <button :disabled="loading" @click="handleLogin">
+      <button class="btn btn-primary login-btn" :disabled="loading" @click="handleLogin">
+        <div v-if="loading" class="btn-spinner" />
         {{ loading ? "登录中..." : "登录" }}
       </button>
 
       <div class="help-links">
-        <a href="https://github.com/settings/tokens" target="_blank">GitHub Token</a>
-        <a href="https://gitlab.com/-/user_settings/personal_access_tokens" target="_blank">GitLab Token</a>
-        <a href="https://gitee.com/profile/personal_access_tokens" target="_blank">Gitee Token</a>
+        <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">GitHub Token</a>
+        <a href="https://gitlab.com/-/user_settings/personal_access_tokens" target="_blank" rel="noopener">GitLab Token</a>
+        <a href="https://gitee.com/profile/personal_access_tokens" target="_blank" rel="noopener">Gitee Token</a>
       </div>
 
       <p class="skip">
@@ -129,93 +129,110 @@ async function handleLogin() {
 
 .login-card {
   width: 440px;
-  padding: 40px;
+  padding: var(--space-10);
   background: var(--color-surface);
-  border-radius: 12px;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.login-brand svg {
+  opacity: 0.8;
 }
 
 h1 {
   font-size: 28px;
+  font-weight: 700;
   text-align: center;
-  margin-bottom: 4px;
+  letter-spacing: -0.02em;
 }
 
 .subtitle {
   text-align: center;
   color: var(--color-text-secondary);
-  margin-bottom: 24px;
+  margin-bottom: var(--space-6);
+  font-size: 14px;
 }
 
 .form-group {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 label {
   display: block;
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
+  font-size: 13px;
 }
 
-select, input {
+select {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-select:focus, input:focus {
-  border-color: var(--color-primary);
 }
 
 .hint {
   font-size: 12px;
-  color: var(--color-text-secondary);
-  margin-top: 4px;
+  color: var(--color-text-tertiary);
+  margin-top: var(--space-1);
 }
 
-.error {
-  padding: 10px;
-  background: #ffeaea;
+.error-box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-danger-light);
   color: var(--color-danger);
-  border-radius: 6px;
-  margin-bottom: 16px;
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
   font-size: 13px;
 }
 
-button {
+.login-btn {
   width: 100%;
-  padding: 12px;
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  font-size: 16px;
+  padding: var(--space-3);
+  font-size: 15px;
   font-weight: 600;
-  transition: background 0.2s;
 }
 
-button:hover:not(:disabled) {
-  background: var(--color-primary-hover);
+.btn-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
 
-button:disabled {
-  opacity: 0.6;
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .help-links {
   display: flex;
   justify-content: space-between;
-  margin-top: 16px;
+  margin-top: var(--space-4);
   font-size: 12px;
 }
 
 .skip {
   text-align: center;
-  margin-top: 16px;
+  margin-top: var(--space-4);
   font-size: 13px;
+}
+
+.skip a {
+  color: var(--color-text-secondary);
+}
+
+.skip a:hover {
+  color: var(--color-primary);
 }
 </style>

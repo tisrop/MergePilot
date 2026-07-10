@@ -12,12 +12,12 @@ defineEmits<{
 
 <template>
   <div class="pr-card" @click="$emit('click')">
-    <div class="pr-card-header">
-      <span class="pr-number">#{{ pr.number }}</span>
+    <div class="pr-card-top">
       <span class="pr-title">{{ pr.title }}</span>
-      <span class="pr-state" :class="`state-${pr.state}`">{{ pr.state }}</span>
+      <span class="badge" :class="`badge-${pr.state}`">{{ pr.state }}</span>
     </div>
     <div class="pr-card-meta">
+      <span class="pr-number">#{{ pr.number }}</span>
       <span>{{ pr.author.login }}</span>
       <span>{{ new Date(pr.updated_at).toLocaleDateString() }}</span>
       <span v-if="pr.labels.length" class="pr-labels">
@@ -35,75 +35,59 @@ defineEmits<{
 
 <style scoped>
 .pr-card {
-  padding: 14px 16px;
+  padding: var(--space-4) var(--space-4);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: box-shadow 0.15s;
+  transition: box-shadow var(--transition-base), border-color var(--transition-base);
 }
 
 .pr-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary-border);
 }
 
-.pr-card-header {
+.pr-card-top {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.pr-number {
-  color: var(--color-text-secondary);
-  font-size: 13px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .pr-title {
   flex: 1;
   font-weight: 600;
   font-size: 15px;
-}
-
-.pr-state {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.state-open {
-  background: #d1f5e0;
-  color: #116329;
-}
-
-.state-closed {
-  background: #ffdce0;
-  color: #86181d;
-}
-
-.state-merged {
-  background: #e5d9fc;
-  color: #4c2889;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pr-card-meta {
   display: flex;
-  gap: 12px;
+  align-items: center;
+  gap: var(--space-3);
   font-size: 12px;
   color: var(--color-text-secondary);
 }
 
+.pr-number {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 .pr-labels {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .label-tag {
   padding: 1px 6px;
-  background: #f0f0f0;
-  border-radius: 4px;
+  background: var(--color-surface-hover);
+  border-radius: var(--radius-sm);
   font-size: 11px;
+  color: var(--color-text-secondary);
 }
 </style>

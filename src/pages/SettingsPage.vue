@@ -24,13 +24,14 @@ import AiSettings from "@/components/ai/AiSettings.vue";
 }
 
 .section {
-  margin-bottom: 32px;
+  margin-bottom: var(--space-8);
 }
 
 .section h3 {
   font-size: 16px;
-  margin-bottom: 16px;
-  padding-bottom: 8px;
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
 }
 </style>

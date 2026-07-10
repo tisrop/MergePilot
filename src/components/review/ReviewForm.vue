@@ -64,12 +64,13 @@ async function handleSubmit() {
 
     <textarea
       v-model="body"
+      class="input"
       placeholder="输入你的评审意见..."
       rows="5"
     />
 
     <div class="form-actions">
-      <button :disabled="submitting || !body.trim()" @click="handleSubmit">
+      <button class="btn btn-primary" :disabled="submitting || !body.trim()" @click="handleSubmit">
         {{ submitting ? "提交中..." : "提交评审" }}
       </button>
       <span v-if="success" class="success-msg">✓ 评审已提交</span>
@@ -80,72 +81,60 @@ async function handleSubmit() {
 
 <style scoped>
 .review-form {
-  margin-top: 24px;
-  padding: 20px;
+  margin-top: var(--space-6);
+  padding: var(--space-5);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 h4 {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .event-select {
   display: flex;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
 }
 
 .event-select button {
   padding: 6px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: none;
   font-size: 13px;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
 }
 
 .event-select button.active {
   border-color: var(--color-primary);
   color: var(--color-primary);
-  background: #e8f0fe;
+  background: var(--color-primary-light);
+}
+
+.event-select button:hover:not(.active) {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
 textarea {
   width: 100%;
-  padding: 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 13px;
-  font-family: inherit;
   resize: vertical;
-  outline: none;
-}
-
-textarea:focus {
-  border-color: var(--color-primary);
+  min-height: 100px;
 }
 
 .form-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 12px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
-.form-actions button {
-  padding: 8px 20px;
-  background: var(--color-primary);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.form-actions button:disabled {
-  opacity: 0.5;
-}
-
-.success-msg { color: var(--color-success); font-size: 13px; }
+.success-msg { color: var(--color-success); font-size: 13px; font-weight: 500; }
 .error-msg { color: var(--color-danger); font-size: 13px; }
 </style>

@@ -18,7 +18,6 @@ const saving = ref(false);
 const testResult = ref<boolean | null>(null);
 const saveMsg = ref("");
 
-// Model list
 const models = ref<string[]>([]);
 const fetchingModels = ref(false);
 const showModelDropdown = ref(false);
@@ -101,7 +100,6 @@ async function handleFetchModels() {
   models.value = [];
 
   try {
-    // If user entered a new API key but hasn't saved yet, save it first
     if (newApiKey.value.trim()) {
       await aiSaveApiKey(newApiKey.value.trim());
       newApiKey.value = "";
@@ -135,7 +133,6 @@ async function handleSave() {
     }
     saveMsg.value = "✓ 设置已保存";
 
-    // Auto-fetch models after saving config + key
     if (hasNewKey && config.value.endpoint) {
       await handleFetchModels();
     }
@@ -161,13 +158,13 @@ async function handleTest() {
 
 <template>
   <div class="ai-settings">
-    <!-- Presets -->
     <div class="presets">
       <label>预设配置</label>
       <div class="preset-btns">
         <button
           v-for="p in presets"
           :key="p.name"
+          class="btn btn-sm"
           @click="applyPreset(p)"
         >
           {{ p.name }}
@@ -175,36 +172,34 @@ async function handleTest() {
       </div>
     </div>
 
-    <!-- Endpoint -->
     <div class="field">
       <label>API 端点</label>
       <input
         v-model="config.endpoint"
+        class="input"
         type="text"
         placeholder="https://api.openai.com/v1"
       />
     </div>
 
-    <!-- API Key -->
     <div class="field">
       <label>API Key</label>
       <input
         v-model="newApiKey"
+        class="input"
         type="password"
-        :placeholder="config.api_key_configured ? '●●●●●● (已设置，输入新 Key 替换)' : '输入 API Key'"
+        :placeholder="config.api_key_configured ? '•••••• (已设置，输入新 Key 替换)' : '输入 API Key'"
       />
-      <p class="hint">
-        API Key 经 AES-256-GCM 加密后写入配置文件，不会明文存储。
-      </p>
+      <p class="hint">API Key 经 AES-256-GCM 加密后写入配置文件，不会明文存储。</p>
     </div>
 
-    <!-- Model with fetch button -->
     <div class="field">
       <label>模型</label>
       <div class="model-row">
         <div class="model-input-wrap">
           <input
             :value="showModelDropdown ? modelSearch : config.model"
+            class="input"
             type="text"
             :placeholder="config.model || 'gpt-4o'"
             @focus="onFocusModel"
@@ -212,7 +207,6 @@ async function handleTest() {
             @blur="onBlurDropdown"
             @keydown="onKeydownModel"
           />
-          <!-- Dropdown -->
           <div v-if="showModelDropdown && models.length > 0" class="model-dropdown">
             <div v-if="modelSearch" class="model-search-hint">
               搜索 "{{ modelSearch }}" — {{ filteredModels.length }} 个结果
@@ -233,21 +227,19 @@ async function handleTest() {
           </div>
         </div>
         <button
-          class="fetch-btn"
+          class="btn btn-sm"
           :disabled="fetchingModels"
           @click="handleFetchModels"
+          style="color: var(--color-primary); border-color: var(--color-primary);"
         >
           {{ fetchingModels ? "获取中..." : "获取模型" }}
         </button>
       </div>
       <p v-if="modelError" class="model-error">{{ modelError }}</p>
-      <p v-else-if="models.length > 0" class="model-count">
-        共 {{ models.length }} 个可用模型
-      </p>
+      <p v-else-if="models.length > 0" class="model-count">共 {{ models.length }} 个可用模型</p>
       <p v-else class="hint">填写端点并保存 API Key 后，点击"获取模型"自动列出可用模型</p>
     </div>
 
-    <!-- Temperature -->
     <div class="field">
       <label>Temperature: {{ config.temperature }}</label>
       <input
@@ -256,26 +248,26 @@ async function handleTest() {
         min="0"
         max="2"
         step="0.1"
+        class="range-input"
       />
     </div>
 
-    <!-- Max Tokens -->
     <div class="field">
       <label>Max Tokens</label>
       <input
         v-model.number="config.max_tokens"
+        class="input"
         type="number"
         min="256"
         max="32768"
       />
     </div>
 
-    <!-- Actions -->
     <div class="actions">
-      <button :disabled="testing" @click="handleTest">
+      <button class="btn" :disabled="testing" @click="handleTest">
         {{ testing ? "测试中..." : "测试连接" }}
       </button>
-      <button :disabled="saving" class="save-btn" @click="handleSave">
+      <button class="btn btn-primary" :disabled="saving" @click="handleSave">
         {{ saving ? "保存中..." : "保存设置" }}
       </button>
     </div>
@@ -292,13 +284,13 @@ async function handleTest() {
 .ai-settings {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .field label {
@@ -306,29 +298,14 @@ async function handleTest() {
   font-size: 13px;
 }
 
-.field input[type="text"],
-.field input[type="password"],
-.field input[type="number"] {
-  padding: 8px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 13px;
-  outline: none;
-}
-
-.field input:focus {
-  border-color: var(--color-primary);
-}
-
 .hint {
   font-size: 11px;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
 }
 
-/* Model row: input + fetch button */
 .model-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .model-input-wrap {
@@ -336,31 +313,10 @@ async function handleTest() {
   position: relative;
 }
 
-.model-input-wrap input {
+.model-input-wrap .input {
   width: 100%;
 }
 
-.fetch-btn {
-  padding: 8px 14px;
-  border: 1px solid var(--color-primary);
-  border-radius: 6px;
-  background: none;
-  color: var(--color-primary);
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.fetch-btn:hover:not(:disabled) {
-  background: #e8f0fe;
-}
-
-.fetch-btn:disabled {
-  opacity: 0.5;
-}
-
-/* Model dropdown */
 .model-dropdown {
   position: absolute;
   top: 100%;
@@ -370,25 +326,25 @@ async function handleTest() {
   overflow-y: auto;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
   z-index: 10;
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .model-item {
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background var(--transition-fast);
 }
 
 .model-item:hover {
-  background: #f0f4ff;
+  background: var(--color-primary-light);
 }
 
 .model-item.selected {
-  background: #e8f0fe;
+  background: var(--color-primary-light);
   color: var(--color-primary);
   font-weight: 600;
 }
@@ -406,10 +362,10 @@ async function handleTest() {
 }
 
 .model-search-hint {
-  padding: 6px 12px;
+  padding: var(--space-1) var(--space-3);
   font-size: 11px;
-  color: var(--color-text-secondary);
-  background: #f6f8fa;
+  color: var(--color-text-tertiary);
+  background: var(--color-surface-hover);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
   top: 0;
@@ -417,9 +373,9 @@ async function handleTest() {
 }
 
 .model-empty {
-  padding: 12px;
+  padding: var(--space-3);
   text-align: center;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
   font-size: 13px;
 }
 
@@ -434,70 +390,45 @@ async function handleTest() {
   font-weight: 600;
   font-size: 13px;
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
 }
 
 .preset-btns {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-}
-
-.preset-btns button {
-  padding: 6px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: none;
-  font-size: 12px;
-  transition: all 0.15s;
-}
-
-.preset-btns button:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
+  gap: var(--space-1);
 }
 
 .actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
-.actions button {
-  padding: 8px 18px;
-  border-radius: 6px;
-  font-size: 13px;
-  border: 1px solid var(--color-border);
-  background: none;
-}
-
-.save-btn {
-  background: var(--color-primary) !important;
-  color: #fff !important;
-  border-color: var(--color-primary) !important;
-}
-
-.actions button:disabled {
-  opacity: 0.5;
+.range-input {
+  width: 100%;
+  accent-color: var(--color-primary);
 }
 
 .test-result {
-  padding: 8px 12px;
-  border-radius: 6px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
   font-size: 13px;
+  font-weight: 500;
 }
 
 .test-result.success {
-  background: #d1f5e0;
-  color: #116329;
+  background: var(--color-success-light);
+  color: #065f46;
 }
 
 .test-result.fail {
-  background: #ffeaea;
-  color: #86181d;
+  background: var(--color-danger-light);
+  color: #991b1b;
 }
 
 .save-msg {
   font-size: 13px;
   color: var(--color-success);
+  font-weight: 500;
 }
 </style>
