@@ -5,6 +5,7 @@ use tauri::State;
 use super::auth::build_platform;
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn review_submit(
     state: State<'_, AppState>,
     platform: String,
@@ -56,6 +57,7 @@ pub async fn review_comments_list(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn review_comment_add(
     state: State<'_, AppState>,
     platform: String,

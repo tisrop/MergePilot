@@ -1,13 +1,14 @@
+pub mod gitee;
 pub mod github;
 pub mod gitlab;
-pub mod gitee;
 
-use crate::models::*;
 use crate::error::AppError;
+use crate::models::*;
 use async_trait::async_trait;
 
 /// Common interface for all Git platforms (GitHub, GitLab, Gitee)
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait GitPlatform: Send + Sync {
     fn name(&self) -> &'static str;
 

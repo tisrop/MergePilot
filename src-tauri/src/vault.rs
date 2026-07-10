@@ -7,6 +7,12 @@ use crate::error::AppError;
 /// File location: ~/.mergepilot/config.json
 pub struct TokenVault;
 
+impl Default for TokenVault {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TokenVault {
     pub fn new() -> Self {
         Self

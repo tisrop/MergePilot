@@ -32,7 +32,8 @@ impl GitHubAdapter {
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, AppError> {
-        let resp = self.client
+        let resp = self
+            .client
             .get(url)
             .header("Authorization", &self.auth_header())
             .header("User-Agent", "mergepilot")
@@ -42,7 +43,10 @@ impl GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, body)));
+            return Err(AppError::Api(format!(
+                "GitHub API {} ({}): {}",
+                status, url, body
+            )));
         }
         Ok(resp.json().await?)
     }
@@ -50,14 +54,18 @@ impl GitHubAdapter {
     /// Parse the `Link` header to extract the last page number.
     /// GitHub format: `<url?page=5>; rel="last"`
     fn parse_last_page(link: Option<&str>, fallback: u32) -> u32 {
-        let Some(header) = link else { return fallback; };
+        let Some(header) = link else {
+            return fallback;
+        };
         // Find the URL with rel="last"
         for part in header.split(',') {
             let part = part.trim();
             if part.contains(r#"rel="last""#) {
                 // Extract the page=XX from the URL between < and >
                 if let Some(url_start) = part.find('<') {
-                    let url_end = part[url_start..].find('>').unwrap_or(part.len() - url_start);
+                    let url_end = part[url_start..]
+                        .find('>')
+                        .unwrap_or(part.len() - url_start);
                     let url = &part[url_start + 1..url_start + url_end];
                     for seg in url.split('&').chain(url.split('?')) {
                         if let Some(page_str) = seg.strip_prefix("page=") {
@@ -73,7 +81,8 @@ impl GitHubAdapter {
     }
 
     async fn get_text(&self, url: &str) -> Result<String, AppError> {
-        let resp = self.client
+        let resp = self
+            .client
             .get(url)
             .header("Authorization", &self.auth_header())
             .header("User-Agent", "mergepilot")
@@ -83,13 +92,17 @@ impl GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, body)));
+            return Err(AppError::Api(format!(
+                "GitHub API {} ({}): {}",
+                status, url, body
+            )));
         }
         Ok(resp.text().await?)
     }
 
     async fn post_json(&self, url: &str, body: &Value) -> Result<Value, AppError> {
-        let resp = self.client
+        let resp = self
+            .client
             .post(url)
             .header("Authorization", &self.auth_header())
             .header("User-Agent", "mergepilot")
@@ -100,7 +113,10 @@ impl GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, error_body)));
+            return Err(AppError::Api(format!(
+                "GitHub API {} ({}): {}",
+                status, url, error_body
+            )));
         }
         Ok(resp.json().await?)
     }
@@ -115,16 +131,15 @@ impl GitHubAdapter {
     }
 
     fn map_pr_state(state_str: &str, merged: bool) -> PrState {
-        if merged { PrState::Merged }
-        else {
+        if merged {
+            PrState::Merged
+        } else {
             match state_str {
                 "closed" => PrState::Closed,
                 _ => PrState::Open,
             }
         }
     }
-
-
 }
 #[async_trait]
 impl GitPlatform for GitHubAdapter {
@@ -149,7 +164,9 @@ impl GitPlatform for GitHubAdapter {
             let fork = r["fork"].as_bool().unwrap_or(false);
             let (parent_full_name, parent_owner) = if fork {
                 let mut pn = r["parent"]["full_name"].as_str().map(|s| s.to_string());
-                let mut po = r["parent"]["owner"]["login"].as_str().map(|s| s.to_string());
+                let mut po = r["parent"]["owner"]["login"]
+                    .as_str()
+                    .map(|s| s.to_string());
                 eprintln!(
                     "[mergepilot] fork repo: {} parent_full_name={:?} parent_owner={:?}",
                     full_name, pn, po
@@ -158,8 +175,12 @@ impl GitPlatform for GitHubAdapter {
                 if pn.is_none() || po.is_none() {
                     let detail_url = format!("{}/repos/{}", self.base_url, full_name);
                     if let Ok(detail) = self.get_json::<Value>(&detail_url).await {
-                        pn = detail["parent"]["full_name"].as_str().map(|s| s.to_string());
-                        po = detail["parent"]["owner"]["login"].as_str().map(|s| s.to_string());
+                        pn = detail["parent"]["full_name"]
+                            .as_str()
+                            .map(|s| s.to_string());
+                        po = detail["parent"]["owner"]["login"]
+                            .as_str()
+                            .map(|s| s.to_string());
                         eprintln!(
                             "[mergepilot] fork repo fallback: {} parent_full_name={:?} parent_owner={:?}",
                             full_name, pn, po
@@ -210,7 +231,9 @@ impl GitPlatform for GitHubAdapter {
         );
 
         // Use raw request to read Link header for pagination
-        let resp = self.client.raw_client()
+        let resp = self
+            .client
+            .raw_client()
             .get(&url)
             .header("Authorization", &self.auth_header())
             .header("User-Agent", "mergepilot")
@@ -224,32 +247,47 @@ impl GitPlatform for GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, body)));
+            return Err(AppError::Api(format!(
+                "GitHub API {} ({}): {}",
+                status, url, body
+            )));
         }
 
         let items: Vec<Value> = resp.json().await?;
 
-        let all_prs: Vec<PrSummary> = items.iter().map(|pr| {
-            PrSummary {
+        let all_prs: Vec<PrSummary> = items
+            .iter()
+            .map(|pr| PrSummary {
                 number: pr["number"].as_u64().unwrap_or(0),
                 title: pr["title"].as_str().unwrap_or("").to_string(),
                 author: Self::map_user(&pr["user"]),
                 state: Self::map_pr_state(
                     pr["state"].as_str().unwrap_or(""),
-                    pr["merged_at"].is_null() == false,
+                    !pr["merged_at"].is_null(),
                 ),
                 created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
                 updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
-                labels: pr["labels"].as_array().map(|arr| {
-                    arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect()
-                }).unwrap_or_default(),
-            }
-        }).collect();
+                labels: pr["labels"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|l| l["name"].as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+            .collect();
 
         // Filter by requested state (needed because GitHub groups merged into closed)
         let prs: Vec<PrSummary> = match state {
-            PrState::Merged => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Merged)).collect(),
-            PrState::Closed => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Closed)).collect(),
+            PrState::Merged => all_prs
+                .into_iter()
+                .filter(|p| matches!(p.state, PrState::Merged))
+                .collect(),
+            PrState::Closed => all_prs
+                .into_iter()
+                .filter(|p| matches!(p.state, PrState::Closed))
+                .collect(),
             _ => all_prs,
         };
 
@@ -267,7 +305,10 @@ impl GitPlatform for GitHubAdapter {
         repo: &str,
         pr_number: u64,
     ) -> Result<PrDetail, AppError> {
-        let url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
         let json = self.get_json::<Value>(&url).await?;
 
         let summary = PrSummary {
@@ -276,13 +317,18 @@ impl GitPlatform for GitHubAdapter {
             author: Self::map_user(&json["user"]),
             state: Self::map_pr_state(
                 json["state"].as_str().unwrap_or(""),
-                json["merged_at"].is_null() == false,
+                !json["merged_at"].is_null(),
             ),
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
-            labels: json["labels"].as_array().map(|arr| {
-                arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect()
-            }).unwrap_or_default(),
+            labels: json["labels"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|l| l["name"].as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
 
         Ok(PrDetail {
@@ -302,15 +348,22 @@ impl GitPlatform for GitHubAdapter {
         pr_number: u64,
     ) -> Result<(String, Vec<PrFile>), AppError> {
         // Get unified diff
-        let diff_url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
+        let diff_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
         let diff = self.get_text(&diff_url).await?;
 
         // Get files list
-        let files_url = format!("{}/repos/{}/{}/pulls/{}/files?per_page=300", self.base_url, owner, repo, pr_number);
+        let files_url = format!(
+            "{}/repos/{}/{}/pulls/{}/files?per_page=300",
+            self.base_url, owner, repo, pr_number
+        );
         let files_json: Vec<Value> = self.get_json(&files_url).await?;
 
-        let files: Vec<PrFile> = files_json.iter().map(|f| {
-            PrFile {
+        let files: Vec<PrFile> = files_json
+            .iter()
+            .map(|f| PrFile {
                 filename: f["filename"].as_str().unwrap_or("").to_string(),
                 status: match f["status"].as_str().unwrap_or("") {
                     "added" => FileStatus::Added,
@@ -321,8 +374,8 @@ impl GitPlatform for GitHubAdapter {
                 patch: f["patch"].as_str().unwrap_or("").to_string(),
                 additions: f["additions"].as_u64().unwrap_or(0) as u32,
                 deletions: f["deletions"].as_u64().unwrap_or(0) as u32,
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok((diff, files))
     }
@@ -335,7 +388,10 @@ impl GitPlatform for GitHubAdapter {
         body: &str,
         event: &ReviewEvent,
     ) -> Result<Review, AppError> {
-        let url = format!("{}/repos/{}/{}/pulls/{}/reviews", self.base_url, owner, repo, pr_number);
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/reviews",
+            self.base_url, owner, repo, pr_number
+        );
         let event_str = match event {
             ReviewEvent::Approve => "APPROVE",
             ReviewEvent::Comment => "COMMENT",
@@ -382,7 +438,6 @@ impl GitPlatform for GitHubAdapter {
         Ok(())
     }
 
-
     async fn list_pr_comments(
         &self,
         owner: &str,
@@ -394,16 +449,17 @@ impl GitPlatform for GitHubAdapter {
             self.base_url, owner, repo, pr_number
         );
         let items: Vec<Value> = self.get_json(&url).await?;
-        let comments = items.iter().map(|c| {
-            PrComment {
+        let comments = items
+            .iter()
+            .map(|c| PrComment {
                 id: c["id"].clone(),
                 body: c["body"].as_str().unwrap_or("").to_string(),
                 path: c["path"].as_str().unwrap_or("").to_string(),
                 line: c["line"].as_u64().map(|n| n as u32),
                 author: Self::map_user(&c["user"]),
                 created_at: c["created_at"].as_str().unwrap_or("").to_string(),
-            }
-        }).collect();
+            })
+            .collect();
         Ok(comments)
     }
 
@@ -413,18 +469,22 @@ impl GitPlatform for GitHubAdapter {
         repo: &str,
         pr_number: u64,
     ) -> Result<Vec<Review>, AppError> {
-        let url = format!("{}/repos/{}/{}/pulls/{}/reviews", self.base_url, owner, repo, pr_number);
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/reviews",
+            self.base_url, owner, repo, pr_number
+        );
         let items: Vec<Value> = self.get_json(&url).await?;
 
-        let reviews = items.iter().map(|r| {
-            Review {
+        let reviews = items
+            .iter()
+            .map(|r| Review {
                 id: r["id"].clone(),
                 body: r["body"].as_str().unwrap_or("").to_string(),
                 state: r["state"].as_str().unwrap_or("").to_string(),
                 author: Self::map_user(&r["user"]),
                 submitted_at: r["submitted_at"].as_str().unwrap_or("").to_string(),
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(reviews)
     }
@@ -443,8 +503,9 @@ impl GitPlatform for GitHubAdapter {
         );
         let items: Vec<Value> = self.get_json(&url).await?;
 
-        let issues: Vec<IssueSummary> = items.iter().map(|i| {
-            IssueSummary {
+        let issues: Vec<IssueSummary> = items
+            .iter()
+            .map(|i| IssueSummary {
                 number: i["number"].as_u64().unwrap_or(0),
                 title: i["title"].as_str().unwrap_or("").to_string(),
                 author: Self::map_user(&i["user"]),
@@ -452,12 +513,17 @@ impl GitPlatform for GitHubAdapter {
                     "closed" => IssueState::Closed,
                     _ => IssueState::Open,
                 },
-                labels: i["labels"].as_array().map(|arr| {
-                    arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect()
-                }).unwrap_or_default(),
+                labels: i["labels"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|l| l["name"].as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 created_at: i["created_at"].as_str().unwrap_or("").to_string(),
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(Paginated {
             items: issues,
@@ -493,9 +559,14 @@ impl GitPlatform for GitHubAdapter {
                 "closed" => IssueState::Closed,
                 _ => IssueState::Open,
             },
-            labels: json["labels"].as_array().map(|arr| {
-                arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect()
-            }).unwrap_or_default(),
+            labels: json["labels"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|l| l["name"].as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
         })

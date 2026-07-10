@@ -8,8 +8,12 @@ pub fn build_system_prompt(focus: Option<&AiReviewFocus>, custom_prompt: Option<
 
     let focus_instruction = match focus.unwrap_or(&AiReviewFocus::All) {
         AiReviewFocus::All => "请全面评审代码，包括逻辑正确性、安全性、性能、代码风格等方面。",
-        AiReviewFocus::Security => "请专注于安全漏洞评审：注入攻击、认证授权、敏感信息泄露、加密问题等。",
-        AiReviewFocus::Performance => "请专注于性能问题：不必要的分配、阻塞操作、算法复杂度、缓存等。",
+        AiReviewFocus::Security => {
+            "请专注于安全漏洞评审：注入攻击、认证授权、敏感信息泄露、加密问题等。"
+        }
+        AiReviewFocus::Performance => {
+            "请专注于性能问题：不必要的分配、阻塞操作、算法复杂度、缓存等。"
+        }
         AiReviewFocus::Logic => "请专注于逻辑正确性：边界条件、空值处理、错误处理、并发问题等。",
         AiReviewFocus::CodeStyle => "请专注于代码风格和可读性：命名、注释、结构清晰度等。",
     };
@@ -64,7 +68,10 @@ pub fn build_user_message(diff: &str, context: Option<&PrContext>) -> String {
 
     // Truncate diff if it's too large (max ~64KB for reasonable AI input)
     let diff_content = if diff.len() > 65536 {
-        format!("{}...\n[Diff 内容过长，已截断，仅展示前 64KB]", &diff[..65536])
+        format!(
+            "{}...\n[Diff 内容过长，已截断，仅展示前 64KB]",
+            &diff[..65536]
+        )
     } else {
         diff.to_string()
     };

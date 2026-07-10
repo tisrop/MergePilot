@@ -30,12 +30,16 @@ impl GiteeAdapter {
 
     /// Parse the `Link` header to extract the last page number (same format as GitHub).
     fn parse_last_page_gitee(link: Option<&str>, fallback: u32) -> u32 {
-        let Some(header) = link else { return fallback; };
+        let Some(header) = link else {
+            return fallback;
+        };
         for part in header.split(',') {
             let part = part.trim();
             if part.contains(r#"rel="last""#) {
                 if let Some(url_start) = part.find('<') {
-                    let url_end = part[url_start..].find('>').unwrap_or(part.len() - url_start);
+                    let url_end = part[url_start..]
+                        .find('>')
+                        .unwrap_or(part.len() - url_start);
                     let url = &part[url_start + 1..url_start + url_end];
                     for seg in url.split('&').chain(url.split('?')) {
                         if let Some(page_str) = seg.strip_prefix("page=") {
@@ -58,7 +62,8 @@ impl GiteeAdapter {
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(&full_url)
             .header("User-Agent", "mergepilot")
             .send()
@@ -71,7 +76,8 @@ impl GiteeAdapter {
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&full_url)
             .header("User-Agent", "mergepilot")
             .json(body)
@@ -89,8 +95,6 @@ impl GiteeAdapter {
             avatar_url: json["avatar_url"].as_str().unwrap_or("").to_string(),
         }
     }
-
-
 }
 #[async_trait]
 impl GitPlatform for GiteeAdapter {
@@ -108,31 +112,41 @@ impl GitPlatform for GiteeAdapter {
         let url = format!("{}/user/repos?per_page=100&page={}", self.base_url, page);
         let items: Vec<Value> = self.get_json(&url).await?;
 
-        let repos: Vec<RepoSummary> = items.iter().map(|r| {
-            let full_name = r["full_name"].as_str().unwrap_or("");
-            let parts: Vec<&str> = full_name.splitn(2, '/').collect();
-            let fork = r["fork"].as_bool().unwrap_or(false);
-            let (parent_full_name, parent_owner) = if fork {
-                let parent_name = r["parent"]["full_name"].as_str().map(|s| s.to_string());
-                let parent_owner = r["parent"]["owner"]["login"].as_str().map(|s| s.to_string());
-                (parent_name, parent_owner)
-            } else {
-                (None, None)
-            };
-            RepoSummary {
-                id: r["id"].clone(),
-                name: r["name"].as_str().unwrap_or("").to_string(),
-                full_name: full_name.to_string(),
-                owner: parts.first().unwrap_or(&"").to_string(),
-                description: r["description"].as_str().unwrap_or("").to_string(),
-                private: r["private"].as_bool().unwrap_or(false),
-                fork,
-                parent_full_name,
-                parent_owner,
-            }
-        }).collect();
+        let repos: Vec<RepoSummary> = items
+            .iter()
+            .map(|r| {
+                let full_name = r["full_name"].as_str().unwrap_or("");
+                let parts: Vec<&str> = full_name.splitn(2, '/').collect();
+                let fork = r["fork"].as_bool().unwrap_or(false);
+                let (parent_full_name, parent_owner) = if fork {
+                    let parent_name = r["parent"]["full_name"].as_str().map(|s| s.to_string());
+                    let parent_owner = r["parent"]["owner"]["login"]
+                        .as_str()
+                        .map(|s| s.to_string());
+                    (parent_name, parent_owner)
+                } else {
+                    (None, None)
+                };
+                RepoSummary {
+                    id: r["id"].clone(),
+                    name: r["name"].as_str().unwrap_or("").to_string(),
+                    full_name: full_name.to_string(),
+                    owner: parts.first().unwrap_or(&"").to_string(),
+                    description: r["description"].as_str().unwrap_or("").to_string(),
+                    private: r["private"].as_bool().unwrap_or(false),
+                    fork,
+                    parent_full_name,
+                    parent_owner,
+                }
+            })
+            .collect();
 
-        Ok(Paginated { items: repos, page, total_pages: 1, total_count: 0 })
+        Ok(Paginated {
+            items: repos,
+            page,
+            total_pages: 1,
+            total_count: 0,
+        })
     }
 
     async fn list_pull_requests(
@@ -152,11 +166,13 @@ impl GitPlatform for GiteeAdapter {
             "{}/repos/{}/{}/pulls?state={}&per_page={}&page={}",
             self.base_url, owner, repo, api_state, per_page, page
         );
-        
+
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
 
-        let resp = self.client.raw_client()
+        let resp = self
+            .client
+            .raw_client()
             .get(&full_url)
             .header("User-Agent", "mergepilot")
             .send()
@@ -168,37 +184,63 @@ impl GitPlatform for GiteeAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!("Gitee API {} ({}): {}", status, url, body)));
+            return Err(AppError::Api(format!(
+                "Gitee API {} ({}): {}",
+                status, url, body
+            )));
         }
 
         let items: Vec<Value> = resp.json().await?;
 
-        let all_prs: Vec<PrSummary> = items.iter().map(|pr| {
-            let state_str = pr["state"].as_str().unwrap_or("");
-            let merged = pr["merged_at"].is_null() == false;
-            PrSummary {
-                number: pr["number"].as_u64().unwrap_or(0),
-                title: pr["title"].as_str().unwrap_or("").to_string(),
-                author: Self::map_user(&pr["user"]),
-                state: if merged { PrState::Merged }
-                    else if state_str == "closed" { PrState::Closed }
-                    else { PrState::Open },
-                created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
-                updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
-                labels: pr["labels"].as_array().map(|arr| {
-                    arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect()
-                }).unwrap_or_default(),
-            }
-        }).collect();
+        let all_prs: Vec<PrSummary> = items
+            .iter()
+            .map(|pr| {
+                let state_str = pr["state"].as_str().unwrap_or("");
+                let merged = !pr["merged_at"].is_null();
+                PrSummary {
+                    number: pr["number"].as_u64().unwrap_or(0),
+                    title: pr["title"].as_str().unwrap_or("").to_string(),
+                    author: Self::map_user(&pr["user"]),
+                    state: if merged {
+                        PrState::Merged
+                    } else if state_str == "closed" {
+                        PrState::Closed
+                    } else {
+                        PrState::Open
+                    },
+                    created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
+                    updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
+                    labels: pr["labels"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|l| l["name"].as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                }
+            })
+            .collect();
 
         // Filter by requested state (Gitee groups merged into closed)
         let prs: Vec<PrSummary> = match state {
-            PrState::Merged => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Merged)).collect(),
-            PrState::Closed => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Closed)).collect(),
+            PrState::Merged => all_prs
+                .into_iter()
+                .filter(|p| matches!(p.state, PrState::Merged))
+                .collect(),
+            PrState::Closed => all_prs
+                .into_iter()
+                .filter(|p| matches!(p.state, PrState::Closed))
+                .collect(),
             _ => all_prs,
         };
 
-        Ok(Paginated { items: prs, page, total_pages: last_page, total_count: 0 })
+        Ok(Paginated {
+            items: prs,
+            page,
+            total_pages: last_page,
+            total_count: 0,
+        })
     }
 
     async fn get_pull_request(
@@ -207,7 +249,10 @@ impl GitPlatform for GiteeAdapter {
         repo: &str,
         pr_number: u64,
     ) -> Result<PrDetail, AppError> {
-        let url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
         let json = self.get_json::<Value>(&url).await?;
 
         let summary = PrSummary {
@@ -216,16 +261,25 @@ impl GitPlatform for GiteeAdapter {
             author: Self::map_user(&json["user"]),
             state: {
                 let st = json["state"].as_str().unwrap_or("");
-                let merged = json["merged_at"].is_null() == false;
-                if merged { PrState::Merged }
-                else if st == "closed" { PrState::Closed }
-                else { PrState::Open }
+                let merged = !json["merged_at"].is_null();
+                if merged {
+                    PrState::Merged
+                } else if st == "closed" {
+                    PrState::Closed
+                } else {
+                    PrState::Open
+                }
             },
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
-            labels: json["labels"].as_array().map(|arr| {
-                arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect()
-            }).unwrap_or_default(),
+            labels: json["labels"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|l| l["name"].as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
 
         Ok(PrDetail {
@@ -244,11 +298,15 @@ impl GitPlatform for GiteeAdapter {
         repo: &str,
         pr_number: u64,
     ) -> Result<(String, Vec<PrFile>), AppError> {
-        let files_url = format!("{}/repos/{}/{}/pulls/{}/files?per_page=300", self.base_url, owner, repo, pr_number);
+        let files_url = format!(
+            "{}/repos/{}/{}/pulls/{}/files?per_page=300",
+            self.base_url, owner, repo, pr_number
+        );
         let files_json: Vec<Value> = self.get_json(&files_url).await?;
 
-        let files: Vec<PrFile> = files_json.iter().map(|f| {
-            PrFile {
+        let files: Vec<PrFile> = files_json
+            .iter()
+            .map(|f| PrFile {
                 filename: f["filename"].as_str().unwrap_or("").to_string(),
                 status: match f["status"].as_str().unwrap_or("") {
                     "added" => FileStatus::Added,
@@ -259,10 +317,14 @@ impl GitPlatform for GiteeAdapter {
                 patch: f["patch"].as_str().unwrap_or("").to_string(),
                 additions: f["additions"].as_u64().unwrap_or(0) as u32,
                 deletions: f["deletions"].as_u64().unwrap_or(0) as u32,
-            }
-        }).collect();
+            })
+            .collect();
 
-        let diff = files.iter().map(|f| f.patch.clone()).collect::<Vec<_>>().join("");
+        let diff = files
+            .iter()
+            .map(|f| f.patch.clone())
+            .collect::<Vec<_>>()
+            .join("");
 
         Ok((diff, files))
     }
@@ -276,7 +338,10 @@ impl GitPlatform for GiteeAdapter {
         event: &ReviewEvent,
     ) -> Result<Review, AppError> {
         // Gitee doesn't have a full review API like GitHub; use PR comments
-        let url = format!("{}/repos/{}/{}/pulls/{}/comments", self.base_url, owner, repo, pr_number);
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/comments",
+            self.base_url, owner, repo, pr_number
+        );
         let payload = serde_json::json!({
             "body": format!("**Review ({})**\n\n{}",
                 match event {
@@ -299,8 +364,26 @@ impl GitPlatform for GiteeAdapter {
         })
     }
 
-    async fn create_pr_comment(&self, _owner: &str, _repo: &str, _pr_number: u64, _commit_id: &str, _path: &str, _line: u32, _body: &str) -> Result<(), AppError> { Ok(()) }
-    async fn list_pr_comments(&self, _owner: &str, _repo: &str, _pr_number: u64) -> Result<Vec<PrComment>, AppError> { Ok(Vec::new()) }
+    async fn create_pr_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _pr_number: u64,
+        _commit_id: &str,
+        _path: &str,
+        _line: u32,
+        _body: &str,
+    ) -> Result<(), AppError> {
+        Ok(())
+    }
+    async fn list_pr_comments(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<PrComment>, AppError> {
+        Ok(Vec::new())
+    }
 
     async fn list_reviews(
         &self,
@@ -308,16 +391,22 @@ impl GitPlatform for GiteeAdapter {
         repo: &str,
         pr_number: u64,
     ) -> Result<Vec<Review>, AppError> {
-        let url = format!("{}/repos/{}/{}/pulls/{}/comments?per_page=100", self.base_url, owner, repo, pr_number);
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/comments?per_page=100",
+            self.base_url, owner, repo, pr_number
+        );
         let items: Vec<Value> = self.get_json(&url).await?;
 
-        let reviews = items.iter().map(|c| Review {
-            id: c["id"].clone(),
-            body: c["body"].as_str().unwrap_or("").to_string(),
-            state: "commented".to_string(),
-            author: Self::map_user(&c["user"]),
-            submitted_at: c["created_at"].as_str().unwrap_or("").to_string(),
-        }).collect();
+        let reviews = items
+            .iter()
+            .map(|c| Review {
+                id: c["id"].clone(),
+                body: c["body"].as_str().unwrap_or("").to_string(),
+                state: "commented".to_string(),
+                author: Self::map_user(&c["user"]),
+                submitted_at: c["created_at"].as_str().unwrap_or("").to_string(),
+            })
+            .collect();
 
         Ok(reviews)
     }
@@ -336,8 +425,9 @@ impl GitPlatform for GiteeAdapter {
         );
         let items: Vec<Value> = self.get_json(&url).await?;
 
-        let issues = items.iter().map(|i| {
-            IssueSummary {
+        let issues = items
+            .iter()
+            .map(|i| IssueSummary {
                 number: i["number"].as_u64().unwrap_or(0),
                 title: i["title"].as_str().unwrap_or("").to_string(),
                 author: Self::map_user(&i["user"]),
@@ -345,14 +435,24 @@ impl GitPlatform for GiteeAdapter {
                     "closed" => IssueState::Closed,
                     _ => IssueState::Open,
                 },
-                labels: i["labels"].as_array().map(|arr| {
-                    arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect()
-                }).unwrap_or_default(),
+                labels: i["labels"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|l| l["name"].as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 created_at: i["created_at"].as_str().unwrap_or("").to_string(),
-            }
-        }).collect();
+            })
+            .collect();
 
-        Ok(Paginated { items: issues, page, total_pages: 1, total_count: 0 })
+        Ok(Paginated {
+            items: issues,
+            page,
+            total_pages: 1,
+            total_count: 0,
+        })
     }
 
     async fn create_issue(
@@ -370,7 +470,6 @@ impl GitPlatform for GiteeAdapter {
             "labels": labels.join(","),
         });
 
-
         let json = self.post_json(&url, &payload).await?;
 
         Ok(Issue {
@@ -382,9 +481,14 @@ impl GitPlatform for GiteeAdapter {
                 "closed" => IssueState::Closed,
                 _ => IssueState::Open,
             },
-            labels: json["labels"].as_array().map(|arr| {
-                arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect()
-            }).unwrap_or_default(),
+            labels: json["labels"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|l| l["name"].as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
         })

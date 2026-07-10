@@ -21,9 +21,15 @@ pub async fn pr_list(
         Some("all") => PrState::All,
         _ => PrState::Open,
     };
-    p.list_pull_requests(&owner, &repo, &pr_state, page.unwrap_or(1), per_page.unwrap_or(20))
-        .await
-        .map_err(|e| e.to_string())
+    p.list_pull_requests(
+        &owner,
+        &repo,
+        &pr_state,
+        page.unwrap_or(1),
+        per_page.unwrap_or(20),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -49,7 +55,8 @@ pub async fn pr_diff(
     number: u64,
 ) -> Result<DiffResult, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
-    let (diff, files) = p.get_pr_diff(&owner, &repo, number)
+    let (diff, files) = p
+        .get_pr_diff(&owner, &repo, number)
         .await
         .map_err(|e| e.to_string())?;
     Ok(DiffResult { diff, files })
