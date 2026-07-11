@@ -85,6 +85,7 @@ pub async fn pr_diff(
     Ok(DiffResult { diff, files })
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn pr_merge(
     state: State<'_, AppState>,

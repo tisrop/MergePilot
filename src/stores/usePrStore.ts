@@ -111,7 +111,16 @@ export const usePrStore = defineStore("pr", () => {
   ) {
     error.value = null;
     try {
-      const result = await prMerge(platform, owner, repo, number, strategy, commitTitle, commitMessage, closeIssues);
+      const result = await prMerge(
+        platform,
+        owner,
+        repo,
+        number,
+        strategy,
+        commitTitle,
+        commitMessage,
+        closeIssues,
+      );
       currentPr.value = await prDetail(platform, owner, repo, number);
       return result;
     } catch (e) {

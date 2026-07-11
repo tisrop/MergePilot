@@ -195,7 +195,11 @@ onMounted(async () => {
           </span>
           <span class="author">by {{ pr.currentPr.summary.author.login }}</span>
           <span :class="['pr-state-badge', pr.currentPr.summary.state]">
-            {{ { open: "Open", closed: "Closed", merged: "Merged", all: "" }[pr.currentPr.summary.state] }}
+            {{
+              { open: "Open", closed: "Closed", merged: "Merged", all: "" }[
+                pr.currentPr.summary.state
+              ]
+            }}
           </span>
         </div>
 
@@ -207,8 +211,19 @@ onMounted(async () => {
                 :disabled="!canMerge || operating"
                 @click="handleMerge"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 0 0 9 9" />
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="18" cy="18" r="3" />
+                  <circle cx="6" cy="6" r="3" />
+                  <path d="M6 21V9a9 9 0 0 0 9 9" />
                 </svg>
                 {{ mergeButtonLabel }}
               </button>
@@ -217,7 +232,16 @@ onMounted(async () => {
                 :disabled="!canMerge || operating"
                 @click="dropdownOpen = !dropdownOpen"
               >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" /></svg>
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </button>
               <div v-if="dropdownOpen" class="merge-dropdown">
                 <button
@@ -225,7 +249,10 @@ onMounted(async () => {
                   :key="s.value"
                   class="dropdown-item"
                   :class="{ active: selectedStrategy === s.value }"
-                  @click="selectedStrategy = s.value; dropdownOpen = false"
+                  @click="
+                    selectedStrategy = s.value;
+                    dropdownOpen = false;
+                  "
                 >
                   {{ s.label }}
                 </button>
@@ -239,11 +266,7 @@ onMounted(async () => {
               placeholder="Commit message"
             />
             <label class="close-issues-checkbox">
-              <input
-                v-model="closeRelatedIssues"
-                type="checkbox"
-                :disabled="operating"
-              />
+              <input v-model="closeRelatedIssues" type="checkbox" :disabled="operating" />
               合并后关闭关联 Issue
             </label>
           </div>
@@ -259,11 +282,7 @@ onMounted(async () => {
           </div>
 
           <div v-if="canReopen" class="close-btn-wrapper">
-            <button
-              class="btn btn-outline btn-reopen"
-              :disabled="operating"
-              @click="handleReopen"
-            >
+            <button class="btn btn-outline btn-reopen" :disabled="operating" @click="handleReopen">
               Reopen
             </button>
           </div>
@@ -273,8 +292,19 @@ onMounted(async () => {
 
         <div v-if="pr.error" class="error-box">
           <p class="error-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="15" y1="9" x2="9" y2="15" />
+              <line x1="9" y1="9" x2="15" y2="15" />
             </svg>
             操作失败
           </p>
@@ -444,7 +474,7 @@ onMounted(async () => {
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   padding-left: var(--space-1);
   padding-right: var(--space-1);
-  border-left: 1px solid rgba(255,255,255,0.2);
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .merge-dropdown {
@@ -455,7 +485,7 @@ onMounted(async () => {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 100;
   min-width: 180px;
 }
