@@ -87,6 +87,22 @@ impl GiteeAdapter {
         Ok(resp.json().await?)
     }
 
+    async fn patch_json(&self, url: &str, body: &Value) -> Result<Value, AppError> {
+        let separator = if url.contains('?') { "&" } else { "?" };
+        let full_url = format!("{}{}{}", url, separator, self.auth_query());
+
+        let resp = self
+            .client
+            .raw_client()
+            .patch(&full_url)
+            .header("User-Agent", "mergepilot")
+            .json(body)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
     fn map_user(json: &Value) -> User {
         User {
             id: json["id"].clone(),
@@ -629,5 +645,122 @@ impl GitPlatform for GiteeAdapter {
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
         })
+    }
+
+    async fn merge_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        strategy: &MergeStrategy,
+        commit_title: Option<String>,
+        commit_message: Option<String>,
+        sha: &str,
+    ) -> Result<PrMergeResult, AppError> {
+        let merge_method = match strategy {
+            MergeStrategy::Merge => "merge",
+            MergeStrategy::Squash => "squash",
+            MergeStrategy::Rebase => "rebase",
+        };
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/merge",
+            self.base_url, owner, repo, pr_number
+        );
+        let mut payload = serde_json::json!({
+            "merge_method": merge_method,
+            "sha": sha,
+        });
+        if let Some(t) = commit_title {
+            payload["title"] = serde_json::Value::String(t);
+        }
+        if let Some(m) = commit_message {
+            payload["description"] = serde_json::Value::String(m);
+        }
+        let separator = if url.contains('?') { "&" } else { "?" };
+        let full_url = format!("{}{}{}", url, separator, self.auth_query());
+        let resp = self
+            .client
+            .put(&full_url)
+            .header("User-Agent", "mergepilot")
+            .json(&payload)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let detail = serde_json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|v| v["message"].as_str().map(String::from))
+                .unwrap_or_else(|| {
+                    if body.is_empty() {
+                        "未知错误".to_string()
+                    } else {
+                        body
+                    }
+                });
+            return Err(AppError::Api(detail));
+        }
+        let json: Value = resp.json().await?;
+        Ok(PrMergeResult {
+            merged: json["merged"].as_bool().unwrap_or(false),
+            sha: json["sha"].as_str().unwrap_or("").to_string(),
+            message: json["message"].as_str().unwrap_or("").to_string(),
+        })
+    }
+
+    async fn close_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrState, AppError> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
+        let payload = serde_json::json!({ "state": "closed" });
+        let json = self.patch_json(&url, &payload).await?;
+        let state = if !json["merged_at"].is_null() {
+            PrState::Merged
+        } else if json["state"].as_str().unwrap_or("") == "closed" {
+            PrState::Closed
+        } else {
+            PrState::Open
+        };
+        Ok(state)
+    }
+
+    async fn reopen_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrState, AppError> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
+        let payload = serde_json::json!({ "state": "open" });
+        let json = self.patch_json(&url, &payload).await?;
+        let state = if json["state"].as_str().unwrap_or("") == "open" {
+            PrState::Open
+        } else {
+            PrState::Closed
+        };
+        Ok(state)
+    }
+
+    async fn close_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: u64,
+    ) -> Result<(), AppError> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            self.base_url, owner, repo, issue_number
+        );
+        let payload = serde_json::json!({ "state": "closed" });
+        self.patch_json(&url, &payload).await?;
+        Ok(())
     }
 }

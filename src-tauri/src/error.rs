@@ -17,6 +17,10 @@ pub enum AppError {
     #[error("Platform API error: {0}")]
     Api(String),
 
+    #[allow(dead_code)]
+    #[error("Unsupported merge strategy for this platform: {0}")]
+    UnsupportedStrategy(String),
+
     #[error("AI error: {0}")]
     Ai(String),
 

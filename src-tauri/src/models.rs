@@ -183,6 +183,22 @@ pub struct CreateIssueRequest {
     pub labels: Vec<String>,
 }
 
+// ── Merge / Close / Reopen ──
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeStrategy {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrMergeResult {
+    pub merged: bool,
+    pub sha: String,
+    pub message: String,
+}
+
 // ── Pagination ──
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paginated<T> {

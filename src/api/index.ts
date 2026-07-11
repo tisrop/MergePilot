@@ -6,6 +6,8 @@ import type {
   PrSummary,
   PrDetail,
   DiffResult,
+  MergeStrategy,
+  MergeResult,
   Review,
   ReviewCommentPosition,
   IssueState,
@@ -84,6 +86,46 @@ export async function prDiff(
   number: number,
 ): Promise<DiffResult> {
   return invoke("pr_diff", { platform, owner, repo, number });
+}
+
+export async function prMerge(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  number: number,
+  strategy: MergeStrategy,
+  commitTitle?: string,
+  commitMessage?: string,
+  closeIssues?: boolean,
+): Promise<MergeResult> {
+  return invoke("pr_merge", {
+    platform,
+    owner,
+    repo,
+    number,
+    strategy,
+    commitTitle: commitTitle ?? null,
+    commitMessage: commitMessage ?? null,
+    closeIssues: closeIssues ?? null,
+  });
+}
+
+export async function prClose(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PrState> {
+  return invoke("pr_close", { platform, owner, repo, number });
+}
+
+export async function prReopen(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PrState> {
+  return invoke("pr_reopen", { platform, owner, repo, number });
 }
 
 // ── Review ──

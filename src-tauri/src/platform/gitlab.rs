@@ -57,6 +57,19 @@ impl GitLabAdapter {
         Ok(resp.json().await?)
     }
 
+    async fn put_json(&self, url: &str, body: &Value) -> Result<Value, AppError> {
+        let resp = self
+            .client
+            .put(url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .header("User-Agent", "mergepilot")
+            .json(body)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
     fn map_user(json: &Value) -> User {
         User {
             id: json["id"].clone(),
@@ -471,6 +484,85 @@ impl GitPlatform for GitLabAdapter {
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
         })
+    }
+
+    async fn merge_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        strategy: &MergeStrategy,
+        _commit_title: Option<String>,
+        commit_message: Option<String>,
+        sha: &str,
+    ) -> Result<PrMergeResult, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let url = format!(
+            "{}/projects/{}/merge_requests/{}/merge",
+            self.base_url, project_id, pr_number
+        );
+        let squash = matches!(strategy, MergeStrategy::Squash);
+        let mut payload = serde_json::json!({
+            "squash": squash,
+            "sha": sha,
+        });
+        if let Some(m) = commit_message {
+            payload["merge_commit_message"] = serde_json::Value::String(m);
+        }
+        let json = self.put_json(&url, &payload).await?;
+        Ok(PrMergeResult {
+            merged: true,
+            sha: json["id"].as_str().unwrap_or("").to_string(),
+            message: String::new(),
+        })
+    }
+
+    async fn close_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrState, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let url = format!(
+            "{}/projects/{}/merge_requests/{}",
+            self.base_url, project_id, pr_number
+        );
+        let payload = serde_json::json!({ "state_event": "close" });
+        self.put_json(&url, &payload).await?;
+        Ok(PrState::Closed)
+    }
+
+    async fn reopen_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrState, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let url = format!(
+            "{}/projects/{}/merge_requests/{}",
+            self.base_url, project_id, pr_number
+        );
+        let payload = serde_json::json!({ "state_event": "reopen" });
+        self.put_json(&url, &payload).await?;
+        Ok(PrState::Open)
+    }
+
+    async fn close_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: u64,
+    ) -> Result<(), AppError> {
+        let project_id = urlencoding(owner, repo);
+        let url = format!(
+            "{}/projects/{}/issues/{}",
+            self.base_url, project_id, issue_number
+        );
+        let payload = serde_json::json!({ "state_event": "close" });
+        self.put_json(&url, &payload).await?;
+        Ok(())
     }
 }
 
