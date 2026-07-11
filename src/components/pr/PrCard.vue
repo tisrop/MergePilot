@@ -21,11 +21,7 @@ defineEmits<{
       <span>{{ pr.author.login }}</span>
       <span>{{ new Date(pr.updated_at).toLocaleDateString() }}</span>
       <span v-if="pr.labels.length" class="pr-labels">
-        <span
-          v-for="label in pr.labels"
-          :key="label"
-          class="label-tag"
-        >
+        <span v-for="label in pr.labels" :key="label" class="label-tag">
           {{ label }}
         </span>
       </span>
@@ -40,7 +36,9 @@ defineEmits<{
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: box-shadow var(--transition-base), border-color var(--transition-base);
+  transition:
+    box-shadow var(--transition-base),
+    border-color var(--transition-base);
 }
 
 .pr-card:hover {

@@ -85,17 +85,23 @@ function needsExpand(body: string) {
       <div class="skeleton skeleton-review" v-for="i in 3" :key="i" />
     </div>
     <div v-else-if="items.length === 0" class="empty-state">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <svg
+        width="28"
+        height="28"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
       <p>暂无评审意见</p>
     </div>
 
     <div v-else class="reviews">
-      <div
-        v-for="item in items"
-        :key="item.id"
-        class="review-item"
-        @click="toggle(item.id)"
-      >
+      <div v-for="item in items" :key="item.id" class="review-item" @click="toggle(item.id)">
         <div class="review-header">
           <img :src="item.author.avatar_url" class="avatar" />
           <span class="review-author">{{ item.author.login }}</span>
@@ -103,11 +109,18 @@ function needsExpand(body: string) {
           <span v-if="item.path" class="review-path">{{ item.path }}:{{ item.line }}</span>
           <span class="review-time">{{ new Date(item.time).toLocaleString() }}</span>
         </div>
-        <div class="review-body" :class="{ collapsed: needsExpand(item.body) && !expanded.has(item.id) }">
-          {{ needsExpand(item.body) && !expanded.has(item.id) ? item.body.slice(0, PREVIEW_LEN) + '...' : item.body }}
+        <div
+          class="review-body"
+          :class="{ collapsed: needsExpand(item.body) && !expanded.has(item.id) }"
+        >
+          {{
+            needsExpand(item.body) && !expanded.has(item.id)
+              ? item.body.slice(0, PREVIEW_LEN) + "..."
+              : item.body
+          }}
         </div>
         <div v-if="needsExpand(item.body)" class="expand-hint">
-          {{ expanded.has(item.id) ? '▲ 收起' : '▼ 展开' }}
+          {{ expanded.has(item.id) ? "▲ 收起" : "▼ 展开" }}
         </div>
       </div>
     </div>
@@ -115,8 +128,14 @@ function needsExpand(body: string) {
 </template>
 
 <style scoped>
-.review-list { padding: var(--space-4) 0; }
-h4 { margin-bottom: var(--space-4); font-size: 15px; font-weight: 600; }
+.review-list {
+  padding: var(--space-4) 0;
+}
+h4 {
+  margin-bottom: var(--space-4);
+  font-size: 15px;
+  font-weight: 600;
+}
 
 .loading-state {
   display: flex;
@@ -138,7 +157,11 @@ h4 { margin-bottom: var(--space-4); font-size: 15px; font-weight: 600; }
   color: var(--color-text-tertiary);
 }
 
-.reviews { display: flex; flex-direction: column; gap: var(--space-3); }
+.reviews {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
 
 .review-item {
   padding: var(--space-4);
@@ -146,7 +169,9 @@ h4 { margin-bottom: var(--space-4); font-size: 15px; font-weight: 600; }
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+  transition:
+    border-color var(--transition-base),
+    box-shadow var(--transition-base);
 }
 
 .review-item:hover {
@@ -161,11 +186,32 @@ h4 { margin-bottom: var(--space-4); font-size: 15px; font-weight: 600; }
   margin-bottom: var(--space-2);
 }
 
-.avatar { width: 20px; height: 20px; border-radius: 50%; }
-.review-author { font-weight: 600; font-size: 13px; }
-.review-kind { font-size: 11px; padding: 1px 6px; background: var(--color-primary-light); color: var(--color-primary); border-radius: var(--radius-sm); }
-.review-path { font-size: 11px; font-family: var(--font-mono); color: var(--color-text-secondary); }
-.review-time { margin-left: auto; font-size: 11px; color: var(--color-text-tertiary); }
+.avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+.review-author {
+  font-weight: 600;
+  font-size: 13px;
+}
+.review-kind {
+  font-size: 11px;
+  padding: 1px 6px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-radius: var(--radius-sm);
+}
+.review-path {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+.review-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
 
 .review-body {
   font-size: 13px;

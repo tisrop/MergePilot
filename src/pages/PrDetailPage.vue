@@ -25,11 +25,28 @@ const activeTab = ref<"diff" | "reviews" | "ai">("diff");
 const inlineComments = ref<ReviewCommentPosition[]>([]);
 const reviewListRef = ref<InstanceType<typeof ReviewList> | null>(null);
 
-async function handleAddComment(path: string, startLine: number, endLine: number, side: string, body?: string) {
+async function handleAddComment(
+  path: string,
+  startLine: number,
+  endLine: number,
+  side: string,
+  body?: string,
+) {
   if (!pr.currentPr?.head_sha || !body) return;
   try {
     const sl = startLine !== endLine ? startLine : null;
-    await reviewCommentAdd(platform, owner, repo, number, pr.currentPr.head_sha, path, sl, endLine, side, body);
+    await reviewCommentAdd(
+      platform,
+      owner,
+      repo,
+      number,
+      pr.currentPr.head_sha,
+      path,
+      sl,
+      endLine,
+      side,
+      body,
+    );
     // Refresh review list after successful comment submission
     if (reviewListRef.value) {
       reviewListRef.value.refresh();
@@ -60,7 +77,21 @@ onMounted(async () => {
         </div>
         <div class="pr-meta" v-if="pr.currentPr">
           <span class="branch">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/></svg>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="6" y1="3" x2="6" y2="15" />
+              <circle cx="18" cy="6" r="3" />
+              <circle cx="6" cy="6" r="3" />
+              <circle cx="18" cy="18" r="3" />
+            </svg>
             {{ pr.currentPr.source_branch }} → {{ pr.currentPr.target_branch }}
           </span>
           <span class="author">by {{ pr.currentPr.summary.author.login }}</span>
@@ -75,25 +106,50 @@ onMounted(async () => {
 
     <div v-else-if="pr.currentPr" class="pr-detail">
       <div class="tabs">
-        <button
-          :class="{ active: activeTab === 'diff' }"
-          @click="activeTab = 'diff'"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/></svg>
+        <button :class="{ active: activeTab === 'diff' }" @click="activeTab = 'diff'">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 3v18M3 12h18" />
+          </svg>
           Diff
         </button>
-        <button
-          :class="{ active: activeTab === 'reviews' }"
-          @click="activeTab = 'reviews'"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <button :class="{ active: activeTab === 'reviews' }" @click="activeTab = 'reviews'">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
           评审意见
         </button>
-        <button
-          :class="{ active: activeTab === 'ai' }"
-          @click="activeTab = 'ai'"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 2-2 4-4 4s-4-2-4-4a4 4 0 0 1 4-4z"/><path d="M12 14c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/></svg>
+        <button :class="{ active: activeTab === 'ai' }" @click="activeTab = 'ai'">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 2a4 4 0 0 1 4 4c0 2-2 4-4 4s-4-2-4-4a4 4 0 0 1 4-4z" />
+            <path d="M12 14c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z" />
+          </svg>
           AI 评审
         </button>
       </div>
@@ -101,20 +157,10 @@ onMounted(async () => {
       <div class="tab-content">
         <div v-if="activeTab === 'diff'">
           <DiffViewer :diff="pr.diff" @add-comment="handleAddComment" />
-          <ReviewForm
-            :platform="platform"
-            :owner="owner"
-            :repo="repo"
-            :pr-number="number"
-          />
+          <ReviewForm :platform="platform" :owner="owner" :repo="repo" :pr-number="number" />
         </div>
         <div v-else-if="activeTab === 'reviews'">
-          <ReviewList
-            :platform="platform"
-            :owner="owner"
-            :repo="repo"
-            :pr-number="number"
-          />
+          <ReviewList :platform="platform" :owner="owner" :repo="repo" :pr-number="number" />
         </div>
         <div v-else-if="activeTab === 'ai'">
           <AiReviewPanel
@@ -123,7 +169,9 @@ onMounted(async () => {
             :repo="repo"
             :pr-number="number"
             :diff="pr.diff?.diff ?? ''"
-            :context="pr.currentPr ? { title: pr.currentPr.summary.title, body: pr.currentPr.body } : null"
+            :context="
+              pr.currentPr ? { title: pr.currentPr.summary.title, body: pr.currentPr.body } : null
+            "
           />
         </div>
       </div>

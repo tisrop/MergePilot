@@ -23,9 +23,7 @@ const platforms: { value: Platform; label: string }[] = [
   { value: "gitee", label: "Gitee" },
 ];
 
-const needsCustomUrl = computed(() =>
-  platform.value === "gitlab" || platform.value === "gitee"
-);
+const needsCustomUrl = computed(() => platform.value === "gitlab" || platform.value === "gitee");
 
 function getCustomUrl(): string | undefined {
   if (!needsCustomUrl.value) return undefined;
@@ -62,7 +60,21 @@ async function handleLogin() {
   <div class="login-page">
     <div class="login-card">
       <div class="login-brand">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="6" x2="6" y2="15"/></svg>
+        <svg
+          width="40"
+          height="40"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-primary)"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="18" cy="18" r="3" />
+          <circle cx="6" cy="6" r="3" />
+          <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+          <line x1="6" y1="6" x2="6" y2="15" />
+        </svg>
         <h1>MergePilot</h1>
       </div>
       <p class="subtitle">跨平台 Code Merge 工具</p>
@@ -78,7 +90,11 @@ async function handleLogin() {
           v-model="gitlabUrl"
           class="input"
           type="text"
-          :placeholder="platform === 'gitlab' ? 'https://gitlab.com（留空使用官方）' : 'https://gitee.com（留空使用官方）'"
+          :placeholder="
+            platform === 'gitlab'
+              ? 'https://gitlab.com（留空使用官方）'
+              : 'https://gitee.com（留空使用官方）'
+          "
         />
         <p class="hint">私有化部署请填写完整地址，如 https://gitlab.example.com</p>
       </div>
@@ -96,7 +112,18 @@ async function handleLogin() {
       </div>
 
       <div v-if="error" class="error-box">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <line x1="15" y1="9" x2="9" y2="15" />
+          <line x1="9" y1="9" x2="15" y2="15" />
+        </svg>
         {{ error }}
       </div>
 
@@ -107,8 +134,15 @@ async function handleLogin() {
 
       <div class="help-links">
         <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">GitHub Token</a>
-        <a href="https://gitlab.com/-/user_settings/personal_access_tokens" target="_blank" rel="noopener">GitLab Token</a>
-        <a href="https://gitee.com/profile/personal_access_tokens" target="_blank" rel="noopener">Gitee Token</a>
+        <a
+          href="https://gitlab.com/-/user_settings/personal_access_tokens"
+          target="_blank"
+          rel="noopener"
+          >GitLab Token</a
+        >
+        <a href="https://gitee.com/profile/personal_access_tokens" target="_blank" rel="noopener"
+          >Gitee Token</a
+        >
       </div>
 
       <p class="skip">
@@ -212,7 +246,9 @@ select {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .help-links {

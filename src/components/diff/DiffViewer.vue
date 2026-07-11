@@ -10,7 +10,13 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  addComment: [path: string, startLine: number, endLine: number, side: "left" | "right", body: string];
+  addComment: [
+    path: string,
+    startLine: number,
+    endLine: number,
+    side: "left" | "right",
+    body: string,
+  ];
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -47,40 +53,44 @@ const categories: Record<string, string[]> = {
   log: ["日志级别不当", "敏感信息打印", "日志缺失", "异常信息不全", "日志格式", "日志过多"],
 };
 const categoryLabels: Record<string, string> = {
-  logic: "逻辑类", security: "安全类", performance: "性能类", style: "代码风格类", log: "日志类",
+  logic: "逻辑类",
+  security: "安全类",
+  performance: "性能类",
+  style: "代码风格类",
+  log: "日志类",
 };
 
 const opinionTemplates: Record<string, string> = {
-  "边界条件": "请检查此处的边界条件是否处理完整，包括空值、越界、临界值等场景。",
-  "空值处理": "此处缺少空值判断，建议增加 null/undefined 保护。",
-  "异常处理": "建议完善异常处理逻辑，确保异常路径能被正确捕获和处理。",
-  "并发问题": "此处存在并发安全问题，建议考虑加锁或使用原子操作。",
-  "状态管理": "状态管理逻辑不够清晰，建议简化或拆分状态管理。",
-  "类型错误": "存在类型不匹配问题，建议使用更精确的类型定义。",
-  "注入攻击": "存在注入风险，建议使用参数化查询或对输入进行严格过滤。",
-  "权限控制": "缺少必要的权限校验，建议在此处增加权限检查。",
-  "敏感信息泄露": "可能泄露敏感信息，建议避免在输出中暴露内部细节。",
-  "加密问题": "加密方案不够安全，建议使用更安全的加密算法。",
-  "输入校验": "缺少输入校验，建议对用户输入进行合法性检查。",
+  边界条件: "请检查此处的边界条件是否处理完整，包括空值、越界、临界值等场景。",
+  空值处理: "此处缺少空值判断，建议增加 null/undefined 保护。",
+  异常处理: "建议完善异常处理逻辑，确保异常路径能被正确捕获和处理。",
+  并发问题: "此处存在并发安全问题，建议考虑加锁或使用原子操作。",
+  状态管理: "状态管理逻辑不够清晰，建议简化或拆分状态管理。",
+  类型错误: "存在类型不匹配问题，建议使用更精确的类型定义。",
+  注入攻击: "存在注入风险，建议使用参数化查询或对输入进行严格过滤。",
+  权限控制: "缺少必要的权限校验，建议在此处增加权限检查。",
+  敏感信息泄露: "可能泄露敏感信息，建议避免在输出中暴露内部细节。",
+  加密问题: "加密方案不够安全，建议使用更安全的加密算法。",
+  输入校验: "缺少输入校验，建议对用户输入进行合法性检查。",
   "CSRF/XSS": "存在跨站攻击风险，建议增加 CSRF Token 或 XSS 过滤。",
-  "算法复杂度": "算法复杂度过高，建议优化以提升性能。",
-  "内存泄漏": "可能存在内存泄漏风险，请检查资源释放路径。",
-  "IO阻塞": "IO 操作未异步处理，可能阻塞主线程，建议异步化。",
-  "重复计算": "存在重复计算，建议提取为变量或缓存结果。",
-  "缓存优化": "缓存策略可以进一步优化，减少不必要的缓存更新。",
-  "数据库查询": "数据库查询效率较低，建议添加索引或优化查询。",
-  "命名规范": "命名不够规范，建议遵循项目命名约定。",
-  "注释缺失": "此处逻辑较复杂，建议补充注释说明意图。",
-  "代码冗余": "代码存在冗余，建议抽取为公共方法复用。",
-  "硬编码": "存在硬编码值，建议抽取为常量或配置项。",
-  "函数过长": "函数过长，建议拆分为多个小函数。",
-  "结构混乱": "代码结构不够清晰，建议重新组织逻辑。",
-  "日志级别不当": "日志级别设置不当，建议根据场景调整。",
-  "敏感信息打印": "日志中可能包含敏感信息，建议脱敏处理。",
-  "日志缺失": "关键路径缺少日志，建议补充以方便排查。",
-  "异常信息不全": "异常信息不够详细，建议补充上下文。",
-  "日志格式": "日志格式不规范，建议统一格式。",
-  "日志过多": "日志输出过于频繁，可能影响性能。",
+  算法复杂度: "算法复杂度过高，建议优化以提升性能。",
+  内存泄漏: "可能存在内存泄漏风险，请检查资源释放路径。",
+  IO阻塞: "IO 操作未异步处理，可能阻塞主线程，建议异步化。",
+  重复计算: "存在重复计算，建议提取为变量或缓存结果。",
+  缓存优化: "缓存策略可以进一步优化，减少不必要的缓存更新。",
+  数据库查询: "数据库查询效率较低，建议添加索引或优化查询。",
+  命名规范: "命名不够规范，建议遵循项目命名约定。",
+  注释缺失: "此处逻辑较复杂，建议补充注释说明意图。",
+  代码冗余: "代码存在冗余，建议抽取为公共方法复用。",
+  硬编码: "存在硬编码值，建议抽取为常量或配置项。",
+  函数过长: "函数过长，建议拆分为多个小函数。",
+  结构混乱: "代码结构不够清晰，建议重新组织逻辑。",
+  日志级别不当: "日志级别设置不当，建议根据场景调整。",
+  敏感信息打印: "日志中可能包含敏感信息，建议脱敏处理。",
+  日志缺失: "关键路径缺少日志，建议补充以方便排查。",
+  异常信息不全: "异常信息不够详细，建议补充上下文。",
+  日志格式: "日志格式不规范，建议统一格式。",
+  日志过多: "日志输出过于频繁，可能影响性能。",
 };
 
 function getFileFromNode(node: Node): HTMLElement | null {
@@ -120,7 +130,9 @@ function getSelectionRange(): {
   const endFile = getFileFromNode(range.endContainer);
   if (!startFile || startFile !== endFile) return null;
 
-  const fileNameEl = startFile.querySelector(".d2h-file-name") || startFile.querySelector(".d2h-file-name-wrapper .d2h-file-name");
+  const fileNameEl =
+    startFile.querySelector(".d2h-file-name") ||
+    startFile.querySelector(".d2h-file-name-wrapper .d2h-file-name");
   const filePath = fileNameEl?.textContent?.trim() || "";
   if (!filePath) return null;
 
@@ -241,12 +253,7 @@ onUnmounted(() => {
 
 <template>
   <div class="diff-viewer-wrapper">
-    <div
-      v-if="diffHtml"
-      ref="containerRef"
-      class="diff2html-container"
-      v-html="diffHtml"
-    />
+    <div v-if="diffHtml" ref="containerRef" class="diff2html-container" v-html="diffHtml" />
 
     <div v-else class="diff-empty">暂无 diff 数据</div>
 
@@ -254,26 +261,45 @@ onUnmounted(() => {
       <div
         v-if="quickComment"
         class="quick-comment-popup"
-        :style="{ left: quickComment.x + 'px', top: (quickComment.y - 8) + 'px' }"
+        :style="{ left: quickComment.x + 'px', top: quickComment.y - 8 + 'px' }"
         @click.stop
         @keydown="handleQuickKeydown"
       >
         <div class="popup-header">
           <span class="file-ref">
-            {{ quickComment.path.split('/').pop() }}:L{{ quickComment.startLine
-            }}{{ quickComment.endLine !== quickComment.startLine ? '-L' + quickComment.endLine : '' }}
+            {{ quickComment.path.split("/").pop() }}:L{{ quickComment.startLine
+            }}{{
+              quickComment.endLine !== quickComment.startLine ? "-L" + quickComment.endLine : ""
+            }}
           </span>
           <button class="close-btn" @click="quickComment = null">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
         </div>
-        <pre v-if="quickComment.selectedText" class="selected-code">{{ quickComment.selectedText }}</pre>
+        <pre v-if="quickComment.selectedText" class="selected-code">{{
+          quickComment.selectedText
+        }}</pre>
 
         <div class="popup-category">
           <AppSelect
             v-model="quickCategory"
             :options="Object.entries(categoryLabels).map(([value, label]) => ({ value, label }))"
-            @update:model-value="quickSubCategory = ''; quickBody = ''"
+            @update:model-value="
+              quickSubCategory = '';
+              quickBody = '';
+            "
           />
           <AppSelect
             v-if="categories[quickCategory]"
@@ -299,7 +325,7 @@ onUnmounted(() => {
             :disabled="!quickBody.trim() || quickSubmitting"
             @click="submitQuickComment"
           >
-            {{ quickSubmitting ? '提交中...' : '提交' }}
+            {{ quickSubmitting ? "提交中..." : "提交" }}
           </button>
         </div>
       </div>
@@ -412,7 +438,9 @@ onUnmounted(() => {
   box-sizing: border-box;
   background: var(--color-surface);
   color: var(--color-text);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .quick-comment-textarea:focus {

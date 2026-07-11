@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 
-const props = withDefaults(defineProps<{
-  modelValue: string;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-  size?: "sm" | "md";
-}>(), {
-  placeholder: "请选择",
-  size: "md",
-});
+const props = withDefaults(
+  defineProps<{
+    modelValue: string;
+    options: { value: string; label: string }[];
+    placeholder?: string;
+    size?: "sm" | "md";
+  }>(),
+  {
+    placeholder: "请选择",
+    size: "md",
+  },
+);
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
@@ -126,11 +129,7 @@ onUnmounted(() => {
       </svg>
     </div>
 
-    <div
-      v-if="open"
-      ref="listRef"
-      class="dropdown-panel"
-    >
+    <div v-if="open" ref="listRef" class="dropdown-panel">
       <button
         v-for="(opt, i) in options"
         :key="opt.value"
@@ -173,7 +172,9 @@ onUnmounted(() => {
   font-family: inherit;
   cursor: pointer;
   outline: none;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
   user-select: none;
 }
 

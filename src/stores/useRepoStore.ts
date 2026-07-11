@@ -72,7 +72,10 @@ export const useRepoStore = defineStore("repo", () => {
       activeRepo.value = { owner: forkContext.value.forkOwner, repo: forkContext.value.forkRepo };
     } else if (forkContext.value.upstreamFullName && forkContext.value.upstreamOwner) {
       // Switch to upstream repo
-      activeRepo.value = { owner: forkContext.value.upstreamOwner, repo: forkContext.value.upstreamFullName.split("/").slice(1).join("/") };
+      activeRepo.value = {
+        owner: forkContext.value.upstreamOwner,
+        repo: forkContext.value.upstreamFullName.split("/").slice(1).join("/"),
+      };
     }
   }
 

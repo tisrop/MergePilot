@@ -48,12 +48,16 @@ function selectModel(model: string) {
 }
 
 function onBlurDropdown() {
-  setTimeout(() => { showModelDropdown.value = false; }, 200);
+  setTimeout(() => {
+    showModelDropdown.value = false;
+  }, 200);
 }
 
 function onKeydownModel(e: KeyboardEvent) {
   if (!showModelDropdown.value || filteredModels.value.length === 0) return;
-  if (e.key === "Escape") { showModelDropdown.value = false; }
+  if (e.key === "Escape") {
+    showModelDropdown.value = false;
+  }
   if (e.key === "Enter") {
     const first = filteredModels.value[0];
     if (first) selectModel(first);
@@ -63,14 +67,18 @@ function onKeydownModel(e: KeyboardEvent) {
 
 function highlight(text: string, query: string): string {
   if (!query) return text;
-  const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-  return text.replace(re, '<mark>$1</mark>');
+  const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  return text.replace(re, "<mark>$1</mark>");
 }
 
 const presets = [
   { name: "OpenAI", endpoint: "https://api.openai.com/v1", model: "gpt-4o" },
   { name: "DeepSeek", endpoint: "https://api.deepseek.com/v1", model: "deepseek-chat" },
-  { name: "通义千问", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  {
+    name: "通义千问",
+    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen-plus",
+  },
   { name: "Moonshot", endpoint: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
   { name: "Ollama 本地", endpoint: "http://localhost:11434/v1", model: "llama3" },
 ];
@@ -119,7 +127,6 @@ async function handleFetchModels() {
   }
 }
 
-
 async function handleSave() {
   saving.value = true;
   saveMsg.value = "";
@@ -161,12 +168,7 @@ async function handleTest() {
     <div class="presets">
       <label>预设配置</label>
       <div class="preset-btns">
-        <button
-          v-for="p in presets"
-          :key="p.name"
-          class="btn btn-sm"
-          @click="applyPreset(p)"
-        >
+        <button v-for="p in presets" :key="p.name" class="btn btn-sm" @click="applyPreset(p)">
           {{ p.name }}
         </button>
       </div>
@@ -188,7 +190,9 @@ async function handleTest() {
         v-model="newApiKey"
         class="input"
         type="password"
-        :placeholder="config.api_key_configured ? '•••••• (已设置，输入新 Key 替换)' : '输入 API Key'"
+        :placeholder="
+          config.api_key_configured ? '•••••• (已设置，输入新 Key 替换)' : '输入 API Key'
+        "
       />
       <p class="hint">API Key 经 AES-256-GCM 加密后写入配置文件，不会明文存储。</p>
     </div>
@@ -203,7 +207,10 @@ async function handleTest() {
             type="text"
             :placeholder="config.model || 'gpt-4o'"
             @focus="onFocusModel"
-            @input="modelSearch = ($event.target as HTMLInputElement).value; onInputModel()"
+            @input="
+              modelSearch = ($event.target as HTMLInputElement).value;
+              onInputModel();
+            "
             @blur="onBlurDropdown"
             @keydown="onKeydownModel"
           />
@@ -221,16 +228,14 @@ async function handleTest() {
               <span v-if="modelSearch" v-html="highlight(m, modelSearch)" />
               <span v-else>{{ m }}</span>
             </div>
-            <div v-if="filteredModels.length === 0" class="model-empty">
-              无匹配结果
-            </div>
+            <div v-if="filteredModels.length === 0" class="model-empty">无匹配结果</div>
           </div>
         </div>
         <button
           class="btn btn-sm"
           :disabled="fetchingModels"
           @click="handleFetchModels"
-          style="color: var(--color-primary); border-color: var(--color-primary);"
+          style="color: var(--color-primary); border-color: var(--color-primary)"
         >
           {{ fetchingModels ? "获取中..." : "获取模型" }}
         </button>
@@ -254,13 +259,7 @@ async function handleTest() {
 
     <div class="field">
       <label>Max Tokens</label>
-      <input
-        v-model.number="config.max_tokens"
-        class="input"
-        type="number"
-        min="256"
-        max="32768"
-      />
+      <input v-model.number="config.max_tokens" class="input" type="number" min="256" max="32768" />
     </div>
 
     <div class="actions">
@@ -272,7 +271,11 @@ async function handleTest() {
       </button>
     </div>
 
-    <div v-if="testResult !== null" class="test-result" :class="{ success: testResult, fail: !testResult }">
+    <div
+      v-if="testResult !== null"
+      class="test-result"
+      :class="{ success: testResult, fail: !testResult }"
+    >
       {{ testResult ? "✓ 连接成功" : "✗ 连接失败" }}
     </div>
 

@@ -16,9 +16,7 @@ const platforms: { value: Platform; label: string }[] = [
   { value: "gitee", label: "Gitee" },
 ];
 
-const visiblePlatforms = computed(() =>
-  platforms.filter((p) => auth.platformVisibility[p.value])
-);
+const visiblePlatforms = computed(() => platforms.filter((p) => auth.platformVisibility[p.value]));
 
 onMounted(async () => {
   for (const p of platforms) {
@@ -104,11 +102,39 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
     <!-- Navigation -->
     <nav class="nav">
       <router-link to="/pr" :class="{ active: isActive('pr') }">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M18 15V9"/><path d="M6 9v9"/><path d="M13 6h3a2 2 0 0 1 2 2v3"/></svg>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="18" cy="18" r="3" />
+          <circle cx="6" cy="6" r="3" />
+          <path d="M18 15V9" />
+          <path d="M6 9v9" />
+          <path d="M13 6h3a2 2 0 0 1 2 2v3" />
+        </svg>
         Pull Requests
       </router-link>
       <router-link to="/issue" :class="{ active: isActive('issue') }">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
         Issues
       </router-link>
     </nav>
@@ -117,8 +143,26 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
     <div class="repo-section" v-if="auth.isLoggedIn">
       <div class="repo-header">
         <h4>仓库</h4>
-        <button class="refresh-btn" title="刷新仓库列表" :disabled="repo.loading" @click="repo.refreshRepos(auth.activePlatform)">
-          <svg :class="{ spinning: repo.loading }" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+        <button
+          class="refresh-btn"
+          title="刷新仓库列表"
+          :disabled="repo.loading"
+          @click="repo.refreshRepos(auth.activePlatform)"
+        >
+          <svg
+            :class="{ spinning: repo.loading }"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
         </button>
       </div>
       <div v-if="repo.loading && repo.repos.length === 0" class="repo-list">
@@ -128,18 +172,40 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
         <template v-for="r in repo.repos" :key="r.id">
           <button
             v-if="r.fork"
-            :class="{ active: repo.activeFullName === r.parent_full_name || repo.activeFullName === r.full_name, 'is-fork': true }"
+            :class="{
+              active:
+                repo.activeFullName === r.parent_full_name || repo.activeFullName === r.full_name,
+              'is-fork': true,
+            }"
             :title="r.parent_full_name ? 'Fork from ' + r.parent_full_name : r.full_name"
             @click="selectForkRepo(r, true)"
           >
-            <svg class="fork-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/></svg>
+            <svg
+              class="fork-icon"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="6" y1="3" x2="6" y2="15" />
+              <circle cx="18" cy="6" r="3" />
+              <circle cx="6" cy="6" r="3" />
+              <circle cx="18" cy="18" r="3" />
+            </svg>
             {{ r.full_name }}
           </button>
           <button
             v-else
             :class="{ active: repo.activeFullName === r.full_name }"
             :title="r.full_name"
-            @click="selectRepo(getRepoOwner(r.full_name)); repo.setForkContext(null)"
+            @click="
+              selectRepo(getRepoOwner(r.full_name));
+              repo.setForkContext(null);
+            "
           >
             {{ r.full_name }}
           </button>
@@ -302,7 +368,9 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .spinning {

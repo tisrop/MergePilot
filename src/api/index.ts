@@ -6,13 +6,11 @@ import type {
   PrSummary,
   PrDetail,
   DiffResult,
-  CreateReviewRequest,
   Review,
   ReviewCommentPosition,
   IssueState,
   IssueSummary,
   Issue,
-  CreateIssueRequest,
   Paginated,
   RepoSummary,
   User,
@@ -26,7 +24,11 @@ import type {
 // ============================================================
 
 // ── Auth ──
-export async function authLogin(platform: Platform, token: string, customUrl?: string): Promise<User> {
+export async function authLogin(
+  platform: Platform,
+  token: string,
+  customUrl?: string,
+): Promise<User> {
   return invoke("auth_login", { platform, token, customUrl: customUrl ?? null });
 }
 
@@ -39,7 +41,10 @@ export async function authCheck(platform: Platform): Promise<User | null> {
 }
 
 // ── Repo ──
-export async function repoList(platform: Platform, page: number = 1): Promise<Paginated<RepoSummary>> {
+export async function repoList(
+  platform: Platform,
+  page: number = 1,
+): Promise<Paginated<RepoSummary>> {
   return invoke("repo_list", { platform, page });
 }
 
@@ -95,7 +100,14 @@ export async function reviewList(
   return invoke("review_list", { platform, owner, repo, prNumber });
 }
 
-export async function reviewCommentsList(platform: Platform, owner: string, repo: string, prNumber: number): Promise<PrComment[]> { return invoke("review_comments_list", { platform, owner, repo, prNumber }); }
+export async function reviewCommentsList(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<PrComment[]> {
+  return invoke("review_comments_list", { platform, owner, repo, prNumber });
+}
 
 export async function reviewCommentAdd(
   platform: Platform,
@@ -109,7 +121,18 @@ export async function reviewCommentAdd(
   side: string,
   body: string,
 ): Promise<void> {
-  return invoke("review_comment_add", { platform, owner, repo, prNumber, commitId, path, startLine, line, side, body });
+  return invoke("review_comment_add", {
+    platform,
+    owner,
+    repo,
+    prNumber,
+    commitId,
+    path,
+    startLine,
+    line,
+    side,
+    body,
+  });
 }
 
 // ── Issue ──

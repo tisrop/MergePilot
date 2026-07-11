@@ -28,9 +28,13 @@ export const useAuthStore = defineStore("auth", () => {
     ...defaultVisibility,
     ...JSON.parse(localStorage.getItem("mergepilot:platformVisibility") ?? "null"),
   });
-  watch(platformVisibility, (val) => {
-    localStorage.setItem("mergepilot:platformVisibility", JSON.stringify(val));
-  }, { deep: true });
+  watch(
+    platformVisibility,
+    (val) => {
+      localStorage.setItem("mergepilot:platformVisibility", JSON.stringify(val));
+    },
+    { deep: true },
+  );
 
   const activePlatform = ref<Platform>("github");
 
@@ -70,8 +74,9 @@ export const useAuthStore = defineStore("auth", () => {
     }
     platformVisibility.value = { ...platformVisibility.value, [platform]: visible };
     if (!visible && activePlatform.value === platform) {
-      const firstVisible = (Object.entries(platformVisibility.value) as [Platform, boolean][])
-        .find(([, v]) => v)?.[0];
+      const firstVisible = (Object.entries(platformVisibility.value) as [Platform, boolean][]).find(
+        ([, v]) => v,
+      )?.[0];
       if (firstVisible) activePlatform.value = firstVisible;
     }
   }
