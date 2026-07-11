@@ -28,8 +28,13 @@ const platformList: { value: Platform; label: string }[] = [
             <input
               type="checkbox"
               :checked="auth.platformVisibility[p.value]"
-              :disabled="auth.platformVisibility[p.value] && Object.values(auth.platformVisibility).filter(Boolean).length <= 1"
-              @change="auth.setPlatformVisibility(p.value, ($event.target as HTMLInputElement).checked)"
+              :disabled="
+                auth.platformVisibility[p.value] &&
+                Object.values(auth.platformVisibility).filter(Boolean).length <= 1
+              "
+              @change="
+                auth.setPlatformVisibility(p.value, ($event.target as HTMLInputElement).checked)
+              "
             />
             <span class="toggle-slider" />
           </label>

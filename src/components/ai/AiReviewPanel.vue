@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from "vue";
-import type { Platform, AiReviewFocus, AiReviewResult, PrContext, AiSuggestionAction } from "@/types";
+import type {
+  Platform,
+  AiReviewFocus,
+  AiReviewResult,
+  PrContext,
+  AiSuggestionAction,
+} from "@/types";
 import { aiReview, aiReviewStream } from "@/api";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import AiSuggestionCard from "./AiSuggestionCard.vue";
@@ -131,7 +137,18 @@ function onAction(index: number, action: AiSuggestionAction) {
       </label>
 
       <button class="btn btn-primary" :disabled="loading || !diff" @click="startReview">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
         {{ loading ? "评审中..." : "开始 AI 评审" }}
       </button>
     </div>
@@ -164,7 +181,19 @@ function onAction(index: number, action: AiSuggestionAction) {
     <div v-if="result" class="ai-result">
       <div class="summary-card">
         <h4>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 2-2 4-4 4s-4-2-4-4a4 4 0 0 1 4-4z"/><path d="M12 14c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/></svg>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 2a4 4 0 0 1 4 4c0 2-2 4-4 4s-4-2-4-4a4 4 0 0 1 4-4z" />
+            <path d="M12 14c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z" />
+          </svg>
           AI 评审总览
         </h4>
         <p>{{ result.summary }}</p>
@@ -181,7 +210,19 @@ function onAction(index: number, action: AiSuggestionAction) {
       </div>
 
       <div v-else class="no-issues">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
         <p>AI 未发现明显问题</p>
       </div>
     </div>
@@ -210,8 +251,6 @@ function onAction(index: number, action: AiSuggestionAction) {
   gap: var(--space-1);
   font-size: 13px;
 }
-
-
 
 .stream-toggle {
   display: flex;
@@ -242,7 +281,9 @@ function onAction(index: number, action: AiSuggestionAction) {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .stream-preview {
@@ -272,8 +313,13 @@ function onAction(index: number, action: AiSuggestionAction) {
 }
 
 @keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .stream-content {

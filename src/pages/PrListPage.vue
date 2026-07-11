@@ -32,10 +32,23 @@ onMounted(async () => {
   await fetchPrs();
 });
 
-watch(() => repo.activeRepo, () => fetchPrs());
-watch(() => pr.filters, () => fetchPrs(), { deep: true });
-watch(() => pr.perPage, () => fetchPrs());
-watch(() => route.query._t, () => fetchPrs());
+watch(
+  () => repo.activeRepo,
+  () => fetchPrs(),
+);
+watch(
+  () => pr.filters,
+  () => fetchPrs(),
+  { deep: true },
+);
+watch(
+  () => pr.perPage,
+  () => fetchPrs(),
+);
+watch(
+  () => route.query._t,
+  () => fetchPrs(),
+);
 
 function onSelectPr(prNumber: number) {
   if (!repo.activeRepo) return;
@@ -59,10 +72,22 @@ function onSelectPr(prNumber: number) {
         <span v-if="repo.activeFullName" class="repo-name">{{ repo.activeFullName }}</span>
       </div>
       <div v-if="repo.forkContext" class="fork-banner">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <line x1="6" y1="3" x2="6" y2="15" />
+          <circle cx="18" cy="6" r="3" />
+          <circle cx="6" cy="6" r="3" />
+          <circle cx="18" cy="18" r="3" />
+        </svg>
         <template v-if="!repo.hasUpstreamInfo">
-          这是一个 Fork 仓库，但未获取到上游仓库信息
-          （请确认 Token 有足够的仓库权限，或检查终端日志中的 parent 数据）
+          这是一个 Fork 仓库，但未获取到上游仓库信息 （请确认 Token
+          有足够的仓库权限，或检查终端日志中的 parent 数据）
         </template>
         <template v-else-if="repo.viewingUpstream">
           正在查看上游仓库 <strong>{{ repo.forkContext.upstreamFullName }}</strong> 的 PR
@@ -70,7 +95,9 @@ function onSelectPr(prNumber: number) {
         </template>
         <template v-else>
           正在查看本仓库 PR
-          <button class="fork-switch" @click="switchToFork">查看上游 {{ repo.forkContext.upstreamFullName }}</button>
+          <button class="fork-switch" @click="switchToFork">
+            查看上游 {{ repo.forkContext.upstreamFullName }}
+          </button>
         </template>
       </div>
       <PrFilterBar />
@@ -83,21 +110,62 @@ function onSelectPr(prNumber: number) {
 
     <div v-else-if="pr.error" class="error-box">
       <p class="error-title">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <line x1="15" y1="9" x2="9" y2="15" />
+          <line x1="9" y1="9" x2="15" y2="15" />
+        </svg>
         获取 PR 列表失败
       </p>
       <p class="error-msg">{{ pr.error }}</p>
     </div>
 
     <div v-else-if="!repo.activeRepo" class="empty-state">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13 12H3"/></svg>
+      <svg
+        width="32"
+        height="32"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13 12H3" />
+      </svg>
       <p>请先在左侧选择一个仓库</p>
     </div>
 
     <div v-else-if="pr.list.length === 0" class="empty-state">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M18 15V9"/><path d="M6 9v9"/><path d="M13 6h3a2 2 0 0 1 2 2v3"/></svg>
+      <svg
+        width="32"
+        height="32"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <circle cx="18" cy="18" r="3" />
+        <circle cx="6" cy="6" r="3" />
+        <path d="M18 15V9" />
+        <path d="M6 9v9" />
+        <path d="M13 6h3a2 2 0 0 1 2 2v3" />
+      </svg>
       <p>暂无 Pull Request</p>
-      <p v-if="repo.activeFullName" class="empty-repo text-secondary font-mono">当前仓库：{{ repo.activeFullName }}</p>
+      <p v-if="repo.activeFullName" class="empty-repo text-secondary font-mono">
+        当前仓库：{{ repo.activeFullName }}
+      </p>
     </div>
 
     <div v-else class="pr-list">
@@ -111,13 +179,39 @@ function onSelectPr(prNumber: number) {
 
     <div v-if="pr.list.length > 0 && pr.totalPages > 1" class="pagination">
       <button class="btn btn-sm" :disabled="pr.filters.page <= 1" @click="pr.prevPage()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
         上一页
       </button>
       <span class="page-info">{{ pr.filters.page }} / {{ pr.totalPages }}</span>
-      <button class="btn btn-sm" :disabled="pr.filters.page >= pr.totalPages" @click="pr.nextPage()">
+      <button
+        class="btn btn-sm"
+        :disabled="pr.filters.page >= pr.totalPages"
+        @click="pr.nextPage()"
+      >
         下一页
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
       </button>
       <AppSelect
         size="sm"
@@ -256,6 +350,4 @@ function onSelectPr(prNumber: number) {
   font-size: 13px;
   color: var(--color-text-secondary);
 }
-
-
 </style>

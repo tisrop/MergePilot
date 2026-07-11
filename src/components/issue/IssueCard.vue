@@ -17,11 +17,7 @@ defineProps<{
       <span>{{ issue.author.login }}</span>
       <span>{{ new Date(issue.created_at).toLocaleDateString() }}</span>
       <span v-if="issue.labels.length" class="issue-labels">
-        <span
-          v-for="label in issue.labels"
-          :key="label"
-          class="label-tag"
-        >
+        <span v-for="label in issue.labels" :key="label" class="label-tag">
           {{ label }}
         </span>
       </span>
@@ -35,7 +31,9 @@ defineProps<{
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  transition: box-shadow var(--transition-base), border-color var(--transition-base);
+  transition:
+    box-shadow var(--transition-base),
+    border-color var(--transition-base);
 }
 
 .issue-card:hover {

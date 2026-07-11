@@ -35,11 +35,7 @@ export const usePrStore = defineStore("pr", () => {
     filters.value.page = 1;
   }
 
-  async function fetchPrList(
-    platform: Platform,
-    owner: string,
-    repo: string,
-  ) {
+  async function fetchPrList(platform: Platform, owner: string, repo: string) {
     loading.value = true;
     error.value = null;
     try {
@@ -62,12 +58,7 @@ export const usePrStore = defineStore("pr", () => {
     }
   }
 
-  async function fetchPrDetail(
-    platform: Platform,
-    owner: string,
-    repo: string,
-    number: number,
-  ) {
+  async function fetchPrDetail(platform: Platform, owner: string, repo: string, number: number) {
     loading.value = true;
     try {
       currentPr.value = await prDetail(platform, owner, repo, number);
@@ -76,12 +67,7 @@ export const usePrStore = defineStore("pr", () => {
     }
   }
 
-  async function fetchPrDiff(
-    platform: Platform,
-    owner: string,
-    repo: string,
-    number: number,
-  ) {
+  async function fetchPrDiff(platform: Platform, owner: string, repo: string, number: number) {
     loading.value = true;
     try {
       diff.value = await prDiff(platform, owner, repo, number);

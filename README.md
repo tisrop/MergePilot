@@ -64,6 +64,7 @@
 | 桌面框架 | Tauri 2 |
 | 前端 | Vue 3、Composition API、Pinia、Vue Router |
 | 前端构建 | TypeScript、Vite 6 |
+| 代码规范 | ESLint + Prettier（平面配置） |
 | 后端 | Rust 2021、Tokio、Reqwest |
 | 平台抽象 | `GitPlatform` trait + GitHub / GitLab / Gitee Adapter |
 | Diff 渲染 | diff2html、highlight.js |
@@ -192,6 +193,9 @@ mergepilot/
 │   ├── tests/                  # WireMock 集成测试
 │   ├── Cargo.toml
 │   └── tauri.conf.json
+├── eslint.config.js       # ESLint 平面配置
+├── .prettierrc            # Prettier 配置
+├── .prettierignore        # Prettier 忽略规则
 ├── package.json
 ├── vite.config.ts
 └── README.md
@@ -202,6 +206,11 @@ mergepilot/
 ```bash
 # 前端类型检查并构建
 npm run build
+
+# 代码检查与格式化
+npm run lint              # ESLint 检查
+npm run format            # Prettier 格式检查
+npm run format:fix        # Prettier 格式化
 
 # Rust 测试
 cd src-tauri

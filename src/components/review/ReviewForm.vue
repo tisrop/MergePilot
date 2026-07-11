@@ -62,12 +62,7 @@ async function handleSubmit() {
       </button>
     </div>
 
-    <textarea
-      v-model="body"
-      class="input"
-      placeholder="输入你的评审意见..."
-      rows="5"
-    />
+    <textarea v-model="body" class="input" placeholder="输入你的评审意见..." rows="5" />
 
     <div class="form-actions">
       <button class="btn btn-primary" :disabled="submitting || !body.trim()" @click="handleSubmit">
@@ -135,6 +130,13 @@ textarea {
   margin-top: var(--space-3);
 }
 
-.success-msg { color: var(--color-success); font-size: 13px; font-weight: 500; }
-.error-msg { color: var(--color-danger); font-size: 13px; }
+.success-msg {
+  color: var(--color-success);
+  font-size: 13px;
+  font-weight: 500;
+}
+.error-msg {
+  color: var(--color-danger);
+  font-size: 13px;
+}
 </style>

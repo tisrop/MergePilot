@@ -18,9 +18,9 @@ defineProps<{
       'line-context': line.type === 'context',
     }"
   >
-    <span class="line-num-old">{{ line.oldNumber ?? '' }}</span>
-    <span class="line-num-new">{{ line.newNumber ?? '' }}</span>
-    <span class="line-type">{{ line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ' }}</span>
+    <span class="line-num-old">{{ line.oldNumber ?? "" }}</span>
+    <span class="line-num-new">{{ line.newNumber ?? "" }}</span>
+    <span class="line-type">{{ line.type === "add" ? "+" : line.type === "del" ? "-" : " " }}</span>
     <span class="line-content" v-text="line.content" />
   </div>
 </template>
