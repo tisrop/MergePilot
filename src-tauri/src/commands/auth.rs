@@ -94,10 +94,7 @@ pub async fn auth_has_any_token(state: State<'_, AppState>) -> Result<bool, Stri
 }
 
 #[tauri::command]
-pub async fn auth_has_token(
-    state: State<'_, AppState>,
-    platform: String,
-) -> Result<bool, String> {
+pub async fn auth_has_token(state: State<'_, AppState>, platform: String) -> Result<bool, String> {
     Ok(state
         .token_vault
         .get_token(&platform)

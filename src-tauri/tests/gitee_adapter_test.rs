@@ -36,18 +36,23 @@ async fn test_gitee_list_prs_open() {
         .and(path("/api/v5/repos/octocat/hello-world/pulls"))
         .and(query_param("state", "open"))
         .and(query_param("access_token", "test-token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            {
-                "number": 42,
-                "title": "Fix bug",
-                "state": "open",
-                "merged_at": null,
-                "created_at": "2025-01-01T00:00:00Z",
-                "updated_at": "2025-01-02T00:00:00Z",
-                "user": { "id": 1, "login": "dev1", "name": "", "avatar_url": "" },
-                "labels": [{ "name": "bug" }]
-            }
-        ])))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("total_count", "1")
+                .append_header("total_page", "1")
+                .set_body_json(serde_json::json!([
+                    {
+                        "number": 42,
+                        "title": "Fix bug",
+                        "state": "open",
+                        "merged_at": null,
+                        "created_at": "2025-01-01T00:00:00Z",
+                        "updated_at": "2025-01-02T00:00:00Z",
+                        "user": { "id": 1, "login": "dev1", "name": "", "avatar_url": "" },
+                        "labels": [{ "name": "bug" }]
+                    }
+                ])),
+        )
         .mount(&mock_server)
         .await;
 
@@ -69,6 +74,59 @@ async fn test_gitee_list_prs_open() {
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].number, 42);
     assert_eq!(result.items[0].title, "Fix bug");
+    assert_eq!(result.total_count, 1);
+    assert_eq!(result.total_pages, 1);
+}
+
+#[tokio::test]
+async fn test_gitee_list_prs_pagination_headers() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls"))
+        .and(query_param("state", "open"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("total_count", "25")
+                .append_header("total_page", "2")
+                .append_header(
+                    "link",
+                    "<https://gitee.com/api/v5/repos/octocat/hello-world/pulls?page=2&per_page=20&state=open>; rel='next', <https://gitee.com/api/v5/repos/octocat/hello-world/pulls?page=2&per_page=20&state=open>; rel='last'",
+                )
+                .set_body_json(serde_json::json!([
+                    {
+                        "number": 42,
+                        "title": "Fix bug",
+                        "state": "open",
+                        "merged_at": null,
+                        "created_at": "2025-01-01T00:00:00Z",
+                        "updated_at": "2025-01-02T00:00:00Z",
+                        "user": { "id": 1, "login": "dev1", "name": "", "avatar_url": "" },
+                        "labels": []
+                    }
+                ])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let client = HttpClient::new();
+    let adapter = GiteeAdapter::new(client, "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+
+    let result = adapter
+        .list_pull_requests(
+            "octocat",
+            "hello-world",
+            &mergepilot_lib::models::PrState::Open,
+            1,
+            20,
+        )
+        .await
+        .expect("should list PRs");
+
+    assert_eq!(result.total_count, 25);
+    assert_eq!(result.total_pages, 2);
 }
 
 #[tokio::test]
@@ -79,28 +137,33 @@ async fn test_gitee_list_prs_merged() {
         .and(path("/api/v5/repos/octocat/hello-world/pulls"))
         .and(query_param("state", "merged"))
         .and(query_param("access_token", "test-token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            {
-                "number": 100,
-                "title": "Merged feature",
-                "state": "merged",
-                "merged_at": "2025-01-03T00:00:00Z",
-                "created_at": "2025-01-01T00:00:00Z",
-                "updated_at": "2025-01-03T00:00:00Z",
-                "user": { "id": 1, "login": "dev1", "name": "", "avatar_url": "" },
-                "labels": []
-            },
-            {
-                "number": 101,
-                "title": "Another merge",
-                "state": "merged",
-                "merged_at": "2025-01-04T00:00:00Z",
-                "created_at": "2025-01-02T00:00:00Z",
-                "updated_at": "2025-01-04T00:00:00Z",
-                "user": { "id": 2, "login": "dev2", "name": "", "avatar_url": "" },
-                "labels": [{ "name": "enhancement" }]
-            }
-        ])))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("total_count", "2")
+                .append_header("total_page", "1")
+                .set_body_json(serde_json::json!([
+                    {
+                        "number": 100,
+                        "title": "Merged feature",
+                        "state": "merged",
+                        "merged_at": "2025-01-03T00:00:00Z",
+                        "created_at": "2025-01-01T00:00:00Z",
+                        "updated_at": "2025-01-03T00:00:00Z",
+                        "user": { "id": 1, "login": "dev1", "name": "", "avatar_url": "" },
+                        "labels": []
+                    },
+                    {
+                        "number": 101,
+                        "title": "Another merge",
+                        "state": "merged",
+                        "merged_at": "2025-01-04T00:00:00Z",
+                        "created_at": "2025-01-02T00:00:00Z",
+                        "updated_at": "2025-01-04T00:00:00Z",
+                        "user": { "id": 2, "login": "dev2", "name": "", "avatar_url": "" },
+                        "labels": [{ "name": "enhancement" }]
+                    }
+                ])),
+        )
         .mount(&mock_server)
         .await;
 
@@ -131,6 +194,8 @@ async fn test_gitee_list_prs_merged() {
         result.items[1].state,
         mergepilot_lib::models::PrState::Merged
     ));
+    assert_eq!(result.total_count, 2);
+    assert_eq!(result.total_pages, 1);
 }
 
 #[tokio::test]

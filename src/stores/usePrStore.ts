@@ -17,6 +17,12 @@ export const usePrStore = defineStore("pr", () => {
     state: "open",
     page: 1,
   });
+  const stateCounts = ref<Record<PrState, number>>({
+    open: 0,
+    closed: 0,
+    merged: 0,
+    all: 0,
+  });
 
   function nextPage() {
     if (filters.value.page < totalPages.value) {
@@ -81,6 +87,18 @@ export const usePrStore = defineStore("pr", () => {
     filters.value.page = 1;
   }
 
+  async function fetchStateCounts(platform: Platform, owner: string, repo: string) {
+    const states: PrState[] = ["open", "closed", "merged", "all"];
+    const results = await Promise.allSettled(
+      states.map((s) => prList(platform, owner, repo, s, 1, 1)),
+    );
+    results.forEach((result, i) => {
+      if (result.status === "fulfilled") {
+        stateCounts.value[states[i]] = result.value.total_count;
+      }
+    });
+  }
+
   return {
     list,
     currentPr,
@@ -94,9 +112,11 @@ export const usePrStore = defineStore("pr", () => {
     nextPage,
     prevPage,
     setPerPage,
+    stateCounts,
     fetchPrList,
     fetchPrDetail,
     fetchPrDiff,
+    fetchStateCounts,
     setFilter,
   };
 });
