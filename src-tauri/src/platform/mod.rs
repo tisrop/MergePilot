@@ -78,6 +78,32 @@ pub trait GitPlatform: Send + Sync {
         pr_number: u64,
     ) -> Result<Vec<PrComment>, AppError>;
 
+    // ── Merge / Close / Reopen ──
+    async fn merge_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        strategy: &MergeStrategy,
+        commit_title: Option<String>,
+        commit_message: Option<String>,
+        sha: &str,
+    ) -> Result<PrMergeResult, AppError>;
+
+    async fn close_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrState, AppError>;
+
+    async fn reopen_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrState, AppError>;
+
     // ── Issue ──
     async fn list_issues(
         &self,
@@ -95,4 +121,7 @@ pub trait GitPlatform: Send + Sync {
         body: &str,
         labels: &[String],
     ) -> Result<Issue, AppError>;
+
+    async fn close_issue(&self, owner: &str, repo: &str, issue_number: u64)
+        -> Result<(), AppError>;
 }

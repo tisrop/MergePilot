@@ -122,6 +122,50 @@ impl GitHubAdapter {
         Ok(resp.json().await?)
     }
 
+    async fn put_json(&self, url: &str, body: &Value) -> Result<Value, AppError> {
+        let resp = self
+            .client
+            .put(url)
+            .header("Authorization", &self.auth_header())
+            .header("User-Agent", "mergepilot")
+            .header("Accept", "application/vnd.github.v3+json")
+            .json(body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let error_body = resp.text().await.unwrap_or_default();
+            return Err(AppError::Api(format!(
+                "GitHub API {} ({}): {}",
+                status, url, error_body
+            )));
+        }
+        Ok(resp.json().await?)
+    }
+
+    async fn patch_json(&self, url: &str, body: &Value) -> Result<Value, AppError> {
+        // PATCH via reqwest::Client
+        let resp = self
+            .client
+            .raw_client()
+            .patch(url)
+            .header("Authorization", &self.auth_header())
+            .header("User-Agent", "mergepilot")
+            .header("Accept", "application/vnd.github.v3+json")
+            .json(body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let error_body = resp.text().await.unwrap_or_default();
+            return Err(AppError::Api(format!(
+                "GitHub API {} ({}): {}",
+                status, url, error_body
+            )));
+        }
+        Ok(resp.json().await?)
+    }
+
     fn map_user(json: &Value) -> User {
         User {
             id: json["id"].clone(),
@@ -599,5 +643,95 @@ impl GitPlatform for GitHubAdapter {
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
         })
+    }
+
+    async fn merge_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        strategy: &MergeStrategy,
+        commit_title: Option<String>,
+        commit_message: Option<String>,
+        sha: &str,
+    ) -> Result<PrMergeResult, AppError> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/merge",
+            self.base_url, owner, repo, pr_number
+        );
+        let method = match strategy {
+            MergeStrategy::Merge => "merge",
+            MergeStrategy::Squash => "squash",
+            MergeStrategy::Rebase => "rebase",
+        };
+        let mut payload = serde_json::json!({
+            "merge_method": method,
+            "sha": sha,
+        });
+        if let Some(t) = commit_title {
+            payload["commit_title"] = serde_json::Value::String(t);
+        }
+        if let Some(m) = commit_message {
+            payload["commit_message"] = serde_json::Value::String(m);
+        }
+        let json = self.put_json(&url, &payload).await?;
+        Ok(PrMergeResult {
+            merged: json["merged"].as_bool().unwrap_or(false),
+            sha: json["sha"].as_str().unwrap_or("").to_string(),
+            message: json["message"].as_str().unwrap_or("").to_string(),
+        })
+    }
+
+    async fn close_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrState, AppError> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
+        let payload = serde_json::json!({ "state": "closed" });
+        let json = self.patch_json(&url, &payload).await?;
+        let state = Self::map_pr_state(
+            json["state"].as_str().unwrap_or(""),
+            !json["merged_at"].is_null(),
+        );
+        Ok(state)
+    }
+
+    async fn reopen_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrState, AppError> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            self.base_url, owner, repo, pr_number
+        );
+        let payload = serde_json::json!({ "state": "open" });
+        let json = self.patch_json(&url, &payload).await?;
+        let state = Self::map_pr_state(
+            json["state"].as_str().unwrap_or(""),
+            !json["merged_at"].is_null(),
+        );
+        Ok(state)
+    }
+
+    async fn close_issue(
+        &self,
+        owner: &str,
+        repo: &str,
+        issue_number: u64,
+    ) -> Result<(), AppError> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            self.base_url, owner, repo, issue_number
+        );
+        let payload = serde_json::json!({ "state": "closed" });
+        self.patch_json(&url, &payload).await?;
+        Ok(())
     }
 }

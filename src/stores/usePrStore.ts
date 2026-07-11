@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { Platform, PrSummary, PrDetail, DiffResult, PrState } from "@/types";
-import { prList, prDetail, prDiff } from "@/api";
+import type { Platform, PrSummary, PrDetail, DiffResult, PrState, MergeStrategy } from "@/types";
+import { prList, prDetail, prDiff, prMerge, prClose, prReopen } from "@/api";
 
 const PAGE_SIZES = [10, 20, 50, 100] as const;
 
@@ -99,6 +99,58 @@ export const usePrStore = defineStore("pr", () => {
     });
   }
 
+  async function mergePr(
+    platform: Platform,
+    owner: string,
+    repo: string,
+    number: number,
+    strategy: MergeStrategy,
+    commitTitle?: string,
+    commitMessage?: string,
+    closeIssues?: boolean,
+  ) {
+    error.value = null;
+    try {
+      const result = await prMerge(
+        platform,
+        owner,
+        repo,
+        number,
+        strategy,
+        commitTitle,
+        commitMessage,
+        closeIssues,
+      );
+      currentPr.value = await prDetail(platform, owner, repo, number);
+      return result;
+    } catch (e) {
+      error.value = typeof e === "string" ? e : String(e);
+      throw e;
+    }
+  }
+
+  async function closePr(platform: Platform, owner: string, repo: string, number: number) {
+    error.value = null;
+    try {
+      await prClose(platform, owner, repo, number);
+      currentPr.value = await prDetail(platform, owner, repo, number);
+    } catch (e) {
+      error.value = typeof e === "string" ? e : String(e);
+      throw e;
+    }
+  }
+
+  async function reopenPr(platform: Platform, owner: string, repo: string, number: number) {
+    error.value = null;
+    try {
+      await prReopen(platform, owner, repo, number);
+      currentPr.value = await prDetail(platform, owner, repo, number);
+    } catch (e) {
+      error.value = typeof e === "string" ? e : String(e);
+      throw e;
+    }
+  }
+
   return {
     list,
     currentPr,
@@ -118,5 +170,8 @@ export const usePrStore = defineStore("pr", () => {
     fetchPrDiff,
     fetchStateCounts,
     setFilter,
+    mergePr,
+    closePr,
+    reopenPr,
   };
 });

@@ -35,6 +35,14 @@ export interface PrDetail {
   head_sha: string;
 }
 
+export type MergeStrategy = "merge" | "squash" | "rebase";
+
+export interface MergeResult {
+  merged: boolean;
+  sha: string;
+  message: string;
+}
+
 export interface PrFile {
   filename: string;
   status: FileStatus;

@@ -176,6 +176,30 @@ button {
   border-color: var(--color-success);
 }
 
+.btn-danger {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: transparent;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--color-danger);
+  color: #fff;
+  border-color: var(--color-danger);
+}
+
+.btn-reopen {
+  color: var(--color-success);
+  border-color: var(--color-success);
+  background: transparent;
+}
+
+.btn-reopen:hover:not(:disabled) {
+  background: var(--color-success);
+  color: #fff;
+  border-color: var(--color-success);
+}
+
 /* ── Form elements ── */
 
 .input {

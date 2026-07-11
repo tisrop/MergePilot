@@ -61,6 +61,9 @@ pub fn run() {
             pr::pr_list,
             pr::pr_detail,
             pr::pr_diff,
+            pr::pr_merge,
+            pr::pr_close,
+            pr::pr_reopen,
             // Review
             review::review_submit,
             review::review_comment_add,
