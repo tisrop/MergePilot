@@ -5,6 +5,9 @@ import PrDetailPage from "@/pages/PrDetailPage.vue";
 import IssueListPage from "@/pages/IssueListPage.vue";
 import IssueNewPage from "@/pages/IssueNewPage.vue";
 import SettingsPage from "@/pages/SettingsPage.vue";
+import { useAuthStore } from "@/stores/useAuthStore";
+import { authHasAnyToken, authHasToken } from "@/api";
+import type { Platform } from "@/types";
 
 const routes = [
   {
@@ -51,6 +54,21 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+
+router.beforeEach(async (to, _from, next) => {
+  const store = useAuthStore();
+  const platform: Platform | undefined =
+    (to.params.platform as Platform | undefined) ?? store.activePlatform;
+  const hasToken = platform ? await authHasToken(platform) : await authHasAnyToken();
+
+  if (to.path === "/login" && hasToken && store.isLoggedIn) {
+    next("/pr");
+  } else if (to.meta.requiresAuth && !hasToken) {
+    next("/login");
+  } else {
+    next();
+  }
 });
 
 export default router;

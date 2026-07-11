@@ -28,14 +28,13 @@ impl GiteeAdapter {
         self
     }
 
-    /// Parse the `Link` header to extract the last page number (same format as GitHub).
     fn parse_last_page_gitee(link: Option<&str>, fallback: u32) -> u32 {
         let Some(header) = link else {
             return fallback;
         };
         for part in header.split(',') {
             let part = part.trim();
-            if part.contains(r#"rel="last""#) {
+            if part.contains("rel=\"last\"") || part.contains("rel='last'") {
                 if let Some(url_start) = part.find('<') {
                     let url_end = part[url_start..]
                         .find('>')
@@ -197,8 +196,20 @@ impl GitPlatform for GiteeAdapter {
             .send()
             .await?;
 
+        let header_total_count = resp
+            .headers()
+            .get("total_count")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u32>().ok());
+        let header_total_page = resp
+            .headers()
+            .get("total_page")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u32>().ok());
+
         let link_header = resp.headers().get("link").and_then(|v| v.to_str().ok());
-        let last_page = Self::parse_last_page_gitee(link_header, page);
+        let last_page =
+            header_total_page.unwrap_or_else(|| Self::parse_last_page_gitee(link_header, page));
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -253,11 +264,21 @@ impl GitPlatform for GiteeAdapter {
             _ => all_prs,
         };
 
+        let total_count = if let Some(tc) = header_total_count {
+            tc
+        } else if prs.is_empty() {
+            0
+        } else if (prs.len() as u32) < per_page || page >= last_page {
+            (page - 1) * per_page + prs.len() as u32
+        } else {
+            last_page * per_page
+        };
+
         Ok(Paginated {
             items: prs,
             page,
             total_pages: last_page,
-            total_count: 0,
+            total_count,
         })
     }
 

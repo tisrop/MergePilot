@@ -40,6 +40,14 @@ export async function authCheck(platform: Platform): Promise<User | null> {
   return invoke("auth_check", { platform });
 }
 
+export async function authHasAnyToken(): Promise<boolean> {
+  return invoke("auth_has_any_token");
+}
+
+export async function authHasToken(platform: Platform): Promise<boolean> {
+  return invoke("auth_has_token", { platform });
+}
+
 // ── Repo ──
 export async function repoList(
   platform: Platform,

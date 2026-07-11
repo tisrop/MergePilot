@@ -17,20 +17,28 @@ const pr = usePrStore();
 
 async function fetchPrs() {
   if (!auth.isLoggedIn || !repo.activeRepo) return;
-  await pr.fetchPrList(auth.activePlatform, repo.activeRepo.owner, repo.activeRepo.repo);
+  const { owner, repo: repoName } = repo.activeRepo;
+  const platform = auth.activePlatform;
+  await pr.fetchStateCounts(platform, owner, repoName);
+  await pr.fetchPrList(platform, owner, repoName);
 }
 
 function switchToFork() {
   repo.switchForkView();
 }
 
-onMounted(async () => {
-  if (!auth.isLoggedIn) {
-    router.push("/login");
-    return;
+onMounted(() => {
+  if (auth.isLoggedIn) {
+    fetchPrs();
   }
-  await fetchPrs();
 });
+
+watch(
+  () => auth.isLoggedIn,
+  (loggedIn) => {
+    if (loggedIn) fetchPrs();
+  },
+);
 
 watch(
   () => repo.activeRepo,
@@ -103,7 +111,6 @@ function onSelectPr(prNumber: number) {
       <PrFilterBar />
     </template>
 
-    <!-- Loading skeleton -->
     <div v-if="pr.loading" class="loading-skeleton">
       <div class="skeleton skeleton-card" v-for="i in 5" :key="i" />
     </div>
@@ -269,7 +276,6 @@ function onSelectPr(prNumber: number) {
   background: var(--color-primary-light);
 }
 
-/* Loading skeleton */
 .loading-skeleton {
   display: flex;
   flex-direction: column;
@@ -281,7 +287,6 @@ function onSelectPr(prNumber: number) {
   border-radius: var(--radius-lg);
 }
 
-/* Empty state */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -305,7 +310,6 @@ function onSelectPr(prNumber: number) {
   font-size: 11px;
 }
 
-/* Error box */
 .error-box {
   margin: var(--space-3) 0;
   padding: var(--space-3) var(--space-4);

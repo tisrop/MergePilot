@@ -22,6 +22,7 @@ const states: { value: PrState; label: string }[] = [
         @click="pr.setFilter(s.value)"
       >
         {{ s.label }}
+        <span v-if="s.value !== 'all'" class="count">{{ pr.stateCounts[s.value] }}</span>
       </button>
     </div>
   </div>
@@ -60,5 +61,26 @@ const states: { value: PrState; label: string }[] = [
 .filters button:hover:not(.active) {
   background: var(--color-surface-hover);
   color: var(--color-text);
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 5px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  background: var(--color-surface-hover);
+  color: var(--color-text-secondary);
+}
+
+.active .count {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
 }
 </style>

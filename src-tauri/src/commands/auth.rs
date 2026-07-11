@@ -78,6 +78,31 @@ pub async fn auth_logout(state: State<'_, AppState>, platform: String) -> Result
 }
 
 #[tauri::command]
+pub async fn auth_has_any_token(state: State<'_, AppState>) -> Result<bool, String> {
+    let platforms = ["github", "gitlab", "gitee"];
+    for platform in platforms {
+        if state
+            .token_vault
+            .get_token(platform)
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[tauri::command]
+pub async fn auth_has_token(state: State<'_, AppState>, platform: String) -> Result<bool, String> {
+    Ok(state
+        .token_vault
+        .get_token(&platform)
+        .map_err(|e| e.to_string())?
+        .is_some())
+}
+
+#[tauri::command]
 pub async fn auth_check(
     state: State<'_, AppState>,
     platform: String,

@@ -53,6 +53,8 @@ pub fn run() {
             auth::auth_login,
             auth::auth_logout,
             auth::auth_check,
+            auth::auth_has_any_token,
+            auth::auth_has_token,
             // Repo
             auth::repo_list,
             // PR

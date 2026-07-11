@@ -160,6 +160,13 @@ impl GitPlatform for GitLabAdapter {
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(page);
 
+        let total_count = resp
+            .headers()
+            .get("x-total")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(total_pages * per_page);
+
         let items: Vec<Value> = resp.json().await?;
 
         let mrs: Vec<PrSummary> = items
@@ -193,7 +200,7 @@ impl GitPlatform for GitLabAdapter {
             items: mrs,
             page,
             total_pages,
-            total_count: 0,
+            total_count,
         })
     }
 

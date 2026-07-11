@@ -292,11 +292,19 @@ impl GitPlatform for GitHubAdapter {
             _ => all_prs,
         };
 
+        let total_count = if prs.is_empty() {
+            0
+        } else if (prs.len() as u32) < per_page || page >= last_page {
+            (page - 1) * per_page + prs.len() as u32
+        } else {
+            last_page * per_page
+        };
+
         Ok(Paginated {
             items: prs,
             page,
             total_pages: last_page,
-            total_count: 0,
+            total_count,
         })
     }
 
