@@ -106,20 +106,30 @@ jobs:
 
       - name: Create portable zip (Windows)
         if: matrix.platform == 'windows-latest'
-        shell: pwsh
+        shell: bash
         run: |
-          $version = "$env:GITHUB_REF_NAME" -replace '^v', ''
-          $zipName = "MergePilot_${version}_x64-portable.zip"
-          $exe = Get-ChildItem -Path src-tauri\target\release\*.exe |
-            Where-Object { $_.Name -notmatch 'setup|install' } |
-            Select-Object -First 1
-          if (-not $exe) { throw "No executable found" }
-          $tmpExe = Join-Path $env:RUNNER_TEMP "MergePilot.exe"
-          Copy-Item $exe.FullName $tmpExe
-          $tmpZip = Join-Path $env:RUNNER_TEMP $zipName
-          Compress-Archive -Path $tmpExe -DestinationPath $tmpZip
-          echo "PORTABLE_ZIP=$tmpZip" >> $env:GITHUB_ENV
-          Write-Output "Created $zipName"
+          echo "=== Target release dir ==="
+          ls -la src-tauri/target/release/ 2>/dev/null || echo "(dir not found)"
+          echo "=== Recursive exe search ==="
+          find . -name "*.exe" -not -path "./target/*" 2>/dev/null | head -20
+          version="${GITHUB_REF_NAME#v}"
+          zipName="MergePilot_${version}_x64-portable.zip"
+          exe=$(find . -name "mergepilot.exe" -not -path "./target/*" 2>/dev/null | head -1)
+          if [ -z "$exe" ]; then
+            exe=$(find src-tauri/target -name "*.exe" -not -path "*/deps/*" 2>/dev/null \
+              | grep -viE 'setup|install' | head -1)
+          fi
+          if [ -z "$exe" ]; then
+            echo "ERROR: no executable found"
+            exit 1
+          fi
+          echo "Found: $exe"
+          tmpExe="$RUNNER_TEMP/MergePilot.exe"
+          tmpZip="$RUNNER_TEMP/$zipName"
+          cp "$exe" "$tmpExe"
+          (cd "$RUNNER_TEMP" && zip -r "$zipName" "MergePilot.exe")
+          echo "PORTABLE_ZIP=$tmpZip" >> "$GITHUB_ENV"
+          echo "Created $zipName"
 
       - name: Upload portable zip (Windows)
         if: matrix.platform == 'windows-latest'
