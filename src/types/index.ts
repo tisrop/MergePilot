@@ -188,6 +188,11 @@ export interface AiReviewRequest {
   focus: AiReviewFocus | null;
 }
 
+export interface AiStreamEvent<T> {
+  request_id: string;
+  payload: T;
+}
+
 export interface PrContext {
   title: string;
   body: string;

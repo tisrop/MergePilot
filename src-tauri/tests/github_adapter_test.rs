@@ -294,3 +294,33 @@ async fn test_github_list_repos_with_fork() {
     assert_eq!(normal.parent_full_name, None);
     assert_eq!(normal.parent_owner, None);
 }
+
+#[tokio::test]
+async fn test_github_list_repos_parses_link_pagination() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/user/repos"))
+        .and(query_param("page", "2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header(
+                    "link",
+                    format!(
+                        "<{}/user/repos?per_page=100&page=3>; rel=\"next\", <{}/user/repos?per_page=100&page=5>; rel=\"last\"",
+                        mock_server.uri(),
+                        mock_server.uri()
+                    ),
+                )
+                .set_body_json(serde_json::json!([])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(mock_server.uri());
+    let result = adapter.list_repos(2).await.expect("should list repos");
+
+    assert_eq!(result.page, 2);
+    assert_eq!(result.total_pages, 5);
+}

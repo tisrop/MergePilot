@@ -50,19 +50,25 @@ const platforms: { value: Platform; label: string }[] = [
 const visiblePlatforms = computed(() => platforms.filter((p) => auth.platformVisibility[p.value]));
 
 onMounted(async () => {
-  for (const p of platforms) {
-    await auth.checkAuth(p.value);
+  const activePlatform = auth.activePlatform;
+  if (!auth.platforms[activePlatform].isLoggedIn) {
+    await auth.checkAuth(activePlatform);
   }
-  if (auth.isLoggedIn && auth.activePlatform && repo.repos.length === 0) {
-    repo.fetchRepos(auth.activePlatform);
+  if (auth.platforms[activePlatform].isLoggedIn && repo.reposCache[activePlatform].length === 0) {
+    void repo.fetchRepos(activePlatform);
+  }
+
+  for (const item of platforms) {
+    if (item.value !== activePlatform && !auth.platforms[item.value].isLoggedIn) {
+      void auth.checkAuth(item.value);
+    }
   }
 });
 
 function selectPlatform(p: Platform) {
   auth.setActivePlatform(p);
-  if (repo.reposCache[p].length === 0) {
-    repo.loading = true;
-    repo.fetchRepos(p);
+  if (auth.platforms[p].isLoggedIn && repo.reposCache[p].length === 0) {
+    void repo.fetchRepos(p);
   }
 }
 
@@ -127,7 +133,13 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
         <img :src="auth.activeUser.avatar_url" class="avatar" />
         <span class="username">{{ auth.activeUser.login }}</span>
       </template>
-      <router-link v-else to="/login" class="login-link">登录</router-link>
+      <router-link
+        v-else
+        :to="{ path: '/login', query: { platform: auth.activePlatform } }"
+        class="login-link"
+      >
+        登录
+      </router-link>
     </div>
 
     <!-- Navigation -->
@@ -272,6 +284,18 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
           </button>
         </template>
       </div>
+      <div v-if="repo.error" class="repo-load-error">
+        <span>加载失败：{{ repo.error }}</span>
+        <button @click="repo.retry(auth.activePlatform)">重试</button>
+      </div>
+      <button
+        v-else-if="repo.hasMore"
+        class="load-more-btn"
+        :disabled="repo.loadingMore"
+        @click="repo.loadMore(auth.activePlatform)"
+      >
+        {{ repo.loadingMore ? "加载中..." : "加载更多" }}
+      </button>
     </div>
   </aside>
 </template>
@@ -511,5 +535,28 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 
 .fork-icon {
   flex-shrink: 0;
+}
+
+.repo-load-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  color: var(--color-danger);
+  font-size: 11px;
+}
+
+.repo-load-error button,
+.load-more-btn {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  padding: 6px;
+  font-size: 11px;
+}
+
+.load-more-btn {
+  margin-top: var(--space-2);
 }
 </style>

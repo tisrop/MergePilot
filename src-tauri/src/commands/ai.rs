@@ -1,5 +1,6 @@
 use crate::ai::client::AiClient;
-use crate::models::{AiConfig, AiReviewRequest, AiReviewResult};
+use crate::error::AppError;
+use crate::models::{AiConfig, AiReviewRequest, AiReviewResult, AiStreamEvent};
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
 
@@ -59,11 +60,12 @@ pub async fn ai_review(
         .map_err(|e| e.to_string())
 }
 
-/// Streaming AI review — spawns a background task that emits events
+/// Streaming AI review — registers a cancellable background task and emits request-scoped events.
 #[tauri::command]
 pub async fn ai_review_stream(
     app_handle: AppHandle,
     state: State<'_, AppState>,
+    request_id: String,
     request: AiReviewRequest,
 ) -> Result<(), String> {
     let config = state.ai_config.get_config().map_err(|e| e.to_string())?;
@@ -71,11 +73,19 @@ pub async fn ai_review_stream(
     let system_prompt = config.system_prompt.clone();
     let temperature = config.temperature.unwrap_or(0.3);
     let max_tokens = config.max_tokens.unwrap_or(4096);
+    let registry = state.ai_tasks.clone();
+    let generation = registry.next_generation();
+    let task_request_id = request_id.clone();
+    let task_registry = registry.clone();
+    let (start_tx, start_rx) = tokio::sync::oneshot::channel();
 
-    // Spawn a background task for streaming
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
+        if start_rx.await.is_err() {
+            return;
+        }
         let client = AiClient::new(config.endpoint, config.model, api_key);
-
+        let chunk_request_id = task_request_id.clone();
+        let chunk_handle = app_handle.clone();
         let result = client
             .review_stream(
                 &request.diff,
@@ -84,26 +94,60 @@ pub async fn ai_review_stream(
                 system_prompt.as_deref(),
                 temperature,
                 max_tokens,
-                |token| {
-                    // Emit each token chunk to the frontend
-                    let _ = app_handle.emit("ai-review-chunk", token);
+                move |token| {
+                    chunk_handle
+                        .emit(
+                            "ai-review-chunk",
+                            AiStreamEvent {
+                                request_id: chunk_request_id.clone(),
+                                payload: token.to_string(),
+                            },
+                        )
+                        .map_err(|error| AppError::Ai(format!("发送 AI 流事件失败: {error}")))
                 },
             )
             .await;
 
         match result {
             Ok(review_result) => {
-                let _ = app_handle.emit("ai-review-done", review_result);
+                let _ = app_handle.emit(
+                    "ai-review-done",
+                    AiStreamEvent {
+                        request_id: task_request_id.clone(),
+                        payload: review_result,
+                    },
+                );
             }
-            Err(e) => {
-                let _ = app_handle.emit("ai-review-error", e.to_string());
+            Err(error) => {
+                let _ = app_handle.emit(
+                    "ai-review-error",
+                    AiStreamEvent {
+                        request_id: task_request_id.clone(),
+                        payload: error.to_string(),
+                    },
+                );
             }
         }
+        task_registry
+            .remove_if_current(&task_request_id, generation)
+            .await;
     });
 
+    registry
+        .replace(request_id, generation, task.abort_handle())
+        .await;
+    let _ = start_tx.send(());
     Ok(())
 }
 
+#[tauri::command]
+pub async fn ai_review_cancel(
+    state: State<'_, AppState>,
+    request_id: String,
+) -> Result<(), String> {
+    state.ai_tasks.cancel(&request_id).await;
+    Ok(())
+}
 #[tauri::command]
 pub async fn ai_list_models(
     state: State<'_, AppState>,

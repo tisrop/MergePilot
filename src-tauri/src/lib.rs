@@ -33,7 +33,16 @@ pub fn run() {
                 &PredefinedMenuItem::separator(app)?,
                 &PredefinedMenuItem::quit(app, None)?,
             ])?;
-            let menu = Menu::with_items(app, &[&app_menu])?;
+            let edit_menu = Submenu::with_items(app, "编辑", true, &[
+                &PredefinedMenuItem::undo(app, Some("撤销"))?,
+                &PredefinedMenuItem::redo(app, Some("重做"))?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::cut(app, Some("剪切"))?,
+                &PredefinedMenuItem::copy(app, Some("复制"))?,
+                &PredefinedMenuItem::paste(app, Some("粘贴"))?,
+                &PredefinedMenuItem::select_all(app, Some("全选"))?,
+            ])?;
+            let menu = Menu::with_items(app, &[&app_menu, &edit_menu])?;
             app.set_menu(menu)?;
 
             let menu_ready = Arc::new(AtomicBool::new(false));
@@ -84,6 +93,7 @@ pub fn run() {
             ai_cmds::ai_save_api_key,
             ai_cmds::ai_review,
             ai_cmds::ai_review_stream,
+            ai_cmds::ai_review_cancel,
             ai_cmds::ai_list_models,
             ai_cmds::ai_test_connection,
         ])

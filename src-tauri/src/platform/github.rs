@@ -256,7 +256,34 @@ impl GitPlatform for GitHubAdapter {
 
     async fn list_repos(&self, page: u32) -> Result<Paginated<RepoSummary>, AppError> {
         let url = format!("{}/user/repos?per_page=100&page={}", self.base_url, page);
-        let items: Vec<Value> = self.get_json(&url).await?;
+        let resp = self
+            .client
+            .raw_client()
+            .get(&url)
+            .header("Authorization", &self.auth_header())
+            .header("User-Agent", "mergepilot")
+            .header("Accept", "application/vnd.github.v3+json")
+            .send()
+            .await?;
+        let total_pages = Self::parse_last_page(
+            resp.headers()
+                .get("link")
+                .and_then(|value| value.to_str().ok()),
+            page,
+        );
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::Api(format!(
+                "GitHub API {status} ({url}): {body}"
+            )));
+        }
+        let items: Vec<Value> = resp.json().await?;
+        let total_count = if page == total_pages {
+            (page.saturating_sub(1) * 100) + items.len() as u32
+        } else {
+            total_pages * 100
+        };
 
         let mut repos: Vec<RepoSummary> = Vec::with_capacity(items.len());
         for r in &items {
@@ -315,8 +342,8 @@ impl GitPlatform for GitHubAdapter {
         Ok(Paginated {
             items: repos,
             page,
-            total_pages: 1,
-            total_count: 0,
+            total_pages,
+            total_count,
         })
     }
 

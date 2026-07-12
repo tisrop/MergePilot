@@ -739,3 +739,50 @@ async fn test_gitee_create_pr_comment_multi_line() {
 
     assert!(result.is_ok(), "should create multi-line PR comment");
 }
+
+#[tokio::test]
+async fn test_gitee_list_repos_prefers_pagination_headers() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user/repos"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-total-pages", "4")
+                .insert_header("x-total-count", "321")
+                .set_body_json(serde_json::json!([])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let result = adapter.list_repos(1).await.expect("should list repos");
+
+    assert_eq!(result.total_pages, 4);
+    assert_eq!(result.total_count, 321);
+}
+
+#[tokio::test]
+async fn test_gitee_rejects_unsupported_review_without_request() {
+    let mock_server = MockServer::start().await;
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+
+    let result = adapter
+        .create_review(
+            "owner",
+            "repo",
+            1,
+            "approve",
+            &mergepilot_lib::models::ReviewEvent::Approve,
+            &[],
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(mergepilot_lib::error::AppError::NotImplemented(_))
+    ));
+    assert!(mock_server.received_requests().await.unwrap().is_empty());
+}

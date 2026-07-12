@@ -6,8 +6,9 @@ import type {
   AiReviewResult,
   PrContext,
   AiSuggestionAction,
+  AiStreamEvent,
 } from "@/types";
-import { aiReview, aiReviewStream } from "@/api";
+import { aiReview, aiReviewCancel, aiReviewStream } from "@/api";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import AiSuggestionCard from "./AiSuggestionCard.vue";
 import AppSelect from "@/components/shared/AppSelect.vue";
@@ -31,6 +32,7 @@ const streamText = ref("");
 let unlistenChunk: UnlistenFn | null = null;
 let unlistenDone: UnlistenFn | null = null;
 let unlistenError: UnlistenFn | null = null;
+let activeRequestId: string | null = null;
 
 const foci: { value: AiReviewFocus; label: string }[] = [
   { value: "all", label: "全部" },
@@ -46,6 +48,8 @@ async function startReview() {
     return;
   }
 
+  await cancelActiveReview();
+  cleanupListeners();
   loading.value = true;
   error.value = "";
   result.value = null;
@@ -74,33 +78,54 @@ async function startNonStreamingReview() {
 }
 
 async function startStreamingReview() {
+  const requestId = crypto.randomUUID();
+  activeRequestId = requestId;
   try {
-    unlistenChunk = await listen<string>("ai-review-chunk", (event) => {
-      streamText.value += event.payload;
+    unlistenChunk = await listen<AiStreamEvent<string>>("ai-review-chunk", (event) => {
+      if (event.payload.request_id !== activeRequestId) return;
+      streamText.value += event.payload.payload;
     });
 
-    unlistenDone = await listen<AiReviewResult>("ai-review-done", (event) => {
-      result.value = event.payload;
+    unlistenDone = await listen<AiStreamEvent<AiReviewResult>>("ai-review-done", (event) => {
+      if (event.payload.request_id !== activeRequestId) return;
+      result.value = event.payload.payload;
+      activeRequestId = null;
       loading.value = false;
       cleanupListeners();
     });
 
-    unlistenError = await listen<string>("ai-review-error", (event) => {
-      error.value = event.payload;
+    unlistenError = await listen<AiStreamEvent<string>>("ai-review-error", (event) => {
+      if (event.payload.request_id !== activeRequestId) return;
+      error.value = event.payload.payload;
+      activeRequestId = null;
       loading.value = false;
       cleanupListeners();
     });
 
-    await aiReviewStream({
+    await aiReviewStream(requestId, {
       diff: props.diff,
       context: props.context,
       file_filter: null,
       focus: focus.value,
     });
   } catch (e: any) {
-    error.value = e?.toString() || "AI 流式评审启动失败";
-    loading.value = false;
-    cleanupListeners();
+    if (activeRequestId === requestId) {
+      activeRequestId = null;
+      error.value = e?.toString() || "AI 流式评审启动失败";
+      loading.value = false;
+      cleanupListeners();
+    }
+  }
+}
+
+async function cancelActiveReview() {
+  const requestId = activeRequestId;
+  activeRequestId = null;
+  if (!requestId) return;
+  try {
+    await aiReviewCancel(requestId);
+  } catch {
+    // Cancellation is best-effort and must not be presented as an AI review error.
   }
 }
 
@@ -114,7 +139,7 @@ function cleanupListeners() {
 }
 
 onUnmounted(() => {
-  cleanupListeners();
+  void cancelActiveReview().finally(cleanupListeners);
 });
 
 function onAction(index: number, action: AiSuggestionAction) {
@@ -136,7 +161,11 @@ function onAction(index: number, action: AiSuggestionAction) {
         流式输出
       </label>
 
-      <button class="btn btn-primary" :disabled="loading || !diff" @click="startReview">
+      <button
+        class="btn btn-primary"
+        :disabled="(loading && !useStreaming) || !diff"
+        @click="startReview"
+      >
         <svg
           width="14"
           height="14"
@@ -149,7 +178,7 @@ function onAction(index: number, action: AiSuggestionAction) {
         >
           <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
-        {{ loading ? "评审中..." : "开始 AI 评审" }}
+        {{ loading ? (useStreaming ? "重新评审" : "评审中...") : "开始 AI 评审" }}
       </button>
     </div>
 

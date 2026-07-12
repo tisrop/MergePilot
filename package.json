@@ -13,7 +13,8 @@
     "lint:fix": "eslint . --fix",
     "format": "oxfmt --check src/",
     "format:fix": "oxfmt src/",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",
@@ -31,12 +32,15 @@
     "@typescript-eslint/eslint-plugin": "^8.63.0",
     "@typescript-eslint/parser": "^8.63.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.11",
     "eslint": "^10.7.0",
     "eslint-plugin-vue": "^10.9.2",
     "husky": "^9.1.7",
+    "jsdom": "^29.1.1",
     "oxfmt": "^0.58.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
+    "vitest": "^4.1.10",
     "vue-tsc": "^2.2.0"
   }
 }

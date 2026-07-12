@@ -42,3 +42,7 @@ path = "tests/github_adapter_test.rs"
 [[test]]
 name = "gitee_adapter"
 path = "tests/gitee_adapter_test.rs"
+
+[[test]]
+name = "gitlab_adapter"
+path = "tests/gitlab_adapter_test.rs"

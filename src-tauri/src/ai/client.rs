@@ -17,7 +17,7 @@ pub struct AiClient {
 async fn consume_sse_stream<S, F>(stream: S, mut on_token: F) -> Result<String, AppError>
 where
     S: Stream<Item = Result<Vec<u8>, String>>,
-    F: FnMut(&str),
+    F: FnMut(&str) -> Result<(), AppError>,
 {
     // Appending an empty event terminator makes providers that omit the final blank line flush safely.
     let stream = stream.chain(futures::stream::once(async {
@@ -41,7 +41,7 @@ where
         })?;
         if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
             accumulated.push_str(content);
-            on_token(content);
+            on_token(content)?;
         }
     }
     Ok(accumulated)
@@ -110,7 +110,7 @@ impl AiClient {
         on_token: F,
     ) -> Result<String, AppError>
     where
-        F: FnMut(&str) + Send,
+        F: FnMut(&str) -> Result<(), AppError> + Send,
     {
         let url = format!("{}/chat/completions", self.endpoint);
         let body = serde_json::json!({
@@ -184,7 +184,7 @@ impl AiClient {
         on_token: F,
     ) -> Result<AiReviewResult, AppError>
     where
-        F: FnMut(&str) + Send,
+        F: FnMut(&str) -> Result<(), AppError> + Send,
     {
         let system_prompt = prompt::build_system_prompt(focus, custom_prompt);
         let user_message = prompt::build_user_message(diff, context);
@@ -308,9 +308,12 @@ mod tests {
             .map(|chunk| Ok::<_, String>(chunk.to_vec()))
             .collect::<Vec<_>>();
         let mut received = String::new();
-        let result = consume_sse_stream(stream::iter(chunks), |token| received.push_str(token))
-            .await
-            .unwrap();
+        let result = consume_sse_stream(stream::iter(chunks), |token| {
+            received.push_str(token);
+            Ok(())
+        })
+        .await
+        .unwrap();
         assert_eq!(result, "你好");
         assert_eq!(received, "你好");
     }
@@ -318,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn flushes_final_event_without_blank_line() {
         let body = format!("data: {}", delta("尾"));
-        let result = consume_sse_stream(stream::iter(vec![Ok(body.into_bytes())]), |_| {})
+        let result = consume_sse_stream(stream::iter(vec![Ok(body.into_bytes())]), |_| Ok(()))
             .await
             .unwrap();
         assert_eq!(result, "尾");
@@ -328,7 +331,7 @@ mod tests {
     async fn rejects_invalid_nonempty_json() {
         let error = consume_sse_stream(
             stream::iter(vec![Ok(b"data: not-json\n\n".to_vec())]),
-            |_| {},
+            |_| Ok(()),
         )
         .await
         .unwrap_err();

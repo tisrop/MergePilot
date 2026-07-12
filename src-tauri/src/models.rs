@@ -238,6 +238,12 @@ pub struct Paginated<T> {
 }
 
 // ── AI ──
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiStreamEvent<T> {
+    pub request_id: String,
+    pub payload: T,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AiConfig {
     pub endpoint: String,
