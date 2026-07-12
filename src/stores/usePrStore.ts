@@ -23,6 +23,23 @@ export const usePrStore = defineStore("pr", () => {
     merged: 0,
     all: 0,
   });
+  let listRequestSequence = 0;
+  let detailRequestSequence = 0;
+  let diffRequestSequence = 0;
+  let countsRequestSequence = 0;
+
+  function clearContext() {
+    listRequestSequence++;
+    detailRequestSequence++;
+    diffRequestSequence++;
+    countsRequestSequence++;
+    list.value = [];
+    currentPr.value = null;
+    diff.value = null;
+    error.value = null;
+    totalPages.value = 1;
+    stateCounts.value = { open: 0, closed: 0, merged: 0, all: 0 };
+  }
 
   function nextPage() {
     if (filters.value.page < totalPages.value) {
@@ -42,6 +59,7 @@ export const usePrStore = defineStore("pr", () => {
   }
 
   async function fetchPrList(platform: Platform, owner: string, repo: string) {
+    const sequence = ++listRequestSequence;
     loading.value = true;
     error.value = null;
     try {
@@ -53,32 +71,38 @@ export const usePrStore = defineStore("pr", () => {
         filters.value.page,
         perPage.value,
       );
+      if (sequence !== listRequestSequence) return;
       list.value = result.items;
       totalPages.value = result.total_pages;
     } catch (e) {
+      if (sequence !== listRequestSequence) return;
       error.value = typeof e === "string" ? e : String(e);
       list.value = [];
       totalPages.value = 1;
     } finally {
-      loading.value = false;
+      if (sequence === listRequestSequence) loading.value = false;
     }
   }
 
   async function fetchPrDetail(platform: Platform, owner: string, repo: string, number: number) {
+    const sequence = ++detailRequestSequence;
     loading.value = true;
     try {
-      currentPr.value = await prDetail(platform, owner, repo, number);
+      const result = await prDetail(platform, owner, repo, number);
+      if (sequence === detailRequestSequence) currentPr.value = result;
     } finally {
-      loading.value = false;
+      if (sequence === detailRequestSequence) loading.value = false;
     }
   }
 
   async function fetchPrDiff(platform: Platform, owner: string, repo: string, number: number) {
+    const sequence = ++diffRequestSequence;
     loading.value = true;
     try {
-      diff.value = await prDiff(platform, owner, repo, number);
+      const result = await prDiff(platform, owner, repo, number);
+      if (sequence === diffRequestSequence) diff.value = result;
     } finally {
-      loading.value = false;
+      if (sequence === diffRequestSequence) loading.value = false;
     }
   }
 
@@ -88,13 +112,15 @@ export const usePrStore = defineStore("pr", () => {
   }
 
   async function fetchStateCounts(platform: Platform, owner: string, repo: string) {
+    const sequence = ++countsRequestSequence;
     const states: PrState[] = ["open", "closed", "merged", "all"];
     const results = await Promise.allSettled(
-      states.map((s) => prList(platform, owner, repo, s, 1, 1)),
+      states.map((state) => prList(platform, owner, repo, state, 1, 1)),
     );
-    results.forEach((result, i) => {
+    if (sequence !== countsRequestSequence) return;
+    results.forEach((result, index) => {
       if (result.status === "fulfilled") {
-        stateCounts.value[states[i]] = result.value.total_count;
+        stateCounts.value[states[index]] = result.value.total_count;
       }
     });
   }
@@ -165,6 +191,7 @@ export const usePrStore = defineStore("pr", () => {
     prevPage,
     setPerPage,
     stateCounts,
+    clearContext,
     fetchPrList,
     fetchPrDetail,
     fetchPrDiff,

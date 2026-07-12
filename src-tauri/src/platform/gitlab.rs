@@ -328,9 +328,12 @@ impl GitPlatform for GitLabAdapter {
         repo: &str,
         pr_number: u64,
         body: &str,
-        _event: &ReviewEvent,
+        event: &ReviewEvent,
         _comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
+        if !matches!(event, ReviewEvent::Comment) {
+            return Err(AppError::NotImplemented("该平台仅支持评论评审".to_string()));
+        }
         let project_id = urlencoding(owner, repo);
 
         // GitLab uses notes for reviews; approval API is separate

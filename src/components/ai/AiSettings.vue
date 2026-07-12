@@ -65,10 +65,29 @@ function onKeydownModel(e: KeyboardEvent) {
   }
 }
 
-function highlight(text: string, query: string): string {
-  if (!query) return text;
-  const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
-  return text.replace(re, "<mark>$1</mark>");
+interface HighlightSegment {
+  text: string;
+  matched: boolean;
+}
+
+function highlight(text: string, query: string): HighlightSegment[] {
+  if (!query) return [{ text, matched: false }];
+  const lowerText = text.toLocaleLowerCase();
+  const lowerQuery = query.toLocaleLowerCase();
+  const segments: HighlightSegment[] = [];
+  let cursor = 0;
+  let matchIndex = lowerText.indexOf(lowerQuery);
+  while (matchIndex >= 0) {
+    if (matchIndex > cursor) {
+      segments.push({ text: text.slice(cursor, matchIndex), matched: false });
+    }
+    const matchEnd = matchIndex + query.length;
+    segments.push({ text: text.slice(matchIndex, matchEnd), matched: true });
+    cursor = matchEnd;
+    matchIndex = lowerText.indexOf(lowerQuery, cursor);
+  }
+  if (cursor < text.length) segments.push({ text: text.slice(cursor), matched: false });
+  return segments.length > 0 ? segments : [{ text, matched: false }];
 }
 
 const presets = [
@@ -225,7 +244,12 @@ async function handleTest() {
               :class="{ selected: m === config.model }"
               @mousedown.prevent="selectModel(m)"
             >
-              <span v-if="modelSearch" v-html="highlight(m, modelSearch)" />
+              <span v-if="modelSearch">
+                <template v-for="(segment, index) in highlight(m, modelSearch)" :key="index">
+                  <mark v-if="segment.matched">{{ segment.text }}</mark>
+                  <template v-else>{{ segment.text }}</template>
+                </template>
+              </span>
               <span v-else>{{ m }}</span>
             </div>
             <div v-if="filteredModels.length === 0" class="model-empty">无匹配结果</div>

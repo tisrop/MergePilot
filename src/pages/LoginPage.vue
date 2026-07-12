@@ -44,8 +44,8 @@ async function handleLogin() {
   loading.value = true;
   error.value = "";
   try {
-    const user = await authLogin(platform.value, token.value.trim(), getCustomUrl());
-    auth.platforms[platform.value] = { user, isLoggedIn: true };
+    const result = await authLogin(platform.value, token.value.trim(), getCustomUrl());
+    auth.platforms[platform.value] = { user: result.user, isLoggedIn: true };
     auth.activePlatform = platform.value;
     await repo.fetchRepos(platform.value);
     router.push("/pr");
@@ -109,7 +109,7 @@ async function handleLogin() {
           placeholder="输入你的 Token..."
           @keyup.enter="handleLogin"
         />
-        <p class="hint">你的 Token 将被安全存储，不会上传到任何第三方。</p>
+        <p class="hint">Token 优先保存到系统凭证库；不可用时保存到本地加密文件。</p>
       </div>
 
       <div v-if="error" class="error-box">

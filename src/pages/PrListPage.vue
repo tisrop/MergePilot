@@ -41,8 +41,11 @@ watch(
 );
 
 watch(
-  () => repo.activeRepo,
-  () => fetchPrs(),
+  () => [auth.activePlatform, repo.activeRepo] as const,
+  () => {
+    pr.clearContext();
+    fetchPrs();
+  },
 );
 watch(
   () => pr.filters,

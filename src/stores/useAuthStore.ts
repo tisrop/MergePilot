@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed, watch } from "vue";
 import type { Platform, User } from "@/types";
-import { authLogin, authLogout, authCheck } from "@/api";
+import { authLogin, authLogout, authCheck, authHasToken } from "@/api";
 
 export const useAuthStore = defineStore("auth", () => {
   // each platform has independent auth state
@@ -36,14 +36,24 @@ export const useAuthStore = defineStore("auth", () => {
     { deep: true },
   );
 
-  const activePlatform = ref<Platform>("github");
+  const storedActivePlatform = localStorage.getItem("mergepilot:activePlatform");
+  const activePlatform = ref<Platform>(
+    storedActivePlatform === "github" ||
+      storedActivePlatform === "gitlab" ||
+      storedActivePlatform === "gitee"
+      ? storedActivePlatform
+      : "github",
+  );
+  watch(activePlatform, (value) => {
+    localStorage.setItem("mergepilot:activePlatform", value);
+  });
 
   const activeUser = computed(() => platforms.value[activePlatform.value].user);
   const isLoggedIn = computed(() => platforms.value[activePlatform.value].isLoggedIn);
 
   async function login(platform: Platform, token: string) {
-    const user = await authLogin(platform, token);
-    platforms.value[platform] = { user, isLoggedIn: true };
+    const result = await authLogin(platform, token);
+    platforms.value[platform] = { user: result.user, isLoggedIn: true };
     activePlatform.value = platform;
   }
 
@@ -55,12 +65,53 @@ export const useAuthStore = defineStore("auth", () => {
   async function checkAuth(platform: Platform) {
     try {
       const user = await authCheck(platform);
-      if (user) {
-        platforms.value[platform] = { user, isLoggedIn: true };
+      platforms.value[platform] = user
+        ? { user, isLoggedIn: true }
+        : { user: null, isLoggedIn: false };
+    } catch {
+      platforms.value[platform] = { user: null, isLoggedIn: false };
+    }
+  }
+
+  async function restorePlatformSession(platform: Platform): Promise<boolean> {
+    try {
+      if (!(await authHasToken(platform))) {
+        platforms.value[platform] = { user: null, isLoggedIn: false };
+        return false;
+      }
+      await checkAuth(platform);
+      if (platforms.value[platform].isLoggedIn) {
+        activePlatform.value = platform;
+        return true;
       }
     } catch {
       platforms.value[platform] = { user: null, isLoggedIn: false };
     }
+    return false;
+  }
+
+  async function restoreSession(preferredPlatform?: Platform): Promise<boolean> {
+    const candidates: Platform[] = [];
+    const restoreOrder: Array<Platform | undefined> = [
+      preferredPlatform,
+      activePlatform.value,
+      "github",
+      "gitlab",
+      "gitee",
+    ];
+
+    for (const candidate of restoreOrder) {
+      if (candidate && !candidates.includes(candidate)) {
+        candidates.push(candidate);
+      }
+    }
+
+    for (const candidate of candidates) {
+      if (await restorePlatformSession(candidate)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function setActivePlatform(platform: Platform) {
@@ -90,6 +141,8 @@ export const useAuthStore = defineStore("auth", () => {
     login,
     logout,
     checkAuth,
+    restorePlatformSession,
+    restoreSession,
     setActivePlatform,
     setPlatformVisibility,
   };

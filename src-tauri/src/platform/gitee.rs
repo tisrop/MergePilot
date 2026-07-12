@@ -514,9 +514,12 @@ impl GitPlatform for GiteeAdapter {
         repo: &str,
         pr_number: u64,
         body: &str,
-        _event: &ReviewEvent,
+        event: &ReviewEvent,
         comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
+        if !matches!(event, ReviewEvent::Comment) {
+            return Err(AppError::NotImplemented("该平台仅支持评论评审".to_string()));
+        }
         // Gitee API does not support batch inline comments in review creation.
         // Create the main review comment first.
         let url = format!(

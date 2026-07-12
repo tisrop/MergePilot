@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useRepoStore } from "@/stores/useRepoStore";
 import AppLayout from "@/components/layout/AppLayout.vue";
@@ -13,20 +13,35 @@ const repo = useRepoStore();
 const issues = ref<IssueSummary[]>([]);
 const loading = ref(false);
 
-onMounted(async () => {
-  if (!repo.activeRepo) return;
+let requestSequence = 0;
+
+async function fetchIssues() {
+  const sequence = ++requestSequence;
+  issues.value = [];
+  if (!repo.activeRepo) {
+    loading.value = false;
+    return;
+  }
+  const platform = auth.activePlatform;
+  const { owner, repo: repoName } = repo.activeRepo;
   loading.value = true;
   try {
-    const result = await issueList(
-      auth.activePlatform,
-      repo.activeRepo.owner,
-      repo.activeRepo.repo,
-    );
-    issues.value = result.items;
+    const result = await issueList(platform, owner, repoName);
+    if (
+      sequence === requestSequence &&
+      auth.activePlatform === platform &&
+      repo.activeRepo?.owner === owner &&
+      repo.activeRepo?.repo === repoName
+    ) {
+      issues.value = result.items;
+    }
   } finally {
-    loading.value = false;
+    if (sequence === requestSequence) loading.value = false;
   }
-});
+}
+
+onMounted(fetchIssues);
+watch(() => [auth.activePlatform, repo.activeRepo] as const, fetchIssues);
 </script>
 
 <template>

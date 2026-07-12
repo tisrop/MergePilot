@@ -9,6 +9,12 @@ pub struct User {
     pub avatar_url: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthLoginResult {
+    pub user: User,
+    pub credential_storage: crate::vault::CredentialStorage,
+}
+
 // ── Repository ──
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoSummary {

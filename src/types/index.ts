@@ -10,6 +10,13 @@ export interface User {
   avatar_url: string;
 }
 
+export type CredentialStorage = "system_keyring" | "encrypted_file";
+
+export interface AuthLoginResult {
+  user: User;
+  credential_storage: CredentialStorage;
+}
+
 // ── 平台 ──
 export type Platform = "github" | "gitlab" | "gitee";
 

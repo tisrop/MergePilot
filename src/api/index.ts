@@ -16,6 +16,7 @@ import type {
   Paginated,
   RepoSummary,
   User,
+  AuthLoginResult,
   AiConfig,
   AiReviewRequest,
   AiReviewResult,
@@ -30,7 +31,7 @@ export async function authLogin(
   platform: Platform,
   token: string,
   customUrl?: string,
-): Promise<User> {
+): Promise<AuthLoginResult> {
   return invoke("auth_login", { platform, token, customUrl: customUrl ?? null });
 }
 

@@ -6,7 +6,6 @@ import IssueListPage from "@/pages/IssueListPage.vue";
 import IssueNewPage from "@/pages/IssueNewPage.vue";
 import SettingsPage from "@/pages/SettingsPage.vue";
 import { useAuthStore } from "@/stores/useAuthStore";
-import { authHasAnyToken, authHasToken } from "@/api";
 import type { Platform } from "@/types";
 
 const routes = [
@@ -56,15 +55,39 @@ const router = createRouter({
   routes,
 });
 
+function parsePlatform(value: unknown): Platform | undefined {
+  return value === "github" || value === "gitlab" || value === "gitee" ? value : undefined;
+}
+
 router.beforeEach(async (to, _from, next) => {
   const store = useAuthStore();
-  const platform: Platform | undefined =
-    (to.params.platform as Platform | undefined) ?? store.activePlatform;
-  const hasToken = platform ? await authHasToken(platform) : await authHasAnyToken();
+  const routePlatform = parsePlatform(to.params.platform);
+  const loginPlatform = to.path === "/login" ? parsePlatform(to.query.platform) : undefined;
+  const targetPlatform = routePlatform ?? loginPlatform;
+  const requiresAuthentication = to.path === "/login" || Boolean(to.meta.requiresAuth);
 
-  if (to.path === "/login" && hasToken && store.isLoggedIn) {
+  if (loginPlatform) {
+    store.setActivePlatform(loginPlatform);
+  }
+
+  let isLoggedIn = targetPlatform
+    ? (store.platforms[targetPlatform]?.isLoggedIn ?? false)
+    : store.isLoggedIn;
+
+  if (requiresAuthentication && !isLoggedIn) {
+    if (loginPlatform) {
+      await store.restorePlatformSession(loginPlatform);
+    } else {
+      await store.restoreSession(routePlatform);
+    }
+    isLoggedIn = targetPlatform
+      ? (store.platforms[targetPlatform]?.isLoggedIn ?? false)
+      : store.isLoggedIn;
+  }
+
+  if (to.path === "/login" && isLoggedIn) {
     next("/pr");
-  } else if (to.meta.requiresAuth && !hasToken) {
+  } else if (to.meta.requiresAuth && !isLoggedIn) {
     next("/login");
   } else {
     next();

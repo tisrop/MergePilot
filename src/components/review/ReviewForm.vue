@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { Platform, ReviewEvent } from "@/types";
 import { reviewSubmit } from "@/api";
 
@@ -16,11 +16,25 @@ const submitting = ref(false);
 const error = ref("");
 const success = ref(false);
 
-const events: { value: ReviewEvent; label: string }[] = [
+const allEvents: { value: ReviewEvent; label: string }[] = [
   { value: "comment", label: "评论" },
   { value: "approve", label: "批准" },
   { value: "request_changes", label: "请求修改" },
 ];
+const supportedEvents: Record<Platform, ReviewEvent[]> = {
+  github: ["comment", "approve", "request_changes"],
+  gitlab: ["comment"],
+  gitee: ["comment"],
+};
+const events = computed(() =>
+  allEvents.filter((candidate) => supportedEvents[props.platform].includes(candidate.value)),
+);
+watch(
+  () => props.platform,
+  () => {
+    if (!supportedEvents[props.platform].includes(event.value)) event.value = "comment";
+  },
+);
 
 async function handleSubmit() {
   if (!body.value.trim()) return;

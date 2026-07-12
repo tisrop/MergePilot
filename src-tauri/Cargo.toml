@@ -21,6 +21,7 @@ sha2 = "0.10"
 rand = "0.8"
 base64 = "0.22"
 rusqlite = { version = "0.31", features = ["bundled"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [dev-dependencies]
 wiremock = "0.6"

@@ -1,11 +1,27 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
+use serde::{Deserialize, Serialize};
+
+use crate::crypto::{decrypt, encrypt};
 use crate::error::AppError;
 
-/// Token storage using a simple JSON config file (no OS keyring access).
-/// File location: ~/.mergepilot/config.json
-pub struct TokenVault;
+const KEYRING_SERVICE: &str = "com.mergepilot";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialStorage {
+    SystemKeyring,
+    EncryptedFile,
+}
+
+/// Platform token storage backed by the system credential store, with an encrypted config fallback.
+pub struct TokenVault {
+    session_tokens: RwLock<HashMap<String, String>>,
+}
 
 impl Default for TokenVault {
     fn default() -> Self {
@@ -15,81 +31,245 @@ impl Default for TokenVault {
 
 impl TokenVault {
     pub fn new() -> Self {
-        Self
-    }
-
-    /// Directory for config file storage.
-    /// Uses $HOME/.mergepilot (reliable on macOS dev without entitlements).
-    fn storage_dir() -> PathBuf {
-        if let Ok(home) = std::env::var("HOME") {
-            let dir = PathBuf::from(home).join(".mergepilot");
-            if std::fs::create_dir_all(&dir).is_ok() {
-                return dir;
-            }
+        Self {
+            session_tokens: RwLock::new(HashMap::new()),
         }
-        PathBuf::from(".mergepilot")
     }
 
-    fn config_path() -> PathBuf {
-        Self::storage_dir().join("config.json")
+    fn cached_token(&self, platform: &str) -> Option<String> {
+        self.session_tokens
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(platform)
+            .cloned()
     }
 
-    fn read_config() -> HashMap<String, String> {
-        let path = Self::config_path();
+    fn cache_token(&self, platform: &str, token: &str) {
+        self.session_tokens
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(platform.to_string(), token.to_string());
+    }
+
+    fn remove_cached_token(&self, platform: &str) {
+        self.session_tokens
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(platform);
+    }
+
+    fn storage_dir() -> Result<PathBuf, AppError> {
+        let dir = std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(".mergepilot");
+        fs::create_dir_all(&dir)?;
+        set_dir_permissions(&dir)?;
+        Ok(dir)
+    }
+
+    fn config_path() -> Result<PathBuf, AppError> {
+        Ok(Self::storage_dir()?.join("config.json"))
+    }
+
+    fn read_config() -> Result<HashMap<String, String>, AppError> {
+        let path = Self::config_path()?;
         if !path.exists() {
-            return HashMap::new();
+            return Ok(HashMap::new());
         }
-        match std::fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => HashMap::new(),
-        }
+        let content = fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&content)?)
     }
 
     fn write_config(config: &HashMap<String, String>) -> Result<(), AppError> {
-        let path = Self::config_path();
-        let content = serde_json::to_string_pretty(config)?;
-        std::fs::write(&path, content).map_err(|e| {
-            AppError::Io(std::io::Error::new(
-                e.kind(),
-                format!("Failed to write config to {}: {}", path.display(), e),
-            ))
-        })?;
-        Ok(())
+        let path = Self::config_path()?;
+        let temp_path = path.with_extension(format!("json.tmp.{}", std::process::id()));
+        let content = serde_json::to_vec_pretty(config)?;
+        let result = (|| {
+            let mut options = OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            set_file_creation_mode(&mut options);
+            let mut file = options.open(&temp_path)?;
+            file.write_all(&content)?;
+            file.flush()?;
+            file.sync_all()?;
+            fs::rename(&temp_path, &path)?;
+            set_file_permissions(&path)?;
+            if let Some(parent) = path.parent() {
+                File::open(parent)?.sync_all()?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temp_path);
+        }
+        result
     }
 
-    pub fn store_token(&self, platform: &str, token: &str) -> Result<(), AppError> {
-        let mut config = Self::read_config();
-        config.insert(format!("token_{}", platform), token.to_string());
+    fn keyring_is_persistent() -> bool {
+        use keyring::credential::CredentialPersistence;
+
+        matches!(
+            keyring::default::default_credential_builder().persistence(),
+            CredentialPersistence::UntilDelete
+        )
+    }
+
+    fn keyring_entry(platform: &str) -> Result<keyring::Entry, keyring::Error> {
+        keyring::Entry::new(KEYRING_SERVICE, &format!("git-platform:{platform}"))
+    }
+
+    fn store_encrypted(platform: &str, token: &str) -> Result<(), AppError> {
+        let mut config = Self::read_config()?;
+        let encrypted = encrypt(token).map_err(AppError::Unknown)?;
+        config.insert(format!("token_encrypted_{platform}"), encrypted);
+        config.remove(&format!("token_{platform}"));
         Self::write_config(&config)
     }
 
-    pub fn get_token(&self, platform: &str) -> Result<Option<String>, AppError> {
-        let config = Self::read_config();
-        Ok(config.get(&format!("token_{}", platform)).cloned())
+    pub fn store_token(&self, platform: &str, token: &str) -> Result<CredentialStorage, AppError> {
+        if Self::keyring_is_persistent() {
+            if let Ok(entry) = Self::keyring_entry(platform) {
+                if entry.set_password(token).is_ok() {
+                    let mut config = Self::read_config()?;
+                    config.remove(&format!("token_encrypted_{platform}"));
+                    config.remove(&format!("token_{platform}"));
+                    Self::write_config(&config)?;
+                    self.cache_token(platform, token);
+                    return Ok(CredentialStorage::SystemKeyring);
+                }
+            }
+        }
+        Self::store_encrypted(platform, token)?;
+        self.cache_token(platform, token);
+        Ok(CredentialStorage::EncryptedFile)
     }
 
-    // ── Custom base URL (for self-hosted GitLab / Gitee Enterprise) ──
+    pub fn get_token(&self, platform: &str) -> Result<Option<String>, AppError> {
+        if let Some(token) = self.cached_token(platform) {
+            return Ok(Some(token));
+        }
+
+        if Self::keyring_is_persistent() {
+            if let Ok(entry) = Self::keyring_entry(platform) {
+                match entry.get_password() {
+                    Ok(token) => {
+                        self.cache_token(platform, &token);
+                        return Ok(Some(token));
+                    }
+                    Err(keyring::Error::NoEntry) => {}
+                    Err(_) => {}
+                }
+            }
+        }
+
+        let config = Self::read_config()?;
+        if let Some(value) = config.get(&format!("token_encrypted_{platform}")) {
+            let token = decrypt(value).map_err(AppError::Unknown)?;
+            self.cache_token(platform, &token);
+            return Ok(Some(token));
+        }
+
+        if let Some(token) = config.get(&format!("token_{platform}")).cloned() {
+            self.store_token(platform, &token)?;
+            return Ok(Some(token));
+        }
+        Ok(None)
+    }
 
     pub fn store_custom_url(&self, platform: &str, url: &str) -> Result<(), AppError> {
-        let mut config = Self::read_config();
-        config.insert(format!("url_{}", platform), url.to_string());
+        let mut config = Self::read_config()?;
+        config.insert(format!("url_{platform}"), url.to_string());
         Self::write_config(&config)
     }
 
     pub fn get_custom_url(&self, platform: &str) -> Option<String> {
-        let config = Self::read_config();
-        config.get(&format!("url_{}", platform)).cloned()
+        Self::read_config()
+            .ok()
+            .and_then(|config| config.get(&format!("url_{platform}")).cloned())
     }
 
     pub fn delete_custom_url(&self, platform: &str) -> Result<(), AppError> {
-        let mut config = Self::read_config();
-        config.remove(&format!("url_{}", platform));
+        let mut config = Self::read_config()?;
+        config.remove(&format!("url_{platform}"));
         Self::write_config(&config)
     }
 
     pub fn delete_token(&self, platform: &str) -> Result<(), AppError> {
-        let mut config = Self::read_config();
-        config.remove(&format!("token_{}", platform));
-        Self::write_config(&config)
+        self.remove_cached_token(platform);
+        let keyring_error = match Self::keyring_entry(platform) {
+            Ok(entry) => match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => None,
+                Err(error) => Some(error.to_string()),
+            },
+            Err(error) => Some(error.to_string()),
+        };
+        let mut config = Self::read_config()?;
+        config.remove(&format!("token_encrypted_{platform}"));
+        config.remove(&format!("token_{platform}"));
+        Self::write_config(&config)?;
+        if let Some(error) = keyring_error {
+            return Err(AppError::Unknown(format!(
+                "Failed to remove token from system keyring: {error}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn set_dir_permissions(path: &Path) -> Result<(), AppError> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_dir_permissions(_path: &Path) -> Result<(), AppError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_file_creation_mode(options: &mut OpenOptions) {
+    use std::os::unix::fs::OpenOptionsExt;
+    options.mode(0o600);
+}
+
+#[cfg(not(unix))]
+fn set_file_creation_mode(_options: &mut OpenOptions) {}
+
+#[cfg(unix)]
+fn set_file_permissions(path: &Path) -> Result<(), AppError> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_file_permissions(_path: &Path) -> Result<(), AppError> {
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TokenVault;
+
+    #[test]
+    fn configured_keyring_backend_persists_across_processes() {
+        assert!(TokenVault::keyring_is_persistent());
+    }
+
+    #[test]
+    fn session_token_cache_is_available_without_persistent_storage() {
+        let vault = TokenVault::new();
+        vault.cache_token("test-platform", "secret-token");
+
+        assert_eq!(
+            vault.get_token("test-platform").unwrap().as_deref(),
+            Some("secret-token")
+        );
+
+        vault.remove_cached_token("test-platform");
+        assert_eq!(vault.cached_token("test-platform"), None);
     }
 }
