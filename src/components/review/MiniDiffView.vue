@@ -101,17 +101,21 @@ const displayLines = computed((): DisplayLine[] => {
         v-for="(line, i) in displayLines"
         :key="i"
         class="diff-line"
-        :style="line.isComment
-          ? { background: '#fff3cd', color: '#856404', fontWeight: 600 }
-          : line.isOld
-            ? { background: '#f8d7da', color: '#721c24' }
-            : line.isNew
-              ? { background: '#d4edda', color: '#155724' }
-              : {}"
+        :style="
+          line.isComment
+            ? { background: '#fff3cd', color: '#856404', fontWeight: 600 }
+            : line.isOld
+              ? { background: '#f8d7da', color: '#721c24' }
+              : line.isNew
+                ? { background: '#d4edda', color: '#155724' }
+                : {}
+        "
       >
         <span class="ln">{{ line.lineNum }}</span>
-        <span class="mk">{{ line.isOld ? '−' : line.isNew ? '+' : ' ' }}</span>
-        <span class="code"><pre>{{ line.content }}</pre></span>
+        <span class="mk">{{ line.isOld ? "−" : line.isNew ? "+" : " " }}</span>
+        <span class="code">
+          <pre>{{ line.content }}</pre>
+        </span>
       </div>
     </div>
     <div v-else class="no-code">（无代码上下文）</div>

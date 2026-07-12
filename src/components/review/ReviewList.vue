@@ -170,7 +170,9 @@ function needsExpand(body: string) {
           <span class="review-author">{{ item.author.login }}</span>
           <span class="review-kind">{{ item.kind === "comment" ? "行级评论" : "整体评审" }}</span>
           <span v-if="item.path" class="review-path">{{ item.path }}:{{ item.line }}</span>
-          <span v-if="item.kind === 'comment' && isOutdated(item)" class="outdated-badge">代码已过期</span>
+          <span v-if="item.kind === 'comment' && isOutdated(item)" class="outdated-badge"
+            >代码已过期</span
+          >
           <span class="review-time">{{ new Date(item.time).toLocaleString() }}</span>
         </div>
 

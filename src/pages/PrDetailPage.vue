@@ -175,9 +175,7 @@ async function handleAddComment(
   try {
     const sl = startLine !== endLine ? startLine : null;
     const targetLine = endLine;
-    const diffHunk = pr.diff?.files
-      ? extractDiffHunk(pr.diff.files, path, targetLine)
-      : undefined;
+    const diffHunk = pr.diff?.files ? extractDiffHunk(pr.diff.files, path, targetLine) : undefined;
     await reviewCommentAdd(
       platform,
       owner,
