@@ -6,6 +6,21 @@ use crate::error::AppError;
 use crate::models::*;
 use async_trait::async_trait;
 
+/// Normalize a custom host URL to the API root expected by each platform.
+pub fn normalize_api_base(platform: &str, url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    let suffix = match platform {
+        "gitlab" => "/api/v4",
+        "gitee" => "/api/v5",
+        _ => return trimmed.to_string(),
+    };
+    if trimmed.ends_with(suffix) {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}{suffix}")
+    }
+}
+
 /// Common interface for all Git platforms (GitHub, GitLab, Gitee)
 #[async_trait]
 #[allow(clippy::too_many_arguments)]
@@ -125,4 +140,29 @@ pub trait GitPlatform: Send + Sync {
 
     async fn close_issue(&self, owner: &str, repo: &str, issue_number: u64)
         -> Result<(), AppError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_api_base;
+
+    #[test]
+    fn normalizes_platform_api_roots() {
+        assert_eq!(
+            normalize_api_base("gitlab", "https://git.example.com/"),
+            "https://git.example.com/api/v4"
+        );
+        assert_eq!(
+            normalize_api_base("gitlab", "https://git.example.com/proxy"),
+            "https://git.example.com/proxy/api/v4"
+        );
+        assert_eq!(
+            normalize_api_base("gitlab", "https://git.example.com/proxy/api/v4/"),
+            "https://git.example.com/proxy/api/v4"
+        );
+        assert_eq!(
+            normalize_api_base("gitee", "http://gitee.internal/base"),
+            "http://gitee.internal/base/api/v5"
+        );
+    }
 }

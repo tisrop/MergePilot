@@ -7,7 +7,7 @@ import type {
   PrDetail,
   DiffResult,
   MergeStrategy,
-  MergeResult,
+  PrMergeOutcome,
   Review,
   ReviewCommentPosition,
   IssueState,
@@ -98,7 +98,7 @@ export async function prMerge(
   commitTitle?: string,
   commitMessage?: string,
   closeIssues?: boolean,
-): Promise<MergeResult> {
+): Promise<PrMergeOutcome> {
   return invoke("pr_merge", {
     platform,
     owner,

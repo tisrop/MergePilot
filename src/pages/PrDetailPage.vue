@@ -69,6 +69,7 @@ const closeRelatedIssues = ref(false);
 const dropdownOpen = ref(false);
 const operating = ref(false);
 const statusMsg = ref("");
+const mergeWarning = ref("");
 
 const defaultCommitMessage = computed(
   () => `Merge pull request #${number} from ${pr.currentPr?.source_branch ?? ""}`,
@@ -119,7 +120,7 @@ async function handleMerge() {
   operating.value = true;
   statusMsg.value = "正在合并 PR...";
   try {
-    await pr.mergePr(
+    const outcome = await pr.mergePr(
       platform,
       owner,
       repo,
@@ -129,6 +130,11 @@ async function handleMerge() {
       commitMessage.value.trim() || undefined,
       closeRelatedIssues.value || undefined,
     );
+    const failedIssues = outcome.issue_close_failures.map((failure) => `#${failure.number}`);
+    mergeWarning.value =
+      failedIssues.length > 0
+        ? `PR 已合并，但以下关联 Issue 关闭失败：${failedIssues.join("、")}`
+        : "";
     statusMsg.value = "";
   } catch (e) {
     statusMsg.value = "";
@@ -359,6 +365,9 @@ onMounted(async () => {
             操作失败
           </p>
           <p class="error-msg">{{ pr.error }}</p>
+        </div>
+        <div v-if="mergeWarning" class="merge-warning" role="alert">
+          {{ mergeWarning }}
         </div>
       </div>
     </template>
@@ -699,5 +708,14 @@ onMounted(async () => {
   margin: 0;
   font-size: 12px;
   font-weight: 500;
+}
+
+.merge-warning {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  color: var(--color-warning);
+  font-size: 13px;
 }
 </style>

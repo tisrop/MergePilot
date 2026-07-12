@@ -14,6 +14,7 @@ pub async fn auth_login(
     };
 
     let client = state.http_client.as_ref().clone();
+    let custom_url = custom_url.map(|url| crate::platform::normalize_api_base(&platform, &url));
 
     // Build adapter with custom URL if provided
     let p: Box<dyn GitPlatform> = match platform.as_str() {

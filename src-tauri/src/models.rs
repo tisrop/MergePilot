@@ -215,6 +215,19 @@ pub struct PrMergeResult {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueCloseFailure {
+    pub number: u64,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrMergeOutcome {
+    pub merge: PrMergeResult,
+    pub closed_issues: Vec<u64>,
+    pub issue_close_failures: Vec<IssueCloseFailure>,
+}
+
 // ── Pagination ──
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Paginated<T> {

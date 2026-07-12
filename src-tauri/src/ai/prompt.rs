@@ -68,9 +68,13 @@ pub fn build_user_message(diff: &str, context: Option<&PrContext>) -> String {
 
     // Truncate diff if it's too large (max ~64KB for reasonable AI input)
     let diff_content = if diff.len() > 65536 {
+        let mut boundary = 65536;
+        while !diff.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
         format!(
             "{}...\n[Diff 内容过长，已截断，仅展示前 64KB]",
-            &diff[..65536]
+            &diff[..boundary]
         )
     } else {
         diff.to_string()
@@ -82,4 +86,27 @@ pub fn build_user_message(diff: &str, context: Option<&PrContext>) -> String {
     msg.push_str("```");
 
     msg
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_user_message;
+
+    #[test]
+    fn truncates_chinese_on_utf8_boundary() {
+        let diff = format!("{}中tail", "a".repeat(65_535));
+        let message = build_user_message(&diff, None);
+        assert!(message.contains(&"a".repeat(65_535)));
+        assert!(!message.contains("中tail"));
+        assert!(message.contains("已截断"));
+    }
+
+    #[test]
+    fn truncates_emoji_on_utf8_boundary() {
+        let diff = format!("{}🦀tail", "a".repeat(65_534));
+        let message = build_user_message(&diff, None);
+        assert!(message.contains(&"a".repeat(65_534)));
+        assert!(!message.contains("🦀tail"));
+        assert!(message.contains("已截断"));
+    }
 }

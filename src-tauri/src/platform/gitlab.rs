@@ -23,7 +23,7 @@ impl GitLabAdapter {
 
     #[allow(dead_code)]
     pub fn with_base_url(mut self, url: String) -> Self {
-        self.base_url = url.trim_end_matches('/').to_string();
+        self.base_url = super::normalize_api_base("gitlab", &url);
         self
     }
 
@@ -575,5 +575,5 @@ impl GitPlatform for GitLabAdapter {
 }
 
 fn urlencoding(owner: &str, repo: &str) -> String {
-    format!("{}%2F{}", owner, repo)
+    urlencoding::encode(&format!("{owner}/{repo}")).into_owned()
 }

@@ -1,22 +1,33 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
-import { useRouter } from "vue-router";
+import { ref, computed, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
-import { useRepoStore } from "@/stores/useRepoStore";
 import type { Platform } from "@/types";
 import AppSelect from "@/components/shared/AppSelect.vue";
 import { authLogin } from "@/api";
 import { open } from "@tauri-apps/plugin-shell";
 
+const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
-const repo = useRepoStore();
 
-const platform = ref<Platform>("github");
+function parsePlatform(value: unknown): Platform | undefined {
+  return value === "github" || value === "gitlab" || value === "gitee" ? value : undefined;
+}
+
+const platform = ref<Platform>(parsePlatform(route.query.platform) ?? "github");
 const token = ref("");
 const gitlabUrl = ref("");
 const error = ref("");
 const loading = ref(false);
+
+watch(
+  () => route.query.platform,
+  (value) => {
+    const requestedPlatform = parsePlatform(value);
+    if (requestedPlatform) platform.value = requestedPlatform;
+  },
+);
 
 const platforms: { value: Platform; label: string }[] = [
   { value: "github", label: "GitHub" },
@@ -25,6 +36,7 @@ const platforms: { value: Platform; label: string }[] = [
 ];
 
 const needsCustomUrl = computed(() => platform.value === "gitlab" || platform.value === "gitee");
+const usesInsecureHttp = computed(() => getCustomUrl()?.startsWith("http://") ?? false);
 
 function getCustomUrl(): string | undefined {
   if (!needsCustomUrl.value) return undefined;
@@ -47,8 +59,7 @@ async function handleLogin() {
     const result = await authLogin(platform.value, token.value.trim(), getCustomUrl());
     auth.platforms[platform.value] = { user: result.user, isLoggedIn: true };
     auth.activePlatform = platform.value;
-    await repo.fetchRepos(platform.value);
-    router.push("/pr");
+    await router.replace("/pr");
   } catch (e: any) {
     error.value = e?.toString() || "登录失败，请检查 Token 是否正确";
   } finally {
@@ -98,6 +109,9 @@ async function handleLogin() {
           "
         />
         <p class="hint">私有化部署请填写完整地址，如 https://gitlab.example.com</p>
+        <p v-if="usesInsecureHttp" class="http-warning">
+          HTTP 连接不会加密 Token，请仅用于可信内网。
+        </p>
       </div>
 
       <div class="form-group">
@@ -282,5 +296,10 @@ select {
 
 .skip a:hover {
   color: var(--color-primary);
+}
+.http-warning {
+  margin-top: var(--space-2);
+  color: var(--color-warning);
+  font-size: 12px;
 }
 </style>

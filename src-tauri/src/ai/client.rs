@@ -1,4 +1,5 @@
-use futures::StreamExt;
+use eventsource_stream::Eventsource;
+use futures::{Stream, StreamExt};
 use serde_json::Value;
 
 use crate::ai::prompt;
@@ -11,6 +12,39 @@ pub struct AiClient {
     model: String,
     api_key: String,
     client: reqwest::Client,
+}
+
+async fn consume_sse_stream<S, F>(stream: S, mut on_token: F) -> Result<String, AppError>
+where
+    S: Stream<Item = Result<Vec<u8>, String>>,
+    F: FnMut(&str),
+{
+    // Appending an empty event terminator makes providers that omit the final blank line flush safely.
+    let stream = stream.chain(futures::stream::once(async {
+        Ok::<Vec<u8>, String>(b"\n\n".to_vec())
+    }));
+    let events = stream.eventsource();
+    futures::pin_mut!(events);
+    let mut accumulated = String::new();
+
+    while let Some(event) = events.next().await {
+        let event = event.map_err(|error| AppError::Ai(format!("SSE 解析失败: {error}")))?;
+        let data = event.data.trim();
+        if data.is_empty() {
+            continue;
+        }
+        if data == "[DONE]" {
+            break;
+        }
+        let json: Value = serde_json::from_str(data).map_err(|error| {
+            AppError::Ai(format!("AI SSE 数据不是有效 JSON: {error}; data={data}"))
+        })?;
+        if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
+            accumulated.push_str(content);
+            on_token(content);
+        }
+    }
+    Ok(accumulated)
 }
 
 impl AiClient {
@@ -73,7 +107,7 @@ impl AiClient {
         messages: &[Value],
         temperature: f32,
         max_tokens: u32,
-        mut on_token: F,
+        on_token: F,
     ) -> Result<String, AppError>
     where
         F: FnMut(&str) + Send,
@@ -106,42 +140,12 @@ impl AiClient {
             )));
         }
 
-        let mut accumulated = String::new();
-        let mut stream = resp.bytes_stream();
-        let mut buffer = String::new();
-
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?;
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            buffer.push_str(&chunk_str);
-
-            // Parse SSE lines: "data: {...}\n\n"
-            while let Some(pos) = buffer.find("\n\n") {
-                let event_block = buffer[..pos].to_string();
-                buffer = buffer[pos + 2..].to_string();
-
-                for line in event_block.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || !line.starts_with("data: ") {
-                        continue;
-                    }
-                    let data = &line[6..]; // strip "data: "
-
-                    if data == "[DONE]" {
-                        break;
-                    }
-
-                    if let Ok(json) = serde_json::from_str::<Value>(data) {
-                        if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
-                            accumulated.push_str(content);
-                            on_token(content);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(accumulated)
+        let stream = resp.bytes_stream().map(|chunk| {
+            chunk
+                .map(|bytes| bytes.to_vec())
+                .map_err(|error| error.to_string())
+        });
+        consume_sse_stream(stream, on_token).await
     }
 
     /// Perform a code review using the AI model (non-streaming)
@@ -276,5 +280,58 @@ impl AiClient {
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::stream;
+
+    use super::consume_sse_stream;
+
+    fn delta(content: &str) -> String {
+        format!(r#"{{"choices":[{{"delta":{{"content":"{content}"}}}}]}}"#)
+    }
+
+    #[tokio::test]
+    async fn parses_lf_crlf_chunks_multiline_and_done() {
+        let first = delta("你");
+        let second = delta("好");
+        let body = format!(
+            ": keepalive\r\ndata: {first}\r\n\r\ndata: {}\ndata: {}\n\ndata: [DONE]\n\n",
+            &second[..second.len() / 2],
+            &second[second.len() / 2..]
+        );
+        let chunks = body
+            .as_bytes()
+            .chunks(7)
+            .map(|chunk| Ok::<_, String>(chunk.to_vec()))
+            .collect::<Vec<_>>();
+        let mut received = String::new();
+        let result = consume_sse_stream(stream::iter(chunks), |token| received.push_str(token))
+            .await
+            .unwrap();
+        assert_eq!(result, "你好");
+        assert_eq!(received, "你好");
+    }
+
+    #[tokio::test]
+    async fn flushes_final_event_without_blank_line() {
+        let body = format!("data: {}", delta("尾"));
+        let result = consume_sse_stream(stream::iter(vec![Ok(body.into_bytes())]), |_| {})
+            .await
+            .unwrap();
+        assert_eq!(result, "尾");
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_nonempty_json() {
+        let error = consume_sse_stream(
+            stream::iter(vec![Ok(b"data: not-json\n\n".to_vec())]),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("not-json"));
     }
 }

@@ -50,6 +50,17 @@ export interface MergeResult {
   message: string;
 }
 
+export interface IssueCloseFailure {
+  number: number;
+  error: string;
+}
+
+export interface PrMergeOutcome {
+  merge: MergeResult;
+  closed_issues: number[];
+  issue_close_failures: IssueCloseFailure[];
+}
+
 export interface PrFile {
   filename: string;
   status: FileStatus;

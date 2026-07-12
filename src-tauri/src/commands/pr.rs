@@ -97,7 +97,7 @@ pub async fn pr_merge(
     commit_title: Option<String>,
     commit_message: Option<String>,
     close_issues: Option<bool>,
-) -> Result<PrMergeResult, String> {
+) -> Result<PrMergeOutcome, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
     let pr_detail = p
         .get_pull_request(&owner, &repo, number)
@@ -121,16 +121,25 @@ pub async fn pr_merge(
         .await
         .map_err(|e| e.to_string())?;
 
+    let mut closed_issues = Vec::new();
+    let mut issue_close_failures = Vec::new();
     if close_issues.unwrap_or(false) {
-        let issue_numbers = extract_issue_refs(&pr_detail.body);
-        for issue_num in issue_numbers {
-            p.close_issue(&owner, &repo, issue_num)
-                .await
-                .map_err(|e| e.to_string())?;
+        for issue_num in extract_issue_refs(&pr_detail.body) {
+            match p.close_issue(&owner, &repo, issue_num).await {
+                Ok(()) => closed_issues.push(issue_num),
+                Err(error) => issue_close_failures.push(IssueCloseFailure {
+                    number: issue_num,
+                    error: error.to_string(),
+                }),
+            }
         }
     }
 
-    Ok(result)
+    Ok(PrMergeOutcome {
+        merge: result,
+        closed_issues,
+        issue_close_failures,
+    })
 }
 
 #[tauri::command]
