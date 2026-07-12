@@ -171,7 +171,6 @@ onUnmounted(() => {
   font-size: 14px;
   font-family: inherit;
   cursor: pointer;
-  outline: none;
   transition:
     border-color var(--transition-fast),
     box-shadow var(--transition-fast);

@@ -664,7 +664,10 @@ onMounted(async () => {
   font-weight: 500;
   color: var(--color-text-secondary);
   border-bottom: 2px solid transparent;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .tabs button.active {

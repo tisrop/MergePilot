@@ -116,7 +116,10 @@ h4 {
   background: none;
   font-size: 13px;
   font-weight: 500;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
   color: var(--color-text-secondary);
 }
 

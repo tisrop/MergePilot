@@ -466,7 +466,10 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text-secondary);
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .nav a:hover {
@@ -521,7 +524,10 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   border-radius: var(--radius-sm);
   color: var(--color-text-tertiary);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    opacity var(--transition-fast);
 }
 
 .refresh-btn:hover:not(:disabled) {

@@ -190,7 +190,9 @@ CSS、静态资源和前端测试。它是 [`CODE_STANDARDS.md`](CODE_STANDARDS.
 - 超长代码行应在 Diff 容器内部滚动，不得导致整个页面横向滚动。
 - AI 严重级别必须使用 `critical`、`major`、`minor`、`info` 的既有语义映射，不能因视觉偏好
   调换颜色或名称。
-- 远端评论、标题、模型 ID、代码和错误正文一律作为纯文本渲染；禁止使用 `v-html`。
+- 远端评论、标题、模型 ID 和错误正文一律作为纯文本渲染；禁止使用 `v-html`。
+- `DiffViewer.vue` 使用 diff2html 将纯 Diff 转换为本地展示结构，是当前唯一受控的 `v-html`
+  例外；不得把该例外扩展到评论、Markdown 或任意远端 HTML。
 - Markdown 或富文本能力若未来需要引入，必须先完成可信解析、HTML 清洗、链接策略与 CSP 评审。
 
 ## 8. 交互、状态与生命周期
@@ -269,10 +271,13 @@ CSS、静态资源和前端测试。它是 [`CODE_STANDARDS.md`](CODE_STANDARDS.
 
 ### 12.3 提交门禁
 
-按变更范围运行检查。前端代码或样式变更至少执行：
+按变更范围运行检查。`npm run check:frontend-standards` 是 GitHub CI 的阻断项，用于检查
+Tauri IPC 边界、`v-html`、未批准 UI 框架、焦点轮廓、显式 transition 和 `!important` 等可静态
+识别的硬规则。前端代码或样式变更至少执行：
 
 ```bash
 npm run lint
+npm run check:frontend-standards
 npm run format
 npm run build
 npm test

@@ -226,26 +226,26 @@ const severityLabel: Record<Severity, string> = {
 }
 
 .btn-accept {
-  color: var(--color-success) !important;
-  border-color: var(--color-success) !important;
+  color: var(--color-success);
+  border-color: var(--color-success);
 }
 .btn-accept:hover {
-  background: var(--color-success-light) !important;
+  background: var(--color-success-light);
 }
 
 .btn-edit {
-  color: var(--color-primary) !important;
-  border-color: var(--color-primary) !important;
+  color: var(--color-primary);
+  border-color: var(--color-primary);
 }
 .btn-edit:hover {
-  background: var(--color-primary-light) !important;
+  background: var(--color-primary-light);
 }
 
 .btn-reject {
-  color: var(--color-text-tertiary) !important;
+  color: var(--color-text-tertiary);
 }
 .btn-reject:hover {
-  background: var(--color-surface-hover) !important;
+  background: var(--color-surface-hover);
 }
 
 .action-status {

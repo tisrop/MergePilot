@@ -54,7 +54,10 @@ const states: { value: PrState; label: string }[] = [
   background: none;
   font-size: 13px;
   font-weight: 500;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
   color: var(--color-text-secondary);
 }
 

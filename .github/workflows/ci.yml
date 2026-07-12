@@ -32,6 +32,9 @@ jobs:
       - name: Lint (ESLint)
         run: npm run lint
 
+      - name: Frontend standards
+        run: npm run check:frontend-standards
+
       - name: Format check (oxfmt)
         run: npm run format
 
@@ -40,6 +43,9 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+      - name: Unit tests
+        run: npm test
 
   rust-fmt-clippy:
     needs: changes
@@ -148,7 +154,11 @@ jobs:
           filters: |
             frontend:
               - 'src/**'
+              - '.github/checks/frontend-standards.mjs'
               - '*.json'
+              - 'AGENTS.md'
+              - 'CODE_STANDARDS.md'
+              - 'FRONTEND_STANDARDS.md'
               - 'eslint.config.js'
               - '.oxfmtrc*'
               - '.github/workflows/ci.yml'

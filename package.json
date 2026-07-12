@@ -10,9 +10,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint .",
+    "check:frontend-standards": "node .github/checks/frontend-standards.mjs",
     "lint:fix": "eslint . --fix",
-    "format": "oxfmt --check src/",
-    "format:fix": "oxfmt src/",
+    "format": "oxfmt --check src/ .github/checks/",
+    "format:fix": "oxfmt src/ .github/checks/",
     "prepare": "husky",
     "test": "vitest run"
   },

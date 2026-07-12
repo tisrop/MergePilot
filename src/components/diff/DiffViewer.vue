@@ -457,7 +457,6 @@ onUnmounted(() => {
   font-size: 13px;
   font-family: inherit;
   resize: vertical;
-  outline: none;
   min-height: 60px;
   box-sizing: border-box;
   background: var(--color-surface);
