@@ -48,6 +48,7 @@ pub trait GitPlatform: Send + Sync {
         pr_number: u64,
         body: &str,
         event: &ReviewEvent,
+        comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError>;
 
     async fn list_reviews(
@@ -69,7 +70,7 @@ pub trait GitPlatform: Send + Sync {
         line: u32,
         side: &str,
         body: &str,
-    ) -> Result<(), AppError>;
+    ) -> Result<PrComment, AppError>;
 
     async fn list_pr_comments(
         &self,

@@ -440,6 +440,7 @@ impl GitPlatform for GitHubAdapter {
         pr_number: u64,
         body: &str,
         event: &ReviewEvent,
+        comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}/reviews",
@@ -451,10 +452,28 @@ impl GitPlatform for GitHubAdapter {
             ReviewEvent::RequestChanges => "REQUEST_CHANGES",
         };
 
-        let payload = serde_json::json!({
-            "body": body,
-            "event": event_str,
-        });
+        let payload = if comments.is_empty() {
+            serde_json::json!({
+                "body": body,
+                "event": event_str,
+            })
+        } else {
+            let gh_comments: Vec<serde_json::Value> = comments
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "path": c.path,
+                        "position": c.position,
+                        "body": c.body,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "body": body,
+                "event": event_str,
+                "comments": gh_comments,
+            })
+        };
 
         let json = self.post_json(&url, &payload).await?;
 
@@ -478,7 +497,7 @@ impl GitPlatform for GitHubAdapter {
         line: u32,
         side: &str,
         body: &str,
-    ) -> Result<(), AppError> {
+    ) -> Result<PrComment, AppError> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}/comments",
             self.base_url, owner, repo, pr_number
@@ -505,8 +524,21 @@ impl GitPlatform for GitHubAdapter {
                 "side": gh_side,
             })
         };
-        self.post_json(&url, &payload).await?;
-        Ok(())
+        let c: Value = self.post_json(&url, &payload).await?;
+        Ok(PrComment {
+            id: c["id"].clone(),
+            body: c["body"].as_str().unwrap_or("").to_string(),
+            path: c["path"].as_str().unwrap_or("").to_string(),
+            line: c["line"].as_u64().map(|n| n as u32),
+            start_line: c["start_line"].as_u64().map(|n| n as u32),
+            author: Self::map_user(&c["user"]),
+            created_at: c["created_at"].as_str().unwrap_or("").to_string(),
+            commit_id: c["commit_id"].as_str().map(|s| s.to_string()),
+            original_commit_id: c["original_commit_id"].as_str().map(|s| s.to_string()),
+            original_line: c["original_line"].as_u64().map(|n| n as u32),
+            original_start_line: c["original_start_line"].as_u64().map(|n| n as u32),
+            diff_hunk: c["diff_hunk"].as_str().map(|s| s.to_string()),
+        })
     }
 
     async fn list_pr_comments(
@@ -530,6 +562,11 @@ impl GitPlatform for GitHubAdapter {
                 start_line: c["start_line"].as_u64().map(|n| n as u32),
                 author: Self::map_user(&c["user"]),
                 created_at: c["created_at"].as_str().unwrap_or("").to_string(),
+                commit_id: c["commit_id"].as_str().map(|s| s.to_string()),
+                original_commit_id: c["original_commit_id"].as_str().map(|s| s.to_string()),
+                original_line: c["original_line"].as_u64().map(|n| n as u32),
+                original_start_line: c["original_start_line"].as_u64().map(|n| n as u32),
+                diff_hunk: c["diff_hunk"].as_str().map(|s| s.to_string()),
             })
             .collect();
         Ok(comments)

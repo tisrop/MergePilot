@@ -90,6 +90,11 @@ export interface PrComment {
   start_line: number | null;
   author: User;
   created_at: string;
+  commit_id: string | null;
+  original_commit_id: string | null;
+  original_line: number | null;
+  original_start_line: number | null;
+  diff_hunk: string | null;
 }
 
 // ── Issue ──

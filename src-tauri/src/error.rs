@@ -24,6 +24,9 @@ pub enum AppError {
     #[error("AI error: {0}")]
     Ai(String),
 
+    #[error("Not implemented for this platform: {0}")]
+    NotImplemented(String),
+
     #[error("Unknown error: {0}")]
     Unknown(String),
 }

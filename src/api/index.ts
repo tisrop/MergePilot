@@ -170,7 +170,8 @@ export async function reviewCommentAdd(
   line: number,
   side: string,
   body: string,
-): Promise<void> {
+  diffHunk?: string,
+): Promise<PrComment> {
   return invoke("review_comment_add", {
     platform,
     owner,
@@ -182,6 +183,7 @@ export async function reviewCommentAdd(
     line,
     side,
     body,
+    diffHunk: diffHunk ?? null,
   });
 }
 

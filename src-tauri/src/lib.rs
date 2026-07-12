@@ -3,12 +3,14 @@ mod commands;
 pub mod crypto;
 pub mod error;
 pub mod http_client;
+pub mod local_store;
 pub mod models;
 pub mod platform;
 mod state;
 pub mod vault;
 
 use commands::{ai as ai_cmds, auth, issue, pr, review};
+use local_store::CommentSnapshotStore;
 use state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -20,6 +22,10 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::new())
         .setup(|app| {
+            let app_dir = app.path().app_data_dir().unwrap_or_default();
+            let comment_store = CommentSnapshotStore::new(&app_dir.join("comment_cache.db"));
+            app.manage(comment_store);
+
             let settings =
                 MenuItem::with_id(app, "open-settings", "设置...", true, Some("Cmd+,"))?;
             let app_menu = Submenu::with_items(app, "MergePilot", true, &[

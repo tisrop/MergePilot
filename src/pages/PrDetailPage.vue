@@ -9,7 +9,46 @@ import DiffViewer from "@/components/diff/DiffViewer.vue";
 import ReviewForm from "@/components/review/ReviewForm.vue";
 import ReviewList from "@/components/review/ReviewList.vue";
 import AiReviewPanel from "@/components/ai/AiReviewPanel.vue";
-import type { Platform, MergeStrategy } from "@/types";
+import type { Platform, MergeStrategy, PrFile } from "@/types";
+
+function extractDiffHunk(files: PrFile[], path: string, line: number): string | undefined {
+  const file = files.find((f) => f.filename === path);
+  if (!file?.patch) return undefined;
+  const patchLines = file.patch.split("\n");
+  let currentLine = 0;
+  let inHunk = false;
+  let result: string[] = [];
+  for (const pl of patchLines) {
+    const hunkMatch = pl.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      if (inHunk && result.length > 0) {
+        const rangeStart = parseInt(hunkMatch[1], 10);
+        if (rangeStart > line + 5) break;
+      }
+      currentLine = parseInt(hunkMatch[1], 10) - 1;
+      inHunk = false;
+      result = [pl];
+      continue;
+    }
+    if (result.length > 0) {
+      if (pl.startsWith("+")) {
+        currentLine += 1;
+      } else if (pl.startsWith("-")) {
+        // skip old content line counting
+      } else if (pl.startsWith("\\")) {
+        // no-op for no newline markers
+      } else {
+        currentLine += 1;
+      }
+      result.push(pl);
+      if (currentLine >= line && !inHunk) {
+        inHunk = true;
+      }
+      if (inHunk && currentLine > line + 5) break;
+    }
+  }
+  return result.length > 0 ? result.join("\n") : undefined;
+}
 
 const route = useRoute();
 const pr = usePrStore();
@@ -135,6 +174,8 @@ async function handleAddComment(
   if (!pr.currentPr?.head_sha || !body) return;
   try {
     const sl = startLine !== endLine ? startLine : null;
+    const targetLine = endLine;
+    const diffHunk = pr.diff?.files ? extractDiffHunk(pr.diff.files, path, targetLine) : undefined;
     await reviewCommentAdd(
       platform,
       owner,
@@ -143,9 +184,10 @@ async function handleAddComment(
       pr.currentPr.head_sha,
       path,
       sl,
-      endLine,
+      targetLine,
       side,
       body,
+      diffHunk,
     );
     if (reviewListRef.value) {
       reviewListRef.value.refresh();
@@ -374,7 +416,14 @@ onMounted(async () => {
           <ReviewForm :platform="platform" :owner="owner" :repo="repo" :pr-number="number" />
         </div>
         <div v-else-if="activeTab === 'reviews'">
-          <ReviewList :platform="platform" :owner="owner" :repo="repo" :pr-number="number" />
+          <ReviewList
+            :platform="platform"
+            :owner="owner"
+            :repo="repo"
+            :pr-number="number"
+            :head-sha="pr.currentPr?.head_sha ?? null"
+            :diff-files="pr.diff?.files"
+          />
         </div>
         <div v-else-if="activeTab === 'ai'">
           <AiReviewPanel

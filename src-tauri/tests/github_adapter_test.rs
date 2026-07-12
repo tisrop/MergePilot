@@ -120,6 +120,7 @@ async fn test_github_create_review() {
             42,
             "LGTM!",
             &mergepilot_lib::models::ReviewEvent::Approve,
+            &[],
         )
         .await
         .expect("should create review");

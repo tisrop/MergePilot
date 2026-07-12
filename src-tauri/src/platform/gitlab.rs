@@ -318,6 +318,7 @@ impl GitPlatform for GitLabAdapter {
         pr_number: u64,
         body: &str,
         event: &ReviewEvent,
+        _comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
         let project_id = urlencoding(owner, repo);
 
@@ -359,9 +360,9 @@ impl GitPlatform for GitLabAdapter {
         _line: u32,
         _side: &str,
         _body: &str,
-    ) -> Result<(), AppError> {
+    ) -> Result<PrComment, AppError> {
         // TODO: implement GitLab MR comment
-        Ok(())
+        Err(AppError::NotImplemented("GitLab inline comments".into()))
     }
 
     async fn list_pr_comments(

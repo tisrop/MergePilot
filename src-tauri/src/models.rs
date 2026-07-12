@@ -104,6 +104,7 @@ pub enum ReviewEvent {
 pub struct ReviewCommentPosition {
     pub path: String,
     pub position: u32,
+    pub end_line: Option<u32>,
     pub body: String,
 }
 
@@ -133,6 +134,11 @@ pub struct PrComment {
     pub start_line: Option<u32>,
     pub author: User,
     pub created_at: String,
+    pub commit_id: Option<String>,
+    pub original_commit_id: Option<String>,
+    pub original_line: Option<u32>,
+    pub original_start_line: Option<u32>,
+    pub diff_hunk: Option<String>,
 }
 
 // ── Issue ──

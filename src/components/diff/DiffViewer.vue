@@ -31,6 +31,8 @@ const diffHtml = computed(() => {
   });
 });
 
+const popupRef = ref<HTMLElement | null>(null);
+
 const quickComment = ref<{
   x: number;
   y: number;
@@ -233,10 +235,31 @@ function handleQuickKeydown(e: KeyboardEvent) {
   if (e.key === "Escape") quickComment.value = null;
 }
 
+async function adjustPopupPosition() {
+  await nextTick();
+  const el = popupRef.value;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const overflowRight = rect.right - window.innerWidth;
+  const overflowBottom = rect.bottom - window.innerHeight;
+  if (overflowRight > 0) {
+    el.style.left = Math.max(0, rect.left - overflowRight) + "px";
+  }
+  if (overflowBottom > 0) {
+    el.style.top = Math.max(0, rect.top - overflowBottom) + "px";
+  }
+}
+
 watch(quickComment, async (val) => {
   if (val) {
-    await nextTick();
     (document.querySelector(".quick-comment-textarea") as HTMLTextAreaElement)?.focus();
+    await adjustPopupPosition();
+  }
+});
+
+watch([quickCategory, quickSubCategory], async () => {
+  if (quickComment.value) {
+    await adjustPopupPosition();
   }
 });
 
@@ -260,6 +283,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="quickComment"
+        ref="popupRef"
         class="quick-comment-popup"
         :style="{ left: quickComment.x + 'px', top: quickComment.y - 8 + 'px' }"
         @click.stop
