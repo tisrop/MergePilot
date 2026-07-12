@@ -6,6 +6,7 @@ import { useRepoStore } from "@/stores/useRepoStore";
 import type { Platform } from "@/types";
 import AppSelect from "@/components/shared/AppSelect.vue";
 import { authLogin } from "@/api";
+import { open } from "@tauri-apps/plugin-shell";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -133,16 +134,9 @@ async function handleLogin() {
       </button>
 
       <div class="help-links">
-        <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">GitHub Token</a>
-        <a
-          href="https://gitlab.com/-/user_settings/personal_access_tokens"
-          target="_blank"
-          rel="noopener"
-          >GitLab Token</a
-        >
-        <a href="https://gitee.com/profile/personal_access_tokens" target="_blank" rel="noopener"
-          >Gitee Token</a
-        >
+        <span class="token-link" @click="open('https://github.com/settings/tokens')">GitHub Token</span>
+        <span class="token-link" @click="open('https://gitlab.com/-/user_settings/personal_access_tokens')">GitLab Token</span>
+        <span class="token-link" @click="open('https://gitee.com/profile/personal_access_tokens')">Gitee Token</span>
       </div>
 
       <p class="skip">
@@ -262,6 +256,16 @@ select {
   text-align: center;
   margin-top: var(--space-4);
   font-size: 13px;
+}
+
+.token-link {
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.token-link:hover {
+  text-decoration: underline;
 }
 
 .skip a {
