@@ -134,9 +134,17 @@ async function handleLogin() {
       </button>
 
       <div class="help-links">
-        <span class="token-link" @click="open('https://github.com/settings/tokens')">GitHub Token</span>
-        <span class="token-link" @click="open('https://gitlab.com/-/user_settings/personal_access_tokens')">GitLab Token</span>
-        <span class="token-link" @click="open('https://gitee.com/profile/personal_access_tokens')">Gitee Token</span>
+        <span class="token-link" @click="open('https://github.com/settings/tokens')"
+          >GitHub Token</span
+        >
+        <span
+          class="token-link"
+          @click="open('https://gitlab.com/-/user_settings/personal_access_tokens')"
+          >GitLab Token</span
+        >
+        <span class="token-link" @click="open('https://gitee.com/profile/personal_access_tokens')"
+          >Gitee Token</span
+        >
       </div>
 
       <p class="skip">

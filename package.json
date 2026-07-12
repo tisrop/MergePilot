@@ -11,8 +11,8 @@
     "tauri": "tauri",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --check src/",
-    "format:fix": "prettier --write src/",
+    "format": "oxfmt --check src/",
+    "format:fix": "oxfmt src/",
     "prepare": "husky"
   },
   "dependencies": {
@@ -32,10 +32,9 @@
     "@typescript-eslint/parser": "^8.63.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "eslint": "^10.7.0",
-    "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^10.9.2",
     "husky": "^9.1.7",
-    "prettier": "^3.9.5",
+    "oxfmt": "^0.58.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vue-tsc": "^2.2.0"

@@ -239,11 +239,17 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
             v-for="r in group.repos"
             :key="r.id"
             :class="{
-              active: repo.activeFullName === r.full_name || repo.activeFullName !== null && repo.activeFullName === r.parent_full_name,
+              active:
+                repo.activeFullName === r.full_name ||
+                (repo.activeFullName !== null && repo.activeFullName === r.parent_full_name),
               'is-fork': r.fork,
             }"
             :title="r.fork && r.parent_full_name ? 'Fork from ' + r.parent_full_name : r.full_name"
-            @click="r.fork ? selectForkRepo(r, true) : (selectRepo(getRepoOwner(r.full_name)), repo.setForkContext(null))"
+            @click="
+              r.fork
+                ? selectForkRepo(r, true)
+                : (selectRepo(getRepoOwner(r.full_name)), repo.setForkContext(null))
+            "
           >
             <svg
               v-if="r.fork"

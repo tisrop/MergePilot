@@ -11,8 +11,8 @@ npm run build            # vue-tsc --noEmit 类型检查 → vite build
 npm run tauri -- build   # 生产构建，产物在 src-tauri/target/release/bundle/
 npm run lint             # ESLint 检查
 npm run lint:fix         # ESLint 自动修复
-npm run format           # Prettier 格式检查
-npm run format:fix       # Prettier 格式化
+npm run format           # oxfmt 格式检查
+npm run format:fix       # oxfmt 格式化
 cd src-tauri && cargo test              # 全部 Rust 测试
 cd src-tauri && cargo test github_adapter -- --nocapture  # 单个测试目标
 ```
@@ -54,8 +54,8 @@ src-tauri/           # Rust 后端
 
 - **无 UI 框架**：手写 CSS + CSS 变量。不要引入 Tailwind 或组件库除非沟通。
 - Pinia store 直接调用 `src/api/index.ts`，不直接 `invoke`。
-- ESLint 使用平面配置（`eslint.config.js`），集成 `eslint-plugin-vue`、`@typescript-eslint`、`eslint-config-prettier`。无内联 `eslint-disable` 注释。
-- Prettier 配置在 `.prettierrc`，分号、双引号、尾逗号、100 列宽。`.prettierignore` 忽略 `dist/`、`src-tauri/`。
+- ESLint 使用平面配置（`eslint.config.js`），集成 `eslint-plugin-vue`、`@typescript-eslint`。无内联 `eslint-disable` 注释。
+- oxfmt 配置在 `.oxfmtrc.json`，分号、双引号、尾逗号、100 列宽。忽略模式继承自原 `.prettierignore`。
 - `src/main.ts:8` 有 HMR 保护：`/settings` 路径在启动时重定向到 `/pr`。
 - 菜单 "设置..."（Cmd+,）通过 `window.__goToSettings()` 在运行时切换路由。
 - 语言：界面和 AI Prompt 均为中文。

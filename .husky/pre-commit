@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-npm run lint:fix
+npm run format:fix
 
-# Only format and re-add Rust files that are already staged
 TOPLEVEL=$(git rev-parse --show-toplevel)
 
+# Format staged frontend files with oxfmt
+staged_frontend=$(git diff --staged --name-only --diff-filter=ACM -- 'src/' | grep -E '\.(ts|js|vue|css)$' || true)
+if [ -n "$staged_frontend" ]; then
+  echo "Formatting staged frontend files with oxfmt"
+  npx oxfmt src/
+  echo "$staged_frontend" | while IFS= read -r f; do
+    git add "$TOPLEVEL/$f" 2>/dev/null || true
+  done
+fi
+
+# Format staged Rust files with cargo fmt
 format_staged_rust() {
   dir="$1"
   staged=$(git diff --staged --name-only --diff-filter=ACM -- "$dir" | grep '\.rs$' || true)

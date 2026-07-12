@@ -32,7 +32,7 @@ jobs:
       - name: Lint (ESLint)
         run: npm run lint
 
-      - name: Format check (Prettier)
+      - name: Format check (oxfmt)
         run: npm run format
 
       - name: Type check
@@ -150,7 +150,7 @@ jobs:
               - 'src/**'
               - '*.json'
               - 'eslint.config.js'
-              - '.prettierrc*'
+              - '.oxfmtrc*'
               - '.github/workflows/ci.yml'
             rust:
               - 'src-tauri/**'

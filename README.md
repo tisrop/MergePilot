@@ -194,8 +194,7 @@ mergepilot/
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 ├── eslint.config.js       # ESLint 平面配置
-├── .prettierrc            # Prettier 配置
-├── .prettierignore        # Prettier 忽略规则
+├── .oxfmtrc.json          # oxfmt 配置
 ├── package.json
 ├── vite.config.ts
 └── README.md
@@ -209,9 +208,9 @@ npm run build
 
 # 代码检查与格式化
 npm run lint              # ESLint 检查
-npm run format            # Prettier 格式检查
-npm run format:fix        # Prettier 格式化
+npm run format            # oxfmt 格式检查
 
+npm run format:fix        # oxfmt 格式化
 # Rust 测试
 cd src-tauri
 cargo test

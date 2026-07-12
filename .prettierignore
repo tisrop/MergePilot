@@ -1,8 +1,0 @@
-dist/
-src-tauri/
-node_modules/
-*.config.*
-.opencode/
-.codegraph/
-.codewhale/
-.reasonix/

@@ -194,7 +194,9 @@ async function handleAddComment(
       diffHunk,
     );
     commentSuccess.value = true;
-    setTimeout(() => { commentSuccess.value = false; }, 3000);
+    setTimeout(() => {
+      commentSuccess.value = false;
+    }, 3000);
     if (reviewListRef.value) {
       reviewListRef.value.refresh();
     }
