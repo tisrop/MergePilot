@@ -211,12 +211,23 @@ mergepilot/
 │   ├── tests/                  # WireMock 集成测试
 │   ├── Cargo.toml
 │   └── tauri.conf.json
+├── AGENTS.md              # AI 编码代理的项目上下文与操作约束
+├── CODE_STANDARDS.md      # 代码实现与评审规范
 ├── eslint.config.js       # ESLint 平面配置
 ├── .oxfmtrc.json          # oxfmt 配置
 ├── package.json
 ├── vite.config.ts
 └── README.md
 ```
+
+## 代码规范
+
+开发和代码评审以 [`CODE_STANDARDS.md`](CODE_STANDARDS.md) 为基线。该规范覆盖 Vue/TypeScript、
+Rust/Tauri 架构边界、跨平台行为、异步生命周期、凭据安全、测试要求和合并门禁。
+AI 编码代理还需同时遵循 [`AGENTS.md`](AGENTS.md) 中的项目操作约束。
+
+格式和静态检查分别由 ESLint、oxfmt、rustfmt 与 Clippy 执行；涉及认证、平台切换、分页、AI
+请求生命周期或合并结果的改动必须同步增加回归测试。
 
 ## 开发与测试
 
