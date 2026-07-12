@@ -78,9 +78,7 @@ pub async fn review_submit(
         "request_changes" => ReviewEvent::RequestChanges,
         _ => ReviewEvent::Comment,
     };
-    p.create_review(&owner, &repo, pr_number, &body, &review_event, &comments)
-        .await
-        .map_err(|e| e.to_string())
+    p.create_review(&owner, &repo, pr_number, &body, &review_event, &comments).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -92,9 +90,7 @@ pub async fn review_list(
     pr_number: u64,
 ) -> Result<Vec<Review>, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
-    p.list_reviews(&owner, &repo, pr_number)
-        .await
-        .map_err(|e| e.to_string())
+    p.list_reviews(&owner, &repo, pr_number).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -107,19 +103,12 @@ pub async fn review_comments_list(
     pr_number: u64,
 ) -> Result<Vec<PrComment>, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
-    let mut comments = p
-        .list_pr_comments(&owner, &repo, pr_number)
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut comments = p.list_pr_comments(&owner, &repo, pr_number).await.map_err(|e| e.to_string())?;
     // For platforms that don't return diff_hunk (e.g. Gitee), supplement from SQLite
     if platform == "gitee" {
-        let snapshots = comment_store
-            .get_snapshots_for_pr(&platform, &owner, &repo, pr_number)
-            .unwrap_or_default();
-        let snapshot_map: std::collections::HashMap<String, CommentSnapshot> = snapshots
-            .into_iter()
-            .map(|s| (s.comment_id.clone(), s))
-            .collect();
+        let snapshots = comment_store.get_snapshots_for_pr(&platform, &owner, &repo, pr_number).unwrap_or_default();
+        let snapshot_map: std::collections::HashMap<String, CommentSnapshot> =
+            snapshots.into_iter().map(|s| (s.comment_id.clone(), s)).collect();
         for c in &mut comments {
             let cid = format!("{}", c.id);
             if c.diff_hunk.is_none() {
@@ -189,9 +178,7 @@ pub async fn review_comment_add(
 ) -> Result<PrComment, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
     let mut comment = p
-        .create_pr_comment(
-            &owner, &repo, pr_number, &commit_id, &path, start_line, line, &side, &body,
-        )
+        .create_pr_comment(&owner, &repo, pr_number, &commit_id, &path, start_line, line, &side, &body)
         .await
         .map_err(|e| e.to_string())?;
     // If the platform didn't return diff_hunk but the caller provided it, write to SQLite
@@ -210,9 +197,7 @@ pub async fn review_comment_add(
                 original_line: comment.original_line,
                 original_start_line: comment.original_start_line,
             };
-            comment_store
-                .save_snapshot(&snapshot)
-                .map_err(|e| e.to_string())?;
+            comment_store.save_snapshot(&snapshot).map_err(|e| e.to_string())?;
         }
     }
     Ok(comment)

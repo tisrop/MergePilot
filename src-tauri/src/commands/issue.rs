@@ -19,9 +19,7 @@ pub async fn issue_list(
         Some("all") => IssueState::All,
         _ => IssueState::Open,
     };
-    p.list_issues(&owner, &repo, &issue_state, page.unwrap_or(1))
-        .await
-        .map_err(|e| e.to_string())
+    p.list_issues(&owner, &repo, &issue_state, page.unwrap_or(1)).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -35,7 +33,5 @@ pub async fn issue_create(
     labels: Vec<String>,
 ) -> Result<Issue, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
-    p.create_issue(&owner, &repo, &title, &body, &labels)
-        .await
-        .map_err(|e| e.to_string())
+    p.create_issue(&owner, &repo, &title, &body, &labels).await.map_err(|e| e.to_string())
 }

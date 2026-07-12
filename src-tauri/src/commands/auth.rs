@@ -9,9 +9,7 @@ pub async fn auth_login(
     token: String,
     custom_url: Option<String>,
 ) -> Result<AuthLoginResult, String> {
-    use crate::platform::{
-        gitee::GiteeAdapter, github::GitHubAdapter, gitlab::GitLabAdapter, GitPlatform,
-    };
+    use crate::platform::{gitee::GiteeAdapter, github::GitHubAdapter, gitlab::GitLabAdapter, GitPlatform};
 
     let client = state.http_client.as_ref().clone();
     let custom_url = custom_url.map(|url| crate::platform::normalize_api_base(&platform, &url));
@@ -49,35 +47,20 @@ pub async fn auth_login(
     let user = p.current_user().await.map_err(|e| e.to_string())?;
 
     // Store token
-    let credential_storage = state
-        .token_vault
-        .store_token(&platform, &token)
-        .map_err(|e| e.to_string())?;
+    let credential_storage = state.token_vault.store_token(&platform, &token).map_err(|e| e.to_string())?;
 
     // Store custom URL if provided
     if let Some(ref url) = custom_url {
-        state
-            .token_vault
-            .store_custom_url(&platform, url)
-            .map_err(|e| e.to_string())?;
+        state.token_vault.store_custom_url(&platform, url).map_err(|e| e.to_string())?;
     }
 
-    Ok(AuthLoginResult {
-        user,
-        credential_storage,
-    })
+    Ok(AuthLoginResult { user, credential_storage })
 }
 
 #[tauri::command]
 pub async fn auth_logout(state: State<'_, AppState>, platform: String) -> Result<(), String> {
-    state
-        .token_vault
-        .delete_token(&platform)
-        .map_err(|e| e.to_string())?;
-    state
-        .token_vault
-        .delete_custom_url(&platform)
-        .map_err(|e| e.to_string())?;
+    state.token_vault.delete_token(&platform).map_err(|e| e.to_string())?;
+    state.token_vault.delete_custom_url(&platform).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -85,12 +68,7 @@ pub async fn auth_logout(state: State<'_, AppState>, platform: String) -> Result
 pub async fn auth_has_any_token(state: State<'_, AppState>) -> Result<bool, String> {
     let platforms = ["github", "gitlab", "gitee"];
     for platform in platforms {
-        if state
-            .token_vault
-            .get_token(platform)
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
+        if state.token_vault.get_token(platform).map_err(|e| e.to_string())?.is_some() {
             return Ok(true);
         }
     }
@@ -99,18 +77,11 @@ pub async fn auth_has_any_token(state: State<'_, AppState>) -> Result<bool, Stri
 
 #[tauri::command]
 pub async fn auth_has_token(state: State<'_, AppState>, platform: String) -> Result<bool, String> {
-    Ok(state
-        .token_vault
-        .get_token(&platform)
-        .map_err(|e| e.to_string())?
-        .is_some())
+    Ok(state.token_vault.get_token(&platform).map_err(|e| e.to_string())?.is_some())
 }
 
 #[tauri::command]
-pub async fn auth_check(
-    state: State<'_, AppState>,
-    platform: String,
-) -> Result<Option<User>, String> {
+pub async fn auth_check(state: State<'_, AppState>, platform: String) -> Result<Option<User>, String> {
     let p = match build_platform(&platform, &state) {
         Ok(p) => p,
         Err(_) => return Ok(None),
@@ -149,31 +120,16 @@ pub(crate) fn build_platform(
     match platform {
         "github" => {
             let adapter = GitHubAdapter::new(client, token);
-            Ok(Box::new(if let Some(url) = custom_url {
-                adapter.with_base_url(url)
-            } else {
-                adapter
-            }))
+            Ok(Box::new(if let Some(url) = custom_url { adapter.with_base_url(url) } else { adapter }))
         }
         "gitlab" => {
             let adapter = GitLabAdapter::new(client, token);
-            Ok(Box::new(if let Some(url) = custom_url {
-                adapter.with_base_url(url)
-            } else {
-                adapter
-            }))
+            Ok(Box::new(if let Some(url) = custom_url { adapter.with_base_url(url) } else { adapter }))
         }
         "gitee" => {
             let adapter = GiteeAdapter::new(client, token);
-            Ok(Box::new(if let Some(url) = custom_url {
-                adapter.with_base_url(url)
-            } else {
-                adapter
-            }))
+            Ok(Box::new(if let Some(url) = custom_url { adapter.with_base_url(url) } else { adapter }))
         }
-        _ => Err(crate::error::AppError::Unknown(format!(
-            "Unknown platform: {}",
-            platform
-        ))),
+        _ => Err(crate::error::AppError::Unknown(format!("Unknown platform: {}", platform))),
     }
 }

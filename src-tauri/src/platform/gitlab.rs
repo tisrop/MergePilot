@@ -14,11 +14,7 @@ pub struct GitLabAdapter {
 
 impl GitLabAdapter {
     pub fn new(client: HttpClient, token: String) -> Self {
-        Self {
-            client,
-            token,
-            base_url: "https://gitlab.com/api/v4".to_string(),
-        }
+        Self { client, token, base_url: "https://gitlab.com/api/v4".to_string() }
     }
 
     #[allow(dead_code)]
@@ -92,10 +88,7 @@ impl GitPlatform for GitLabAdapter {
     }
 
     async fn list_repos(&self, page: u32) -> Result<Paginated<RepoSummary>, AppError> {
-        let url = format!(
-            "{}/projects?membership=true&per_page=100&page={}",
-            self.base_url, page
-        );
+        let url = format!("{}/projects?membership=true&per_page=100&page={}", self.base_url, page);
         let resp = self
             .client
             .get(&url)
@@ -126,9 +119,7 @@ impl GitPlatform for GitLabAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!(
-                "GitLab API {status} ({url}): {body}"
-            )));
+            return Err(AppError::Api(format!("GitLab API {status} ({url}): {body}")));
         }
         let items: Vec<Value> = resp.json().await?;
 
@@ -138,12 +129,8 @@ impl GitPlatform for GitLabAdapter {
                 let path = r["path_with_namespace"].as_str().unwrap_or("");
                 let fork = r["forked_from_project"].is_object();
                 let (parent_full_name, parent_owner) = if fork {
-                    let parent_name = r["forked_from_project"]["path_with_namespace"]
-                        .as_str()
-                        .map(|s| s.to_string());
-                    let parent_owner = r["forked_from_project"]["namespace"]["path"]
-                        .as_str()
-                        .map(|s| s.to_string());
+                    let parent_name = r["forked_from_project"]["path_with_namespace"].as_str().map(|s| s.to_string());
+                    let parent_owner = r["forked_from_project"]["namespace"]["path"].as_str().map(|s| s.to_string());
                     (parent_name, parent_owner)
                 } else {
                     (None, None)
@@ -153,10 +140,7 @@ impl GitPlatform for GitLabAdapter {
                     _ => "user",
                 };
                 let owner_path = r["namespace"]["path"].as_str().unwrap_or("").to_string();
-                let owner_display_name = r["namespace"]["name"]
-                    .as_str()
-                    .unwrap_or(&owner_path)
-                    .to_string();
+                let owner_display_name = r["namespace"]["name"].as_str().unwrap_or(&owner_path).to_string();
                 RepoSummary {
                     id: r["id"].clone(),
                     name: r["name"].as_str().unwrap_or("").to_string(),
@@ -173,12 +157,7 @@ impl GitPlatform for GitLabAdapter {
             })
             .collect();
 
-        Ok(Paginated {
-            items: repos,
-            page,
-            total_pages,
-            total_count,
-        })
+        Ok(Paginated { items: repos, page, total_pages, total_count })
     }
 
     async fn list_pull_requests(
@@ -233,10 +212,7 @@ impl GitPlatform for GitLabAdapter {
                 number: mr["iid"].as_u64().unwrap_or(0),
                 title: mr["title"].as_str().unwrap_or("").to_string(),
                 author: Self::map_user(&mr["author"]),
-                state: match (
-                    mr["state"].as_str().unwrap_or(""),
-                    mr["merged_at"].is_null(),
-                ) {
+                state: match (mr["state"].as_str().unwrap_or(""), mr["merged_at"].is_null()) {
                     (_, false) => PrState::Merged,
                     ("closed", _) => PrState::Closed,
                     _ => PrState::Open,
@@ -245,44 +221,24 @@ impl GitPlatform for GitLabAdapter {
                 updated_at: mr["updated_at"].as_str().unwrap_or("").to_string(),
                 labels: mr["labels"]
                     .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|l| l.as_str().map(String::from))
-                            .collect()
-                    })
+                    .map(|arr| arr.iter().filter_map(|l| l.as_str().map(String::from)).collect())
                     .unwrap_or_default(),
             })
             .collect();
 
-        Ok(Paginated {
-            items: mrs,
-            page,
-            total_pages,
-            total_count,
-        })
+        Ok(Paginated { items: mrs, page, total_pages, total_count })
     }
 
-    async fn get_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrDetail, AppError> {
+    async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError> {
         let project_id = urlencoding(owner, repo);
-        let url = format!(
-            "{}/projects/{}/merge_requests/{}",
-            self.base_url, project_id, pr_number
-        );
+        let url = format!("{}/projects/{}/merge_requests/{}", self.base_url, project_id, pr_number);
         let json = self.get_json::<Value>(&url).await?;
 
         let summary = PrSummary {
             number: json["iid"].as_u64().unwrap_or(0),
             title: json["title"].as_str().unwrap_or("").to_string(),
             author: Self::map_user(&json["author"]),
-            state: match (
-                json["state"].as_str().unwrap_or(""),
-                json["merged_at"].is_null(),
-            ) {
+            state: match (json["state"].as_str().unwrap_or(""), json["merged_at"].is_null()) {
                 (_, false) => PrState::Merged,
                 ("closed", _) => PrState::Closed,
                 _ => PrState::Open,
@@ -291,11 +247,7 @@ impl GitPlatform for GitLabAdapter {
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
             labels: json["labels"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|l| l.as_str().map(String::from))
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|l| l.as_str().map(String::from)).collect())
                 .unwrap_or_default(),
         };
 
@@ -309,17 +261,9 @@ impl GitPlatform for GitLabAdapter {
         })
     }
 
-    async fn get_pr_diff(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<(String, Vec<PrFile>), AppError> {
+    async fn get_pr_diff(&self, owner: &str, repo: &str, pr_number: u64) -> Result<(String, Vec<PrFile>), AppError> {
         let project_id = urlencoding(owner, repo);
-        let url = format!(
-            "{}/projects/{}/merge_requests/{}/changes",
-            self.base_url, project_id, pr_number
-        );
+        let url = format!("{}/projects/{}/merge_requests/{}/changes", self.base_url, project_id, pr_number);
         let json = self.get_json::<Value>(&url).await?;
 
         let changes: Vec<PrFile> = json["changes"]
@@ -347,11 +291,7 @@ impl GitPlatform for GitLabAdapter {
             .unwrap_or_default();
 
         // Build unified diff from individual file diffs
-        let diff = changes
-            .iter()
-            .map(|f| f.patch.clone())
-            .collect::<Vec<_>>()
-            .join("");
+        let diff = changes.iter().map(|f| f.patch.clone()).collect::<Vec<_>>().join("");
 
         Ok((diff, changes))
     }
@@ -371,10 +311,7 @@ impl GitPlatform for GitLabAdapter {
         let project_id = urlencoding(owner, repo);
 
         // GitLab uses notes for reviews; approval API is separate
-        let url = format!(
-            "{}/projects/{}/merge_requests/{}/notes",
-            self.base_url, project_id, pr_number
-        );
+        let url = format!("{}/projects/{}/merge_requests/{}/notes", self.base_url, project_id, pr_number);
         let payload = serde_json::json!({
             "body": body,
         });
@@ -406,26 +343,13 @@ impl GitPlatform for GitLabAdapter {
         Err(AppError::NotImplemented("GitLab inline comments".into()))
     }
 
-    async fn list_pr_comments(
-        &self,
-        _owner: &str,
-        _repo: &str,
-        _pr_number: u64,
-    ) -> Result<Vec<PrComment>, AppError> {
+    async fn list_pr_comments(&self, _owner: &str, _repo: &str, _pr_number: u64) -> Result<Vec<PrComment>, AppError> {
         Ok(Vec::new())
     }
 
-    async fn list_reviews(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<Vec<Review>, AppError> {
+    async fn list_reviews(&self, owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Review>, AppError> {
         let project_id = urlencoding(owner, repo);
-        let url = format!(
-            "{}/projects/{}/merge_requests/{}/notes?per_page=100",
-            self.base_url, project_id, pr_number
-        );
+        let url = format!("{}/projects/{}/merge_requests/{}/notes?per_page=100", self.base_url, project_id, pr_number);
         let items: Vec<Value> = self.get_json(&url).await?;
 
         let reviews = items
@@ -470,22 +394,13 @@ impl GitPlatform for GitLabAdapter {
                 },
                 labels: i["labels"]
                     .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|l| l.as_str().map(String::from))
-                            .collect()
-                    })
+                    .map(|arr| arr.iter().filter_map(|l| l.as_str().map(String::from)).collect())
                     .unwrap_or_default(),
                 created_at: i["created_at"].as_str().unwrap_or("").to_string(),
             })
             .collect();
 
-        Ok(Paginated {
-            items: issues,
-            page,
-            total_pages: 1,
-            total_count: 0,
-        })
+        Ok(Paginated { items: issues, page, total_pages: 1, total_count: 0 })
     }
 
     async fn create_issue(
@@ -517,11 +432,7 @@ impl GitPlatform for GitLabAdapter {
             },
             labels: json["labels"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|l| l.as_str().map(String::from))
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|l| l.as_str().map(String::from)).collect())
                 .unwrap_or_default(),
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
@@ -539,10 +450,7 @@ impl GitPlatform for GitLabAdapter {
         sha: &str,
     ) -> Result<PrMergeResult, AppError> {
         let project_id = urlencoding(owner, repo);
-        let url = format!(
-            "{}/projects/{}/merge_requests/{}/merge",
-            self.base_url, project_id, pr_number
-        );
+        let url = format!("{}/projects/{}/merge_requests/{}/merge", self.base_url, project_id, pr_number);
         let squash = matches!(strategy, MergeStrategy::Squash);
         let mut payload = serde_json::json!({
             "squash": squash,
@@ -552,56 +460,28 @@ impl GitPlatform for GitLabAdapter {
             payload["merge_commit_message"] = serde_json::Value::String(m);
         }
         let json = self.put_json(&url, &payload).await?;
-        Ok(PrMergeResult {
-            merged: true,
-            sha: json["id"].as_str().unwrap_or("").to_string(),
-            message: String::new(),
-        })
+        Ok(PrMergeResult { merged: true, sha: json["id"].as_str().unwrap_or("").to_string(), message: String::new() })
     }
 
-    async fn close_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrState, AppError> {
+    async fn close_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrState, AppError> {
         let project_id = urlencoding(owner, repo);
-        let url = format!(
-            "{}/projects/{}/merge_requests/{}",
-            self.base_url, project_id, pr_number
-        );
+        let url = format!("{}/projects/{}/merge_requests/{}", self.base_url, project_id, pr_number);
         let payload = serde_json::json!({ "state_event": "close" });
         self.put_json(&url, &payload).await?;
         Ok(PrState::Closed)
     }
 
-    async fn reopen_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrState, AppError> {
+    async fn reopen_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrState, AppError> {
         let project_id = urlencoding(owner, repo);
-        let url = format!(
-            "{}/projects/{}/merge_requests/{}",
-            self.base_url, project_id, pr_number
-        );
+        let url = format!("{}/projects/{}/merge_requests/{}", self.base_url, project_id, pr_number);
         let payload = serde_json::json!({ "state_event": "reopen" });
         self.put_json(&url, &payload).await?;
         Ok(PrState::Open)
     }
 
-    async fn close_issue(
-        &self,
-        owner: &str,
-        repo: &str,
-        issue_number: u64,
-    ) -> Result<(), AppError> {
+    async fn close_issue(&self, owner: &str, repo: &str, issue_number: u64) -> Result<(), AppError> {
         let project_id = urlencoding(owner, repo);
-        let url = format!(
-            "{}/projects/{}/issues/{}",
-            self.base_url, project_id, issue_number
-        );
+        let url = format!("{}/projects/{}/issues/{}", self.base_url, project_id, issue_number);
         let payload = serde_json::json!({ "state_event": "close" });
         self.put_json(&url, &payload).await?;
         Ok(())

@@ -19,10 +19,7 @@ pub struct AiTaskRegistry {
 
 impl AiTaskRegistry {
     fn new() -> Self {
-        Self {
-            tasks: Mutex::new(HashMap::new()),
-            next_generation: AtomicU64::new(1),
-        }
+        Self { tasks: Mutex::new(HashMap::new()), next_generation: AtomicU64::new(1) }
     }
 
     pub fn next_generation(&self) -> u64 {
@@ -30,13 +27,7 @@ impl AiTaskRegistry {
     }
 
     pub async fn replace(&self, request_id: String, generation: u64, abort_handle: AbortHandle) {
-        if let Some(previous) = self.tasks.lock().await.insert(
-            request_id,
-            AiTaskEntry {
-                generation,
-                abort_handle,
-            },
-        ) {
+        if let Some(previous) = self.tasks.lock().await.insert(request_id, AiTaskEntry { generation, abort_handle }) {
             previous.abort_handle.abort();
         }
     }
@@ -49,10 +40,7 @@ impl AiTaskRegistry {
 
     pub async fn remove_if_current(&self, request_id: &str, generation: u64) {
         let mut tasks = self.tasks.lock().await;
-        if tasks
-            .get(request_id)
-            .is_some_and(|entry| entry.generation == generation)
-        {
+        if tasks.get(request_id).is_some_and(|entry| entry.generation == generation) {
             tasks.remove(request_id);
         }
     }

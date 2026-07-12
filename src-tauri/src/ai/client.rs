@@ -20,9 +20,7 @@ where
     F: FnMut(&str) -> Result<(), AppError>,
 {
     // Appending an empty event terminator makes providers that omit the final blank line flush safely.
-    let stream = stream.chain(futures::stream::once(async {
-        Ok::<Vec<u8>, String>(b"\n\n".to_vec())
-    }));
+    let stream = stream.chain(futures::stream::once(async { Ok::<Vec<u8>, String>(b"\n\n".to_vec()) }));
     let events = stream.eventsource();
     futures::pin_mut!(events);
     let mut accumulated = String::new();
@@ -36,9 +34,8 @@ where
         if data == "[DONE]" {
             break;
         }
-        let json: Value = serde_json::from_str(data).map_err(|error| {
-            AppError::Ai(format!("AI SSE 数据不是有效 JSON: {error}; data={data}"))
-        })?;
+        let json: Value = serde_json::from_str(data)
+            .map_err(|error| AppError::Ai(format!("AI SSE 数据不是有效 JSON: {error}; data={data}")))?;
         if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
             accumulated.push_str(content);
             on_token(content)?;
@@ -49,21 +46,11 @@ where
 
 impl AiClient {
     pub fn new(endpoint: String, model: String, api_key: String) -> Self {
-        Self {
-            endpoint: endpoint.trim_end_matches('/').to_string(),
-            model,
-            api_key,
-            client: reqwest::Client::new(),
-        }
+        Self { endpoint: endpoint.trim_end_matches('/').to_string(), model, api_key, client: reqwest::Client::new() }
     }
 
     /// Send a chat completion request (non-streaming)
-    async fn chat(
-        &self,
-        messages: &[Value],
-        temperature: f32,
-        max_tokens: u32,
-    ) -> Result<String, AppError> {
+    async fn chat(&self, messages: &[Value], temperature: f32, max_tokens: u32) -> Result<String, AppError> {
         let url = format!("{}/chat/completions", self.endpoint);
         let body = serde_json::json!({
             "model": self.model,
@@ -84,17 +71,11 @@ impl AiClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Ai(format!(
-                "AI API error ({}): {}",
-                status, error_body
-            )));
+            return Err(AppError::Ai(format!("AI API error ({}): {}", status, error_body)));
         }
 
         let json: Value = resp.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let content = json["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
 
         Ok(content)
     }
@@ -134,17 +115,11 @@ impl AiClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Ai(format!(
-                "AI API error ({}): {}",
-                status, error_body
-            )));
+            return Err(AppError::Ai(format!("AI API error ({}): {}", status, error_body)));
         }
 
-        let stream = resp.bytes_stream().map(|chunk| {
-            chunk
-                .map(|bytes| bytes.to_vec())
-                .map_err(|error| error.to_string())
-        });
+        let stream =
+            resp.bytes_stream().map(|chunk| chunk.map(|bytes| bytes.to_vec()).map_err(|error| error.to_string()));
         consume_sse_stream(stream, on_token).await
     }
 
@@ -194,9 +169,7 @@ impl AiClient {
             serde_json::json!({"role": "user", "content": user_message}),
         ];
 
-        let response = self
-            .chat_stream(&messages, temperature, max_tokens, on_token)
-            .await?;
+        let response = self.chat_stream(&messages, temperature, max_tokens, on_token).await?;
 
         self.parse_review_response(&response)
     }
@@ -217,12 +190,8 @@ impl AiClient {
         };
 
         let trimmed = json_str.trim();
-        let result: AiReviewResult = serde_json::from_str(trimmed).map_err(|e| {
-            AppError::Ai(format!(
-                "Failed to parse AI response: {}\n\nRaw response: {}",
-                e, response
-            ))
-        })?;
+        let result: AiReviewResult = serde_json::from_str(trimmed)
+            .map_err(|e| AppError::Ai(format!("Failed to parse AI response: {}\n\nRaw response: {}", e, response)))?;
 
         Ok(result)
     }
@@ -243,10 +212,7 @@ impl AiClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Ai(format!(
-                "Failed to list models ({}): {}",
-                status, error_body
-            )));
+            return Err(AppError::Ai(format!("Failed to list models ({}): {}", status, error_body)));
         }
 
         let json: Value = resp.json().await?;
@@ -273,8 +239,7 @@ impl AiClient {
 
     /// Test the API connection with a simple request
     pub async fn test_connection(&self) -> Result<bool, AppError> {
-        let messages =
-            vec![serde_json::json!({"role": "user", "content": "Hello, respond with just 'ok'."})];
+        let messages = vec![serde_json::json!({"role": "user", "content": "Hello, respond with just 'ok'."})];
 
         match self.chat(&messages, 0.0, 50).await {
             Ok(_) => Ok(true),
@@ -302,11 +267,7 @@ mod tests {
             &second[..second.len() / 2],
             &second[second.len() / 2..]
         );
-        let chunks = body
-            .as_bytes()
-            .chunks(7)
-            .map(|chunk| Ok::<_, String>(chunk.to_vec()))
-            .collect::<Vec<_>>();
+        let chunks = body.as_bytes().chunks(7).map(|chunk| Ok::<_, String>(chunk.to_vec())).collect::<Vec<_>>();
         let mut received = String::new();
         let result = consume_sse_stream(stream::iter(chunks), |token| {
             received.push_str(token);
@@ -321,20 +282,14 @@ mod tests {
     #[tokio::test]
     async fn flushes_final_event_without_blank_line() {
         let body = format!("data: {}", delta("尾"));
-        let result = consume_sse_stream(stream::iter(vec![Ok(body.into_bytes())]), |_| Ok(()))
-            .await
-            .unwrap();
+        let result = consume_sse_stream(stream::iter(vec![Ok(body.into_bytes())]), |_| Ok(())).await.unwrap();
         assert_eq!(result, "尾");
     }
 
     #[tokio::test]
     async fn rejects_invalid_nonempty_json() {
-        let error = consume_sse_stream(
-            stream::iter(vec![Ok(b"data: not-json\n\n".to_vec())]),
-            |_| Ok(()),
-        )
-        .await
-        .unwrap_err();
+        let error =
+            consume_sse_stream(stream::iter(vec![Ok(b"data: not-json\n\n".to_vec())]), |_| Ok(())).await.unwrap_err();
         assert!(error.to_string().contains("not-json"));
     }
 }

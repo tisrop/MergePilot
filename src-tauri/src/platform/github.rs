@@ -14,11 +14,7 @@ pub struct GitHubAdapter {
 
 impl GitHubAdapter {
     pub fn new(client: HttpClient, token: String) -> Self {
-        Self {
-            client,
-            token,
-            base_url: "https://api.github.com".to_string(),
-        }
+        Self { client, token, base_url: "https://api.github.com".to_string() }
     }
 
     #[allow(dead_code)]
@@ -99,10 +95,7 @@ impl GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!(
-                "GitHub API {} ({}): {}",
-                status, url, body
-            )));
+            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, body)));
         }
         Ok(resp.json().await?)
     }
@@ -119,9 +112,7 @@ impl GitHubAdapter {
             if part.contains(r#"rel="last""#) {
                 // Extract the page=XX from the URL between < and >
                 if let Some(url_start) = part.find('<') {
-                    let url_end = part[url_start..]
-                        .find('>')
-                        .unwrap_or(part.len() - url_start);
+                    let url_end = part[url_start..].find('>').unwrap_or(part.len() - url_start);
                     let url = &part[url_start + 1..url_start + url_end];
                     let query = url.split('?').nth(1).unwrap_or("");
                     for seg in query.split('&') {
@@ -149,10 +140,7 @@ impl GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!(
-                "GitHub API {} ({}): {}",
-                status, url, body
-            )));
+            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, body)));
         }
         Ok(resp.text().await?)
     }
@@ -170,10 +158,7 @@ impl GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!(
-                "GitHub API {} ({}): {}",
-                status, url, error_body
-            )));
+            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, error_body)));
         }
         Ok(resp.json().await?)
     }
@@ -191,10 +176,7 @@ impl GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!(
-                "GitHub API {} ({}): {}",
-                status, url, error_body
-            )));
+            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, error_body)));
         }
         Ok(resp.json().await?)
     }
@@ -214,10 +196,7 @@ impl GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!(
-                "GitHub API {} ({}): {}",
-                status, url, error_body
-            )));
+            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, error_body)));
         }
         Ok(resp.json().await?)
     }
@@ -265,25 +244,15 @@ impl GitPlatform for GitHubAdapter {
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .await?;
-        let total_pages = Self::parse_last_page(
-            resp.headers()
-                .get("link")
-                .and_then(|value| value.to_str().ok()),
-            page,
-        );
+        let total_pages = Self::parse_last_page(resp.headers().get("link").and_then(|value| value.to_str().ok()), page);
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!(
-                "GitHub API {status} ({url}): {body}"
-            )));
+            return Err(AppError::Api(format!("GitHub API {status} ({url}): {body}")));
         }
         let items: Vec<Value> = resp.json().await?;
-        let total_count = if page == total_pages {
-            (page.saturating_sub(1) * 100) + items.len() as u32
-        } else {
-            total_pages * 100
-        };
+        let total_count =
+            if page == total_pages { (page.saturating_sub(1) * 100) + items.len() as u32 } else { total_pages * 100 };
 
         let mut repos: Vec<RepoSummary> = Vec::with_capacity(items.len());
         for r in &items {
@@ -292,23 +261,14 @@ impl GitPlatform for GitHubAdapter {
             let fork = r["fork"].as_bool().unwrap_or(false);
             let (parent_full_name, parent_owner) = if fork {
                 let mut pn = r["parent"]["full_name"].as_str().map(|s| s.to_string());
-                let mut po = r["parent"]["owner"]["login"]
-                    .as_str()
-                    .map(|s| s.to_string());
-                eprintln!(
-                    "[mergepilot] fork repo: {} parent_full_name={:?} parent_owner={:?}",
-                    full_name, pn, po
-                );
+                let mut po = r["parent"]["owner"]["login"].as_str().map(|s| s.to_string());
+                eprintln!("[mergepilot] fork repo: {} parent_full_name={:?} parent_owner={:?}", full_name, pn, po);
                 // Fallback: fetch repo detail if parent info missing from list endpoint
                 if pn.is_none() || po.is_none() {
                     let detail_url = format!("{}/repos/{}", self.base_url, full_name);
                     if let Ok(detail) = self.get_json::<Value>(&detail_url).await {
-                        pn = detail["parent"]["full_name"]
-                            .as_str()
-                            .map(|s| s.to_string());
-                        po = detail["parent"]["owner"]["login"]
-                            .as_str()
-                            .map(|s| s.to_string());
+                        pn = detail["parent"]["full_name"].as_str().map(|s| s.to_string());
+                        po = detail["parent"]["owner"]["login"].as_str().map(|s| s.to_string());
                         eprintln!(
                             "[mergepilot] fork repo fallback: {} parent_full_name={:?} parent_owner={:?}",
                             full_name, pn, po
@@ -339,12 +299,7 @@ impl GitPlatform for GitHubAdapter {
         // Fetch org display names from API
         self.resolve_org_display_names(&mut repos).await;
 
-        Ok(Paginated {
-            items: repos,
-            page,
-            total_pages,
-            total_count,
-        })
+        Ok(Paginated { items: repos, page, total_pages, total_count })
     }
 
     async fn list_pull_requests(
@@ -382,10 +337,7 @@ impl GitPlatform for GitHubAdapter {
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::Api(format!(
-                "GitHub API {} ({}): {}",
-                status, url, body
-            )));
+            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, body)));
         }
 
         let items: Vec<Value> = resp.json().await?;
@@ -396,33 +348,20 @@ impl GitPlatform for GitHubAdapter {
                 number: pr["number"].as_u64().unwrap_or(0),
                 title: pr["title"].as_str().unwrap_or("").to_string(),
                 author: Self::map_user(&pr["user"]),
-                state: Self::map_pr_state(
-                    pr["state"].as_str().unwrap_or(""),
-                    !pr["merged_at"].is_null(),
-                ),
+                state: Self::map_pr_state(pr["state"].as_str().unwrap_or(""), !pr["merged_at"].is_null()),
                 created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
                 updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
                 labels: pr["labels"]
                     .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|l| l["name"].as_str().map(String::from))
-                            .collect()
-                    })
+                    .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect())
                     .unwrap_or_default(),
             })
             .collect();
 
         // Filter by requested state (needed because GitHub groups merged into closed)
         let prs: Vec<PrSummary> = match state {
-            PrState::Merged => all_prs
-                .into_iter()
-                .filter(|p| matches!(p.state, PrState::Merged))
-                .collect(),
-            PrState::Closed => all_prs
-                .into_iter()
-                .filter(|p| matches!(p.state, PrState::Closed))
-                .collect(),
+            PrState::Merged => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Merged)).collect(),
+            PrState::Closed => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Closed)).collect(),
             _ => all_prs,
         };
 
@@ -434,43 +373,23 @@ impl GitPlatform for GitHubAdapter {
             last_page * per_page
         };
 
-        Ok(Paginated {
-            items: prs,
-            page,
-            total_pages: last_page,
-            total_count,
-        })
+        Ok(Paginated { items: prs, page, total_pages: last_page, total_count })
     }
 
-    async fn get_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrDetail, AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}",
-            self.base_url, owner, repo, pr_number
-        );
+    async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError> {
+        let url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
         let json = self.get_json::<Value>(&url).await?;
 
         let summary = PrSummary {
             number: json["number"].as_u64().unwrap_or(0),
             title: json["title"].as_str().unwrap_or("").to_string(),
             author: Self::map_user(&json["user"]),
-            state: Self::map_pr_state(
-                json["state"].as_str().unwrap_or(""),
-                !json["merged_at"].is_null(),
-            ),
+            state: Self::map_pr_state(json["state"].as_str().unwrap_or(""), !json["merged_at"].is_null()),
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
             labels: json["labels"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|l| l["name"].as_str().map(String::from))
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect())
                 .unwrap_or_default(),
         };
 
@@ -484,24 +403,13 @@ impl GitPlatform for GitHubAdapter {
         })
     }
 
-    async fn get_pr_diff(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<(String, Vec<PrFile>), AppError> {
+    async fn get_pr_diff(&self, owner: &str, repo: &str, pr_number: u64) -> Result<(String, Vec<PrFile>), AppError> {
         // Get unified diff
-        let diff_url = format!(
-            "{}/repos/{}/{}/pulls/{}",
-            self.base_url, owner, repo, pr_number
-        );
+        let diff_url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
         let diff = self.get_text(&diff_url).await?;
 
         // Get files list
-        let files_url = format!(
-            "{}/repos/{}/{}/pulls/{}/files?per_page=300",
-            self.base_url, owner, repo, pr_number
-        );
+        let files_url = format!("{}/repos/{}/{}/pulls/{}/files?per_page=300", self.base_url, owner, repo, pr_number);
         let files_json: Vec<Value> = self.get_json(&files_url).await?;
 
         let files: Vec<PrFile> = files_json
@@ -532,10 +440,7 @@ impl GitPlatform for GitHubAdapter {
         event: &ReviewEvent,
         comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}/reviews",
-            self.base_url, owner, repo, pr_number
-        );
+        let url = format!("{}/repos/{}/{}/pulls/{}/reviews", self.base_url, owner, repo, pr_number);
         let event_str = match event {
             ReviewEvent::Approve => "APPROVE",
             ReviewEvent::Comment => "COMMENT",
@@ -588,10 +493,7 @@ impl GitPlatform for GitHubAdapter {
         side: &str,
         body: &str,
     ) -> Result<PrComment, AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}/comments",
-            self.base_url, owner, repo, pr_number
-        );
+        let url = format!("{}/repos/{}/{}/pulls/{}/comments", self.base_url, owner, repo, pr_number);
         let gh_side = match side {
             "left" => "LEFT",
             _ => "RIGHT",
@@ -631,16 +533,8 @@ impl GitPlatform for GitHubAdapter {
         })
     }
 
-    async fn list_pr_comments(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<Vec<PrComment>, AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}/comments?per_page=100",
-            self.base_url, owner, repo, pr_number
-        );
+    async fn list_pr_comments(&self, owner: &str, repo: &str, pr_number: u64) -> Result<Vec<PrComment>, AppError> {
+        let url = format!("{}/repos/{}/{}/pulls/{}/comments?per_page=100", self.base_url, owner, repo, pr_number);
         let items: Vec<Value> = self.get_json(&url).await?;
         let comments = items
             .iter()
@@ -662,16 +556,8 @@ impl GitPlatform for GitHubAdapter {
         Ok(comments)
     }
 
-    async fn list_reviews(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<Vec<Review>, AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}/reviews",
-            self.base_url, owner, repo, pr_number
-        );
+    async fn list_reviews(&self, owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Review>, AppError> {
+        let url = format!("{}/repos/{}/{}/pulls/{}/reviews", self.base_url, owner, repo, pr_number);
         let items: Vec<Value> = self.get_json(&url).await?;
 
         let reviews = items
@@ -715,22 +601,13 @@ impl GitPlatform for GitHubAdapter {
                 },
                 labels: i["labels"]
                     .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|l| l["name"].as_str().map(String::from))
-                            .collect()
-                    })
+                    .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect())
                     .unwrap_or_default(),
                 created_at: i["created_at"].as_str().unwrap_or("").to_string(),
             })
             .collect();
 
-        Ok(Paginated {
-            items: issues,
-            page,
-            total_pages: 1,
-            total_count: 0,
-        })
+        Ok(Paginated { items: issues, page, total_pages: 1, total_count: 0 })
     }
 
     async fn create_issue(
@@ -761,11 +638,7 @@ impl GitPlatform for GitHubAdapter {
             },
             labels: json["labels"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|l| l["name"].as_str().map(String::from))
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect())
                 .unwrap_or_default(),
             created_at: json["created_at"].as_str().unwrap_or("").to_string(),
             updated_at: json["updated_at"].as_str().unwrap_or("").to_string(),
@@ -782,10 +655,7 @@ impl GitPlatform for GitHubAdapter {
         commit_message: Option<String>,
         sha: &str,
     ) -> Result<PrMergeResult, AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}/merge",
-            self.base_url, owner, repo, pr_number
-        );
+        let url = format!("{}/repos/{}/{}/pulls/{}/merge", self.base_url, owner, repo, pr_number);
         let method = match strategy {
             MergeStrategy::Merge => "merge",
             MergeStrategy::Squash => "squash",
@@ -809,54 +679,24 @@ impl GitPlatform for GitHubAdapter {
         })
     }
 
-    async fn close_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrState, AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}",
-            self.base_url, owner, repo, pr_number
-        );
+    async fn close_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrState, AppError> {
+        let url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
         let payload = serde_json::json!({ "state": "closed" });
         let json = self.patch_json(&url, &payload).await?;
-        let state = Self::map_pr_state(
-            json["state"].as_str().unwrap_or(""),
-            !json["merged_at"].is_null(),
-        );
+        let state = Self::map_pr_state(json["state"].as_str().unwrap_or(""), !json["merged_at"].is_null());
         Ok(state)
     }
 
-    async fn reopen_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrState, AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/pulls/{}",
-            self.base_url, owner, repo, pr_number
-        );
+    async fn reopen_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrState, AppError> {
+        let url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
         let payload = serde_json::json!({ "state": "open" });
         let json = self.patch_json(&url, &payload).await?;
-        let state = Self::map_pr_state(
-            json["state"].as_str().unwrap_or(""),
-            !json["merged_at"].is_null(),
-        );
+        let state = Self::map_pr_state(json["state"].as_str().unwrap_or(""), !json["merged_at"].is_null());
         Ok(state)
     }
 
-    async fn close_issue(
-        &self,
-        owner: &str,
-        repo: &str,
-        issue_number: u64,
-    ) -> Result<(), AppError> {
-        let url = format!(
-            "{}/repos/{}/{}/issues/{}",
-            self.base_url, owner, repo, issue_number
-        );
+    async fn close_issue(&self, owner: &str, repo: &str, issue_number: u64) -> Result<(), AppError> {
+        let url = format!("{}/repos/{}/{}/issues/{}", self.base_url, owner, repo, issue_number);
         let payload = serde_json::json!({ "state": "closed" });
         self.patch_json(&url, &payload).await?;
         Ok(())

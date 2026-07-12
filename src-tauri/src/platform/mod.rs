@@ -41,19 +41,9 @@ pub trait GitPlatform: Send + Sync {
         per_page: u32,
     ) -> Result<Paginated<PrSummary>, AppError>;
 
-    async fn get_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrDetail, AppError>;
+    async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError>;
 
-    async fn get_pr_diff(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<(String, Vec<PrFile>), AppError>;
+    async fn get_pr_diff(&self, owner: &str, repo: &str, pr_number: u64) -> Result<(String, Vec<PrFile>), AppError>;
 
     // ── Review ──
     async fn create_review(
@@ -66,12 +56,7 @@ pub trait GitPlatform: Send + Sync {
         comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError>;
 
-    async fn list_reviews(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<Vec<Review>, AppError>;
+    async fn list_reviews(&self, owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Review>, AppError>;
 
     // ── PR Comment ──
     async fn create_pr_comment(
@@ -87,12 +72,7 @@ pub trait GitPlatform: Send + Sync {
         body: &str,
     ) -> Result<PrComment, AppError>;
 
-    async fn list_pr_comments(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<Vec<PrComment>, AppError>;
+    async fn list_pr_comments(&self, owner: &str, repo: &str, pr_number: u64) -> Result<Vec<PrComment>, AppError>;
 
     // ── Merge / Close / Reopen ──
     async fn merge_pull_request(
@@ -106,19 +86,9 @@ pub trait GitPlatform: Send + Sync {
         sha: &str,
     ) -> Result<PrMergeResult, AppError>;
 
-    async fn close_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrState, AppError>;
+    async fn close_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrState, AppError>;
 
-    async fn reopen_pull_request(
-        &self,
-        owner: &str,
-        repo: &str,
-        pr_number: u64,
-    ) -> Result<PrState, AppError>;
+    async fn reopen_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrState, AppError>;
 
     // ── Issue ──
     async fn list_issues(
@@ -138,8 +108,7 @@ pub trait GitPlatform: Send + Sync {
         labels: &[String],
     ) -> Result<Issue, AppError>;
 
-    async fn close_issue(&self, owner: &str, repo: &str, issue_number: u64)
-        -> Result<(), AppError>;
+    async fn close_issue(&self, owner: &str, repo: &str, issue_number: u64) -> Result<(), AppError>;
 }
 
 #[cfg(test)]
@@ -148,10 +117,7 @@ mod tests {
 
     #[test]
     fn normalizes_platform_api_roots() {
-        assert_eq!(
-            normalize_api_base("gitlab", "https://git.example.com/"),
-            "https://git.example.com/api/v4"
-        );
+        assert_eq!(normalize_api_base("gitlab", "https://git.example.com/"), "https://git.example.com/api/v4");
         assert_eq!(
             normalize_api_base("gitlab", "https://git.example.com/proxy"),
             "https://git.example.com/proxy/api/v4"
@@ -160,9 +126,6 @@ mod tests {
             normalize_api_base("gitlab", "https://git.example.com/proxy/api/v4/"),
             "https://git.example.com/proxy/api/v4"
         );
-        assert_eq!(
-            normalize_api_base("gitee", "http://gitee.internal/base"),
-            "http://gitee.internal/base/api/v5"
-        );
+        assert_eq!(normalize_api_base("gitee", "http://gitee.internal/base"), "http://gitee.internal/base/api/v5");
     }
 }

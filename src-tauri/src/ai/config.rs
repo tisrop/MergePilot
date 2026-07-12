@@ -63,8 +63,8 @@ impl AiConfigManager {
     /// Encrypt the API key and store it inside `ai_config.json`.
     /// After this call, the caller should also call `save_config` to persist.
     pub fn save_api_key(&self, plaintext: &str) -> Result<String, AppError> {
-        let encrypted = crypto::encrypt(plaintext)
-            .map_err(|e| AppError::Ai(format!("Failed to encrypt API key: {}", e)))?;
+        let encrypted =
+            crypto::encrypt(plaintext).map_err(|e| AppError::Ai(format!("Failed to encrypt API key: {}", e)))?;
 
         // Update the config file with the encrypted key
         let mut config = self.get_config()?;
@@ -78,12 +78,9 @@ impl AiConfigManager {
     /// Decrypt and return the API key from the config file.
     pub fn get_api_key(&self) -> Result<String, AppError> {
         let config = self.get_config()?;
-        let encrypted = config
-            .api_key_encrypted
-            .ok_or_else(|| AppError::Ai("No API key configured".to_string()))?;
+        let encrypted = config.api_key_encrypted.ok_or_else(|| AppError::Ai("No API key configured".to_string()))?;
 
-        crypto::decrypt(&encrypted)
-            .map_err(|e| AppError::Ai(format!("Failed to decrypt API key: {}", e)))
+        crypto::decrypt(&encrypted).map_err(|e| AppError::Ai(format!("Failed to decrypt API key: {}", e)))
     }
 
     /// Remove the API key from the config file.

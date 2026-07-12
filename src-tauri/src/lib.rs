@@ -26,22 +26,27 @@ pub fn run() {
             let comment_store = CommentSnapshotStore::new(&app_dir.join("comment_cache.db"));
             app.manage(comment_store);
 
-            let settings =
-                MenuItem::with_id(app, "open-settings", "设置...", true, Some("Cmd+,"))?;
-            let app_menu = Submenu::with_items(app, "MergePilot", true, &[
-                &settings,
-                &PredefinedMenuItem::separator(app)?,
-                &PredefinedMenuItem::quit(app, None)?,
-            ])?;
-            let edit_menu = Submenu::with_items(app, "编辑", true, &[
-                &PredefinedMenuItem::undo(app, Some("撤销"))?,
-                &PredefinedMenuItem::redo(app, Some("重做"))?,
-                &PredefinedMenuItem::separator(app)?,
-                &PredefinedMenuItem::cut(app, Some("剪切"))?,
-                &PredefinedMenuItem::copy(app, Some("复制"))?,
-                &PredefinedMenuItem::paste(app, Some("粘贴"))?,
-                &PredefinedMenuItem::select_all(app, Some("全选"))?,
-            ])?;
+            let settings = MenuItem::with_id(app, "open-settings", "设置...", true, Some("Cmd+,"))?;
+            let app_menu = Submenu::with_items(
+                app,
+                "MergePilot",
+                true,
+                &[&settings, &PredefinedMenuItem::separator(app)?, &PredefinedMenuItem::quit(app, None)?],
+            )?;
+            let edit_menu = Submenu::with_items(
+                app,
+                "编辑",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, Some("撤销"))?,
+                    &PredefinedMenuItem::redo(app, Some("重做"))?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, Some("剪切"))?,
+                    &PredefinedMenuItem::copy(app, Some("复制"))?,
+                    &PredefinedMenuItem::paste(app, Some("粘贴"))?,
+                    &PredefinedMenuItem::select_all(app, Some("全选"))?,
+                ],
+            )?;
             let menu = Menu::with_items(app, &[&app_menu, &edit_menu])?;
             app.set_menu(menu)?;
 

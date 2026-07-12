@@ -22,26 +22,16 @@ pub async fn ai_save_config(state: State<'_, AppState>, config: AiConfig) -> Res
         merged.api_key_encrypted = encrypted_key.clone();
         merged.api_key_configured = encrypted_key.is_some();
     }
-    state
-        .ai_config
-        .save_config(&merged)
-        .map_err(|e| e.to_string())
+    state.ai_config.save_config(&merged).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn ai_save_api_key(state: State<'_, AppState>, api_key: String) -> Result<(), String> {
-    state
-        .ai_config
-        .save_api_key(&api_key)
-        .map_err(|e| e.to_string())
-        .map(|_| ())
+    state.ai_config.save_api_key(&api_key).map_err(|e| e.to_string()).map(|_| ())
 }
 
 #[tauri::command]
-pub async fn ai_review(
-    state: State<'_, AppState>,
-    request: AiReviewRequest,
-) -> Result<AiReviewResult, String> {
+pub async fn ai_review(state: State<'_, AppState>, request: AiReviewRequest) -> Result<AiReviewResult, String> {
     let config = state.ai_config.get_config().map_err(|e| e.to_string())?;
     let api_key = state.ai_config.get_api_key().map_err(|e| e.to_string())?;
 
@@ -98,10 +88,7 @@ pub async fn ai_review_stream(
                     chunk_handle
                         .emit(
                             "ai-review-chunk",
-                            AiStreamEvent {
-                                request_id: chunk_request_id.clone(),
-                                payload: token.to_string(),
-                            },
+                            AiStreamEvent { request_id: chunk_request_id.clone(), payload: token.to_string() },
                         )
                         .map_err(|error| AppError::Ai(format!("发送 AI 流事件失败: {error}")))
                 },
@@ -112,47 +99,31 @@ pub async fn ai_review_stream(
             Ok(review_result) => {
                 let _ = app_handle.emit(
                     "ai-review-done",
-                    AiStreamEvent {
-                        request_id: task_request_id.clone(),
-                        payload: review_result,
-                    },
+                    AiStreamEvent { request_id: task_request_id.clone(), payload: review_result },
                 );
             }
             Err(error) => {
                 let _ = app_handle.emit(
                     "ai-review-error",
-                    AiStreamEvent {
-                        request_id: task_request_id.clone(),
-                        payload: error.to_string(),
-                    },
+                    AiStreamEvent { request_id: task_request_id.clone(), payload: error.to_string() },
                 );
             }
         }
-        task_registry
-            .remove_if_current(&task_request_id, generation)
-            .await;
+        task_registry.remove_if_current(&task_request_id, generation).await;
     });
 
-    registry
-        .replace(request_id, generation, task.abort_handle())
-        .await;
+    registry.replace(request_id, generation, task.abort_handle()).await;
     let _ = start_tx.send(());
     Ok(())
 }
 
 #[tauri::command]
-pub async fn ai_review_cancel(
-    state: State<'_, AppState>,
-    request_id: String,
-) -> Result<(), String> {
+pub async fn ai_review_cancel(state: State<'_, AppState>, request_id: String) -> Result<(), String> {
     state.ai_tasks.cancel(&request_id).await;
     Ok(())
 }
 #[tauri::command]
-pub async fn ai_list_models(
-    state: State<'_, AppState>,
-    endpoint: String,
-) -> Result<Vec<String>, String> {
+pub async fn ai_list_models(state: State<'_, AppState>, endpoint: String) -> Result<Vec<String>, String> {
     let api_key = state.ai_config.get_api_key().map_err(|e| e.to_string())?;
 
     // Use a dummy model name — list_models doesn't need a model

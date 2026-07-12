@@ -20,8 +20,8 @@ async fn test_gitee_current_user() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token-123".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token-123".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let user = adapter.current_user().await.expect("should fetch user");
     assert_eq!(user.login, "testuser");
@@ -57,17 +57,11 @@ async fn test_gitee_list_prs_open() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_pull_requests(
-            "octocat",
-            "hello-world",
-            &mergepilot_lib::models::PrState::Open,
-            1,
-            20,
-        )
+        .list_pull_requests("octocat", "hello-world", &mergepilot_lib::models::PrState::Open, 1, 20)
         .await
         .expect("should list PRs");
 
@@ -111,17 +105,11 @@ async fn test_gitee_list_prs_pagination_headers() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_pull_requests(
-            "octocat",
-            "hello-world",
-            &mergepilot_lib::models::PrState::Open,
-            1,
-            20,
-        )
+        .list_pull_requests("octocat", "hello-world", &mergepilot_lib::models::PrState::Open, 1, 20)
         .await
         .expect("should list PRs");
 
@@ -168,32 +156,20 @@ async fn test_gitee_list_prs_merged() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_pull_requests(
-            "octocat",
-            "hello-world",
-            &mergepilot_lib::models::PrState::Merged,
-            1,
-            20,
-        )
+        .list_pull_requests("octocat", "hello-world", &mergepilot_lib::models::PrState::Merged, 1, 20)
         .await
         .expect("should list merged PRs");
 
     assert_eq!(result.items.len(), 2);
     assert_eq!(result.items[0].number, 100);
     assert_eq!(result.items[0].title, "Merged feature");
-    assert!(matches!(
-        result.items[0].state,
-        mergepilot_lib::models::PrState::Merged
-    ));
+    assert!(matches!(result.items[0].state, mergepilot_lib::models::PrState::Merged));
     assert_eq!(result.items[1].number, 101);
-    assert!(matches!(
-        result.items[1].state,
-        mergepilot_lib::models::PrState::Merged
-    ));
+    assert!(matches!(result.items[1].state, mergepilot_lib::models::PrState::Merged));
     assert_eq!(result.total_count, 2);
     assert_eq!(result.total_pages, 1);
 }
@@ -227,21 +203,11 @@ async fn test_gitee_create_pr_comment() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .create_pr_comment(
-            "octocat",
-            "hello-world",
-            42,
-            "abc123",
-            "src/main.rs",
-            None,
-            10,
-            "right",
-            "Good catch!",
-        )
+        .create_pr_comment("octocat", "hello-world", 42, "abc123", "src/main.rs", None, 10, "right", "Good catch!")
         .await;
 
     assert!(result.is_ok(), "should create PR comment");
@@ -255,28 +221,16 @@ async fn test_gitee_create_pr_comment_error() {
     Mock::given(method("POST"))
         .and(path("/api/v5/repos/octocat/hello-world/pulls/42/comments"))
         .and(query_param("access_token", "test-token"))
-        .respond_with(
-            ResponseTemplate::new(422).set_body_string(r#"{"message":"Validation failed"}"#),
-        )
+        .respond_with(ResponseTemplate::new(422).set_body_string(r#"{"message":"Validation failed"}"#))
         .mount(&mock_server)
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .create_pr_comment(
-            "octocat",
-            "hello-world",
-            42,
-            "abc123",
-            "src/main.rs",
-            None,
-            10,
-            "left",
-            "Bad comment",
-        )
+        .create_pr_comment("octocat", "hello-world", 42, "abc123", "src/main.rs", None, 10, "left", "Bad comment")
         .await;
 
     assert!(result.is_err(), "should return error for bad request");
@@ -334,13 +288,10 @@ async fn test_gitee_list_pr_comments() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
-    let comments = adapter
-        .list_pr_comments("octocat", "hello-world", 42)
-        .await
-        .expect("should list PR comments");
+    let comments = adapter.list_pr_comments("octocat", "hello-world", 42).await.expect("should list PR comments");
 
     assert_eq!(comments.len(), 3);
     assert_eq!(comments[0].body, "Nice fix!");
@@ -369,13 +320,10 @@ async fn test_gitee_list_pr_comments_empty() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
-    let comments = adapter
-        .list_pr_comments("octocat", "hello-world", 42)
-        .await
-        .expect("should list PR comments");
+    let comments = adapter.list_pr_comments("octocat", "hello-world", 42).await.expect("should list PR comments");
 
     assert_eq!(comments.len(), 0);
 }
@@ -409,13 +357,10 @@ async fn test_gitee_get_pr_diff() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
-    let (diff, files) = adapter
-        .get_pr_diff("octocat", "hello-world", 42)
-        .await
-        .expect("should get diff");
+    let (diff, files) = adapter.get_pr_diff("octocat", "hello-world", 42).await.expect("should get diff");
 
     assert!(diff.contains("src/main.rs"));
     assert!(diff.contains("src/lib.rs"));
@@ -424,10 +369,7 @@ async fn test_gitee_get_pr_diff() {
     assert_eq!(files[0].additions, 1);
     assert_eq!(files[0].deletions, 1);
     assert_eq!(files[1].filename, "src/lib.rs");
-    assert!(matches!(
-        files[1].status,
-        mergepilot_lib::models::FileStatus::Added
-    ));
+    assert!(matches!(files[1].status, mergepilot_lib::models::FileStatus::Added));
 }
 
 #[tokio::test]
@@ -458,8 +400,8 @@ async fn test_gitee_list_repos_paginated() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter.list_repos(1).await.expect("should list repos");
 
@@ -467,10 +409,7 @@ async fn test_gitee_list_repos_paginated() {
     assert_eq!(result.items[0].owner, "user");
     assert_eq!(result.items[0].owner_type, "user");
     assert_eq!(result.items[0].owner_display_name, "user");
-    assert_eq!(
-        result.total_pages, 3,
-        "should parse last page from Link header"
-    );
+    assert_eq!(result.total_pages, 3, "should parse last page from Link header");
 }
 
 #[tokio::test]
@@ -495,17 +434,14 @@ async fn test_gitee_list_repos_single_page() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter.list_repos(1).await.expect("should list repos");
 
     assert_eq!(result.items[0].owner, "user");
     assert_eq!(result.items[0].owner_type, "user");
-    assert_eq!(
-        result.total_pages, 1,
-        "should default to 1 with no Link header"
-    );
+    assert_eq!(result.total_pages, 1, "should default to 1 with no Link header");
 }
 
 #[tokio::test]
@@ -526,30 +462,25 @@ async fn test_gitee_list_issues_paginated() {
                         "created_at": "2025-01-01T00:00:00Z"
                     }
                 ]))
-                .insert_header("Link", "<https://gitee.com/api/v5/repos/octocat/hello-world/issues?page=5&state=open>; rel=\"last\""),
+                .insert_header(
+                    "Link",
+                    "<https://gitee.com/api/v5/repos/octocat/hello-world/issues?page=5&state=open>; rel=\"last\"",
+                ),
         )
         .mount(&mock_server)
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_issues(
-            "octocat",
-            "hello-world",
-            &mergepilot_lib::models::IssueState::Open,
-            1,
-        )
+        .list_issues("octocat", "hello-world", &mergepilot_lib::models::IssueState::Open, 1)
         .await
         .expect("should list issues");
 
     assert_eq!(result.items.len(), 1);
-    assert_eq!(
-        result.total_pages, 5,
-        "should parse last page from Link header"
-    );
+    assert_eq!(result.total_pages, 5, "should parse last page from Link header");
 }
 
 #[tokio::test]
@@ -572,23 +503,15 @@ async fn test_gitee_list_issues_single_page() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_issues(
-            "octocat",
-            "hello-world",
-            &mergepilot_lib::models::IssueState::Open,
-            1,
-        )
+        .list_issues("octocat", "hello-world", &mergepilot_lib::models::IssueState::Open, 1)
         .await
         .expect("should list issues");
 
-    assert_eq!(
-        result.total_pages, 1,
-        "should default to 1 with no Link header"
-    );
+    assert_eq!(result.total_pages, 1, "should default to 1 with no Link header");
 }
 
 #[tokio::test]
@@ -598,15 +521,13 @@ async fn test_gitee_auth_error() {
     Mock::given(method("GET"))
         .and(path("/api/v5/user"))
         .and(query_param("access_token", "invalid-token"))
-        .respond_with(
-            ResponseTemplate::new(401).set_body_string(r#"{"message":"Bad credentials"}"#),
-        )
+        .respond_with(ResponseTemplate::new(401).set_body_string(r#"{"message":"Bad credentials"}"#))
         .mount(&mock_server)
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "invalid-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "invalid-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter.current_user().await;
     assert!(result.is_err(), "should return error for bad credentials");
@@ -633,17 +554,11 @@ async fn test_gitee_create_issue() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let issue = adapter
-        .create_issue(
-            "octocat",
-            "hello-world",
-            "Memory leak",
-            "Steps: 1. Login 2. Logout",
-            &["bug".to_string()],
-        )
+        .create_issue("octocat", "hello-world", "Memory leak", "Steps: 1. Login 2. Logout", &["bug".to_string()])
         .await
         .expect("should create issue");
 
@@ -675,21 +590,11 @@ async fn test_gitee_create_pr_comment_left_side() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .create_pr_comment(
-            "octocat",
-            "hello-world",
-            42,
-            "abc123",
-            "src/main.rs",
-            None,
-            5,
-            "left",
-            "Old code issue",
-        )
+        .create_pr_comment("octocat", "hello-world", 42, "abc123", "src/main.rs", None, 5, "left", "Old code issue")
         .await;
 
     assert!(result.is_ok(), "should create left-side PR comment");
@@ -720,8 +625,8 @@ async fn test_gitee_create_pr_comment_multi_line() {
         .await;
 
     let client = HttpClient::new();
-    let adapter = GiteeAdapter::new(client, "test-token".to_string())
-        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let adapter =
+        GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
         .create_pr_comment(
@@ -769,20 +674,9 @@ async fn test_gitee_rejects_unsupported_review_without_request() {
     let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
         .with_base_url(format!("{}/api/v5", mock_server.uri()));
 
-    let result = adapter
-        .create_review(
-            "owner",
-            "repo",
-            1,
-            "approve",
-            &mergepilot_lib::models::ReviewEvent::Approve,
-            &[],
-        )
-        .await;
+    let result =
+        adapter.create_review("owner", "repo", 1, "approve", &mergepilot_lib::models::ReviewEvent::Approve, &[]).await;
 
-    assert!(matches!(
-        result,
-        Err(mergepilot_lib::error::AppError::NotImplemented(_))
-    ));
+    assert!(matches!(result, Err(mergepilot_lib::error::AppError::NotImplemented(_))));
     assert!(mock_server.received_requests().await.unwrap().is_empty());
 }

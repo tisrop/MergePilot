@@ -12,9 +12,8 @@ use sha2::{Digest, Sha256};
 fn derive_key() -> [u8; 32] {
     let app_secret: &[u8] = b"mergepilot-aes256-v1-ae7f3c9d";
 
-    let username = std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "mergepilot-user".to_string());
+    let username =
+        std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "mergepilot-user".to_string());
 
     let mut hasher = Sha256::new();
     hasher.update(app_secret);
@@ -37,9 +36,7 @@ pub fn encrypt(plaintext: &str) -> Result<String, String> {
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let cipher = Aes256Gcm::new(key);
-    let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_bytes())
-        .map_err(|e| format!("Encryption failed: {}", e))?;
+    let ciphertext = cipher.encrypt(nonce, plaintext.as_bytes()).map_err(|e| format!("Encryption failed: {}", e))?;
 
     // nonce (12 bytes) || ciphertext || GCM tag (16 bytes, appended by aes-gcm)
     let mut combined = Vec::with_capacity(12 + ciphertext.len());
@@ -64,9 +61,7 @@ pub fn decrypt(encoded: &str) -> Result<String, String> {
     let nonce = Nonce::from_slice(nonce_bytes);
 
     let cipher = Aes256Gcm::new(key);
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|e| format!("Decryption failed: {}", e))?;
+    let plaintext = cipher.decrypt(nonce, ciphertext).map_err(|e| format!("Decryption failed: {}", e))?;
 
     String::from_utf8(plaintext).map_err(|e| format!("Invalid UTF-8: {}", e))
 }
@@ -78,7 +73,5 @@ fn base64_encode(data: &[u8]) -> String {
 
 fn base64_decode(encoded: &str) -> Result<Vec<u8>, String> {
     use base64::Engine;
-    base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|e| format!("Base64 decode error: {}", e))
+    base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|e| format!("Base64 decode error: {}", e))
 }

@@ -45,9 +45,7 @@ impl CommentSnapshotStore {
             );",
         )
         .expect("Failed to create comment_snapshots table");
-        Self {
-            conn: Mutex::new(conn),
-        }
+        Self { conn: Mutex::new(conn) }
     }
 
     pub fn save_snapshot(&self, snapshot: &CommentSnapshot) -> Result<(), rusqlite::Error> {
@@ -72,11 +70,7 @@ impl CommentSnapshotStore {
         Ok(())
     }
 
-    pub fn get_snapshot(
-        &self,
-        comment_id: &str,
-        platform: &str,
-    ) -> Result<Option<CommentSnapshot>, rusqlite::Error> {
+    pub fn get_snapshot(&self, comment_id: &str, platform: &str) -> Result<Option<CommentSnapshot>, rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT comment_id, platform, owner, repo, pr_number, commit_id, original_commit_id, diff_hunk, original_line, original_start_line

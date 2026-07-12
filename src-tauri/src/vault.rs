@@ -31,17 +31,11 @@ impl Default for TokenVault {
 
 impl TokenVault {
     pub fn new() -> Self {
-        Self {
-            session_tokens: RwLock::new(HashMap::new()),
-        }
+        Self { session_tokens: RwLock::new(HashMap::new()) }
     }
 
     fn cached_token(&self, platform: &str) -> Option<String> {
-        self.session_tokens
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(platform)
-            .cloned()
+        self.session_tokens.read().unwrap_or_else(|poisoned| poisoned.into_inner()).get(platform).cloned()
     }
 
     fn cache_token(&self, platform: &str, token: &str) {
@@ -52,17 +46,11 @@ impl TokenVault {
     }
 
     fn remove_cached_token(&self, platform: &str) {
-        self.session_tokens
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(platform);
+        self.session_tokens.write().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(platform);
     }
 
     fn storage_dir() -> Result<PathBuf, AppError> {
-        let dir = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".mergepilot");
+        let dir = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(".")).join(".mergepilot");
         fs::create_dir_all(&dir)?;
         set_dir_permissions(&dir)?;
         Ok(dir)
@@ -109,10 +97,7 @@ impl TokenVault {
     fn keyring_is_persistent() -> bool {
         use keyring::credential::CredentialPersistence;
 
-        matches!(
-            keyring::default::default_credential_builder().persistence(),
-            CredentialPersistence::UntilDelete
-        )
+        matches!(keyring::default::default_credential_builder().persistence(), CredentialPersistence::UntilDelete)
     }
 
     fn keyring_entry(platform: &str) -> Result<keyring::Entry, keyring::Error> {
@@ -184,9 +169,7 @@ impl TokenVault {
     }
 
     pub fn get_custom_url(&self, platform: &str) -> Option<String> {
-        Self::read_config()
-            .ok()
-            .and_then(|config| config.get(&format!("url_{platform}")).cloned())
+        Self::read_config().ok().and_then(|config| config.get(&format!("url_{platform}")).cloned())
     }
 
     pub fn delete_custom_url(&self, platform: &str) -> Result<(), AppError> {
@@ -209,9 +192,7 @@ impl TokenVault {
         config.remove(&format!("token_{platform}"));
         Self::write_config(&config)?;
         if let Some(error) = keyring_error {
-            return Err(AppError::Unknown(format!(
-                "Failed to remove token from system keyring: {error}"
-            )));
+            return Err(AppError::Unknown(format!("Failed to remove token from system keyring: {error}")));
         }
         Ok(())
     }
@@ -264,10 +245,7 @@ mod tests {
         let vault = TokenVault::new();
         vault.cache_token("test-platform", "secret-token");
 
-        assert_eq!(
-            vault.get_token("test-platform").unwrap().as_deref(),
-            Some("secret-token")
-        );
+        assert_eq!(vault.get_token("test-platform").unwrap().as_deref(), Some("secret-token"));
 
         vault.remove_cached_token("test-platform");
         assert_eq!(vault.cached_token("test-platform"), None);

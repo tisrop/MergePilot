@@ -21,8 +21,7 @@ async fn test_github_current_user() {
         .await;
 
     let client = HttpClient::new();
-    let adapter =
-        GitHubAdapter::new(client, "test-token-123".to_string()).with_base_url(mock_server.uri());
+    let adapter = GitHubAdapter::new(client, "test-token-123".to_string()).with_base_url(mock_server.uri());
 
     let user = adapter.current_user().await.expect("should fetch user");
     assert_eq!(user.login, "testuser");
@@ -63,33 +62,20 @@ async fn test_github_list_prs() {
         .await;
 
     let client = HttpClient::new();
-    let adapter =
-        GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
+    let adapter = GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
 
     let result = adapter
-        .list_pull_requests(
-            "octocat",
-            "hello-world",
-            &mergepilot_lib::models::PrState::Open,
-            1,
-            20,
-        )
+        .list_pull_requests("octocat", "hello-world", &mergepilot_lib::models::PrState::Open, 1, 20)
         .await
         .expect("should list PRs");
 
     assert_eq!(result.items.len(), 2);
     assert_eq!(result.items[0].number, 42);
     assert_eq!(result.items[0].title, "Fix bug in parser");
-    assert!(matches!(
-        result.items[0].state,
-        mergepilot_lib::models::PrState::Open
-    ));
+    assert!(matches!(result.items[0].state, mergepilot_lib::models::PrState::Open));
     assert_eq!(result.items[1].number, 43);
     // PR #43 has merged_at set, should be Merged
-    assert!(matches!(
-        result.items[1].state,
-        mergepilot_lib::models::PrState::Merged
-    ));
+    assert!(matches!(result.items[1].state, mergepilot_lib::models::PrState::Merged));
 }
 
 #[tokio::test]
@@ -110,18 +96,10 @@ async fn test_github_create_review() {
         .await;
 
     let client = HttpClient::new();
-    let adapter =
-        GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
+    let adapter = GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
 
     let review = adapter
-        .create_review(
-            "octocat",
-            "hello-world",
-            42,
-            "LGTM!",
-            &mergepilot_lib::models::ReviewEvent::Approve,
-            &[],
-        )
+        .create_review("octocat", "hello-world", 42, "LGTM!", &mergepilot_lib::models::ReviewEvent::Approve, &[])
         .await
         .expect("should create review");
 
@@ -150,8 +128,7 @@ async fn test_github_create_issue() {
         .await;
 
     let client = HttpClient::new();
-    let adapter =
-        GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
+    let adapter = GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
 
     let issue = adapter
         .create_issue(
@@ -166,10 +143,7 @@ async fn test_github_create_issue() {
 
     assert_eq!(issue.number, 99);
     assert_eq!(issue.title, "Memory leak in auth module");
-    assert!(matches!(
-        issue.state,
-        mergepilot_lib::models::IssueState::Open
-    ));
+    assert!(matches!(issue.state, mergepilot_lib::models::IssueState::Open));
 }
 
 #[tokio::test]
@@ -180,8 +154,9 @@ async fn test_github_get_pr_diff() {
     Mock::given(method("GET"))
         .and(path("/repos/octocat/hello-world/pulls/42"))
         .and(header("Accept", "application/vnd.github.v3.diff"))
-        .respond_with(ResponseTemplate::new(200)
-            .set_body_string("diff --git a/src/main.rs b/src/main.rs\n@@ -1,3 +1,4 @@\n line1\n-line2\n+line2_new\n line3"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "diff --git a/src/main.rs b/src/main.rs\n@@ -1,3 +1,4 @@\n line1\n-line2\n+line2_new\n line3",
+        ))
         .mount(&mock_server)
         .await;
 
@@ -201,13 +176,9 @@ async fn test_github_get_pr_diff() {
         .await;
 
     let client = HttpClient::new();
-    let adapter =
-        GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
+    let adapter = GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
 
-    let (diff, files) = adapter
-        .get_pr_diff("octocat", "hello-world", 42)
-        .await
-        .expect("should get diff");
+    let (diff, files) = adapter.get_pr_diff("octocat", "hello-world", 42).await.expect("should get diff");
 
     assert!(diff.contains("src/main.rs"));
     assert_eq!(files.len(), 1);
@@ -222,15 +193,12 @@ async fn test_github_auth_error() {
 
     Mock::given(method("GET"))
         .and(path("/user"))
-        .respond_with(
-            ResponseTemplate::new(401).set_body_string(r#"{"message":"Bad credentials"}"#),
-        )
+        .respond_with(ResponseTemplate::new(401).set_body_string(r#"{"message":"Bad credentials"}"#))
         .mount(&mock_server)
         .await;
 
     let client = HttpClient::new();
-    let adapter =
-        GitHubAdapter::new(client, "invalid-token".to_string()).with_base_url(mock_server.uri());
+    let adapter = GitHubAdapter::new(client, "invalid-token".to_string()).with_base_url(mock_server.uri());
 
     let result = adapter.current_user().await;
     assert!(result.is_err(), "should return error for bad credentials");
@@ -242,40 +210,37 @@ async fn test_github_list_repos_with_fork() {
 
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/user/repos"))
-        .respond_with(
-            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!([
-                {
-                    "id": 1,
-                    "name": "linux",
-                    "full_name": "myname/linux",
-                    "private": false,
-                    "fork": true,
-                    "description": "My Linux fork",
-                    "owner": {"login": "myname"},
-                    "parent": {
-                        "id": 999,
-                        "full_name": "torvalds/linux",
-                        "owner": {"login": "torvalds"}
-                    }
-                },
-                {
-                    "id": 2,
-                    "name": "myproject",
-                    "full_name": "myname/myproject",
-                    "private": false,
-                    "fork": false,
-                    "description": "My own project",
-                    "owner": {"login": "myname"}
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "id": 1,
+                "name": "linux",
+                "full_name": "myname/linux",
+                "private": false,
+                "fork": true,
+                "description": "My Linux fork",
+                "owner": {"login": "myname"},
+                "parent": {
+                    "id": 999,
+                    "full_name": "torvalds/linux",
+                    "owner": {"login": "torvalds"}
                 }
-            ])),
-        )
+            },
+            {
+                "id": 2,
+                "name": "myproject",
+                "full_name": "myname/myproject",
+                "private": false,
+                "fork": false,
+                "description": "My own project",
+                "owner": {"login": "myname"}
+            }
+        ])))
         .mount(&mock_server)
         .await;
 
     let client = mergepilot_lib::http_client::HttpClient::new();
-    let adapter =
-        mergepilot_lib::platform::github::GitHubAdapter::new(client, "test-token".to_string())
-            .with_base_url(mock_server.uri());
+    let adapter = mergepilot_lib::platform::github::GitHubAdapter::new(client, "test-token".to_string())
+        .with_base_url(mock_server.uri());
 
     let result = adapter.list_repos(1).await.expect("should list repos");
 
@@ -317,8 +282,7 @@ async fn test_github_list_repos_parses_link_pagination() {
         .mount(&mock_server)
         .await;
 
-    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string())
-        .with_base_url(mock_server.uri());
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
     let result = adapter.list_repos(2).await.expect("should list repos");
 
     assert_eq!(result.page, 2);

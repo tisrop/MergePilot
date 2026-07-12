@@ -12,9 +12,7 @@ impl Default for HttpClient {
 
 impl HttpClient {
     pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
-        }
+        Self { client: reqwest::Client::new() }
     }
 
     pub fn get(&self, url: &str) -> reqwest::RequestBuilder {
