@@ -140,6 +140,8 @@ export interface RepoSummary {
   name: string;
   full_name: string;
   owner: string;
+  owner_type: string;
+  owner_display_name: string;
   description: string;
   private: boolean;
   fork: boolean;

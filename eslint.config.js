@@ -1,7 +1,6 @@
 import pluginVue from "eslint-plugin-vue";
 import tsParser from "@typescript-eslint/parser";
 import tsPlugin from "@typescript-eslint/eslint-plugin";
-import eslintConfigPrettier from "eslint-config-prettier";
 
 export default [
   {
@@ -58,5 +57,4 @@ export default [
       "no-debugger": "warn",
     },
   },
-  eslintConfigPrettier,
 ];

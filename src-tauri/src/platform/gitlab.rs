@@ -114,11 +114,22 @@ impl GitPlatform for GitLabAdapter {
                 } else {
                     (None, None)
                 };
+                let owner_type = match r["namespace"]["kind"].as_str() {
+                    Some("group") => "organization",
+                    _ => "user",
+                };
+                let owner_path = r["namespace"]["path"].as_str().unwrap_or("").to_string();
+                let owner_display_name = r["namespace"]["name"]
+                    .as_str()
+                    .unwrap_or(&owner_path)
+                    .to_string();
                 RepoSummary {
                     id: r["id"].clone(),
                     name: r["name"].as_str().unwrap_or("").to_string(),
                     full_name: path.to_string(),
-                    owner: r["namespace"]["path"].as_str().unwrap_or("").to_string(),
+                    owner: owner_path,
+                    owner_type: owner_type.to_string(),
+                    owner_display_name,
                     description: r["description"].as_str().unwrap_or("").to_string(),
                     private: r["visibility"].as_str().unwrap_or("") != "public",
                     fork,
@@ -317,7 +328,7 @@ impl GitPlatform for GitLabAdapter {
         repo: &str,
         pr_number: u64,
         body: &str,
-        event: &ReviewEvent,
+        _event: &ReviewEvent,
         _comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
         let project_id = urlencoding(owner, repo);
@@ -328,14 +339,7 @@ impl GitPlatform for GitLabAdapter {
             self.base_url, project_id, pr_number
         );
         let payload = serde_json::json!({
-            "body": format!("**Review ({})**\n\n{}",
-                match event {
-                    ReviewEvent::Approve => "Approve",
-                    ReviewEvent::Comment => "Comment",
-                    ReviewEvent::RequestChanges => "Request Changes",
-                },
-                body
-            ),
+            "body": body,
         });
 
         let json = self.post_json(&url, &payload).await?;

@@ -61,6 +61,8 @@ const number = Number(route.params.number);
 const activeTab = ref<"diff" | "reviews" | "ai">("diff");
 
 const reviewListRef = ref<InstanceType<typeof ReviewList> | null>(null);
+const commentError = ref("");
+const commentSuccess = ref(false);
 
 const selectedStrategy = ref<MergeStrategy>("merge");
 const closeRelatedIssues = ref(false);
@@ -172,6 +174,8 @@ async function handleAddComment(
   body?: string,
 ) {
   if (!pr.currentPr?.head_sha || !body) return;
+  commentError.value = "";
+  commentSuccess.value = false;
   try {
     const sl = startLine !== endLine ? startLine : null;
     const targetLine = endLine;
@@ -189,11 +193,15 @@ async function handleAddComment(
       body,
       diffHunk,
     );
+    commentSuccess.value = true;
+    setTimeout(() => {
+      commentSuccess.value = false;
+    }, 3000);
     if (reviewListRef.value) {
       reviewListRef.value.refresh();
     }
-  } catch (e) {
-    console.error("Failed to add review comment:", e);
+  } catch (e: any) {
+    commentError.value = e?.toString() || "提交行内评论失败";
   }
 }
 
@@ -413,6 +421,8 @@ onMounted(async () => {
       <div class="tab-content">
         <div v-if="activeTab === 'diff'">
           <DiffViewer :diff="pr.diff" @add-comment="handleAddComment" />
+          <p v-if="commentError" class="error-msg">{{ commentError }}</p>
+          <p v-if="commentSuccess" class="success-msg">✓ 行内评论已提交</p>
           <ReviewForm :platform="platform" :owner="owner" :repo="repo" :pr-number="number" />
         </div>
         <div v-else-if="activeTab === 'reviews'">
@@ -682,5 +692,12 @@ onMounted(async () => {
   font-size: 12px;
   word-break: break-all;
   opacity: 0.8;
+}
+
+.success-msg {
+  color: var(--color-success);
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
 }
 </style>

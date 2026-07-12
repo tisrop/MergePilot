@@ -28,6 +28,79 @@ impl GiteeAdapter {
         self
     }
 
+    /// Batch-fetch display names for organization groups and enterprises.
+    /// Gitee repo responses include a `namespace` object, but `namespace.name` may
+    /// equal `namespace.path` (the URL slug) when no custom display name is set.
+    /// This function calls `/orgs/{path}` for groups and `/enterprises/{path}` for
+    /// enterprises to resolve proper display names.
+    async fn resolve_namespace_display_names(&self, repos: &mut [RepoSummary]) {
+        let mut org_logins = std::collections::HashSet::new();
+        let mut ent_logins = std::collections::HashSet::new();
+        for r in repos.iter() {
+            if r.owner_type == "organization" && r.owner_display_name == r.owner {
+                org_logins.insert(r.owner.clone());
+            } else if r.owner_type == "enterprise" && r.owner_display_name == r.owner {
+                ent_logins.insert(r.owner.clone());
+            }
+        }
+
+        let base = self.base_url.clone();
+        let client = self.client.clone();
+        let auth = self.auth_query();
+        let mut name_map = std::collections::HashMap::new();
+
+        let mut futs: Vec<tokio::task::JoinHandle<Option<(String, String)>>> = Vec::new();
+
+        for login in org_logins {
+            let url = format!("{}/orgs/{}", base, login);
+            let sep = if url.contains('?') { "&" } else { "?" };
+            let full_url = format!("{}{}{}", url, sep, auth);
+            let c = client.clone();
+            futs.push(tokio::spawn(async move {
+                let resp = c
+                    .get(&full_url)
+                    .header("User-Agent", "mergepilot")
+                    .send()
+                    .await
+                    .ok()?;
+                let json: Value = resp.json().await.ok()?;
+                let name = json["name"].as_str()?.to_string();
+                Some((login, name))
+            }));
+        }
+
+        for login in ent_logins {
+            let url = format!("{}/enterprises/{}", base, login);
+            let sep = if url.contains('?') { "&" } else { "?" };
+            let full_url = format!("{}{}{}", url, sep, auth);
+            let c = client.clone();
+            futs.push(tokio::spawn(async move {
+                let resp = c
+                    .get(&full_url)
+                    .header("User-Agent", "mergepilot")
+                    .send()
+                    .await
+                    .ok()?;
+                let json: Value = resp.json().await.ok()?;
+                let name = json["name"].as_str()?.to_string();
+                Some((login, name))
+            }));
+        }
+
+        let results = futures::future::join_all(futs).await;
+        for r in results {
+            if let Ok(Some((login, name))) = r {
+                name_map.insert(login, name);
+            }
+        }
+
+        for repo in repos.iter_mut() {
+            if let Some(name) = name_map.get(&repo.owner) {
+                repo.owner_display_name = name.clone();
+            }
+        }
+    }
+
     fn parse_last_page_gitee(link: Option<&str>, fallback: u32) -> u32 {
         let Some(header) = link else {
             return fallback;
@@ -151,26 +224,47 @@ impl GitPlatform for GiteeAdapter {
 
         let items: Vec<Value> = resp.json().await?;
 
-        let repos: Vec<RepoSummary> = items
+        let mut repos: Vec<RepoSummary> = items
             .iter()
             .map(|r| {
                 let full_name = r["full_name"].as_str().unwrap_or("");
-                let parts: Vec<&str> = full_name.splitn(2, '/').collect();
                 let fork = r["fork"].as_bool().unwrap_or(false);
                 let (parent_full_name, parent_owner) = if fork {
-                    let parent_name = r["parent"]["full_name"].as_str().map(|s| s.to_string());
-                    let parent_owner = r["parent"]["owner"]["login"]
-                        .as_str()
-                        .map(|s| s.to_string());
-                    (parent_name, parent_owner)
+                    let pn = r["parent"]["full_name"].as_str().map(|s| s.to_string());
+                    let po = pn
+                        .as_ref()
+                        .and_then(|pfn| pfn.split_once('/').map(|(o, _)| o.to_string()));
+                    (pn, po)
                 } else {
                     (None, None)
                 };
+                // Use `namespace` field for owner info — `owner` points to a user,
+                // while `namespace` is the actual space (personal/group/enterprise).
+                let ns = &r["namespace"];
+                let owner_type = match ns["type"].as_str().unwrap_or("personal") {
+                    "group" => "organization",
+                    "enterprise" => "enterprise",
+                    _ => "user",
+                }
+                .to_string();
+                let owner_login = ns["path"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| full_name.split_once('/').map(|(o, _)| o))
+                    .unwrap_or("")
+                    .to_string();
+                let owner_display_name = ns["name"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(&owner_login)
+                    .to_string();
                 RepoSummary {
                     id: r["id"].clone(),
                     name: r["name"].as_str().unwrap_or("").to_string(),
                     full_name: full_name.to_string(),
-                    owner: parts.first().unwrap_or(&"").to_string(),
+                    owner: owner_login,
+                    owner_type,
+                    owner_display_name,
                     description: r["description"].as_str().unwrap_or("").to_string(),
                     private: r["private"].as_bool().unwrap_or(false),
                     fork,
@@ -179,6 +273,9 @@ impl GitPlatform for GiteeAdapter {
                 }
             })
             .collect();
+
+        // Fetch better display names for orgs/enterprises when namespace.name == path
+        self.resolve_namespace_display_names(&mut repos).await;
 
         Ok(Paginated {
             items: repos,
@@ -417,7 +514,7 @@ impl GitPlatform for GiteeAdapter {
         repo: &str,
         pr_number: u64,
         body: &str,
-        event: &ReviewEvent,
+        _event: &ReviewEvent,
         comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
         // Gitee API does not support batch inline comments in review creation.
@@ -427,14 +524,7 @@ impl GitPlatform for GiteeAdapter {
             self.base_url, owner, repo, pr_number
         );
         let payload = serde_json::json!({
-            "body": format!("**Review ({})**\n\n{}",
-                match event {
-                    ReviewEvent::Approve => "Approve",
-                    ReviewEvent::Comment => "Comment",
-                    ReviewEvent::RequestChanges => "Request Changes",
-                },
-                body
-            ),
+            "body": body,
         });
         let json = self.post_json(&url, &payload).await?;
 
