@@ -5,6 +5,37 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { useRepoStore } from "@/stores/useRepoStore";
 import type { Platform, RepoSummary } from "@/types";
 
+interface OwnerGroup {
+  owner: string;
+  isOrganization: boolean;
+  repos: RepoSummary[];
+}
+
+const repoGroups = computed(() => {
+  const groups = new Map<string, OwnerGroup>();
+  for (const r of repo.repos) {
+    const key = r.owner;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        owner: r.owner_display_name || r.owner,
+        isOrganization:
+          r.owner_type === "organization" ||
+          r.owner_type === "group" ||
+          r.owner_type === "enterprise",
+        repos: [],
+      });
+    }
+    groups.get(key)!.repos.push(r);
+  }
+  // Sort: organizations first, then personal, alphabetically within each
+  const sorted = Array.from(groups.values());
+  sorted.sort((a, b) => {
+    if (a.isOrganization !== b.isOrganization) return a.isOrganization ? -1 : 1;
+    return a.owner.localeCompare(b.owner);
+  });
+  return sorted;
+});
+
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
@@ -169,18 +200,53 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
         <div class="loading-hint">加载中...</div>
       </div>
       <div v-else class="repo-list">
-        <template v-for="r in repo.repos" :key="r.id">
+        <template v-for="group in repoGroups" :key="group.owner">
+          <div class="repo-group-header">
+            <svg
+              v-if="group.isOrganization"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="2" y="8" width="6" height="14" rx="1" />
+              <rect x="16" y="8" width="6" height="14" rx="1" />
+              <path d="M8 15h8" />
+              <path d="M12 22V8" />
+              <circle cx="12" cy="4" r="2" />
+            </svg>
+            <svg
+              v-else
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            <span>{{ group.owner }}</span>
+          </div>
           <button
-            v-if="r.fork"
+            v-for="r in group.repos"
+            :key="r.id"
             :class="{
-              active:
-                repo.activeFullName === r.parent_full_name || repo.activeFullName === r.full_name,
-              'is-fork': true,
+              active: repo.activeFullName === r.full_name || repo.activeFullName !== null && repo.activeFullName === r.parent_full_name,
+              'is-fork': r.fork,
             }"
-            :title="r.parent_full_name ? 'Fork from ' + r.parent_full_name : r.full_name"
-            @click="selectForkRepo(r, true)"
+            :title="r.fork && r.parent_full_name ? 'Fork from ' + r.parent_full_name : r.full_name"
+            @click="r.fork ? selectForkRepo(r, true) : (selectRepo(getRepoOwner(r.full_name)), repo.setForkContext(null))"
           >
             <svg
+              v-if="r.fork"
               class="fork-icon"
               width="12"
               height="12"
@@ -196,18 +262,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
               <circle cx="6" cy="6" r="3" />
               <circle cx="18" cy="18" r="3" />
             </svg>
-            {{ r.full_name }}
-          </button>
-          <button
-            v-else
-            :class="{ active: repo.activeFullName === r.full_name }"
-            :title="r.full_name"
-            @click="
-              selectRepo(getRepoOwner(r.full_name));
-              repo.setForkContext(null);
-            "
-          >
-            {{ r.full_name }}
+            {{ r.name }}
           </button>
         </template>
       </div>
@@ -394,12 +449,33 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   gap: 1px;
 }
 
+.repo-group-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 6px var(--space-2) 2px;
+  margin-top: var(--space-1);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+}
+
+.repo-group-header:first-child {
+  margin-top: 0;
+}
+
+.repo-group-header svg {
+  flex-shrink: 0;
+}
+
 .repo-list button {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   text-align: left;
-  padding: 6px var(--space-2);
+  padding: 4px var(--space-2) 4px var(--space-4);
   border: none;
   background: none;
   font-size: 12px;

@@ -448,7 +448,8 @@ async fn test_gitee_list_repos_paginated() {
                         "private": false,
                         "fork": false,
                         "description": "First repo",
-                        "owner": { "login": "user" }
+                        "owner": { "login": "user", "name": "用户昵称", "type": "User" },
+                        "namespace": { "type": "personal", "name": "user", "path": "user", "enterprise_id": 0 }
                     }
                 ]))
                 .insert_header("link", link_value),
@@ -463,6 +464,9 @@ async fn test_gitee_list_repos_paginated() {
     let result = adapter.list_repos(1).await.expect("should list repos");
 
     assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].owner, "user");
+    assert_eq!(result.items[0].owner_type, "user");
+    assert_eq!(result.items[0].owner_display_name, "user");
     assert_eq!(
         result.total_pages, 3,
         "should parse last page from Link header"
@@ -483,7 +487,8 @@ async fn test_gitee_list_repos_single_page() {
                 "private": false,
                 "fork": false,
                 "description": "First repo",
-                "owner": { "login": "user" }
+                "owner": { "login": "user", "name": "用户昵称", "type": "User" },
+                "namespace": { "type": "personal", "name": "user", "path": "user", "enterprise_id": 0 }
             }
         ])))
         .mount(&mock_server)
@@ -495,6 +500,8 @@ async fn test_gitee_list_repos_single_page() {
 
     let result = adapter.list_repos(1).await.expect("should list repos");
 
+    assert_eq!(result.items[0].owner, "user");
+    assert_eq!(result.items[0].owner_type, "user");
     assert_eq!(
         result.total_pages, 1,
         "should default to 1 with no Link header"

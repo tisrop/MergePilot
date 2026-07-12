@@ -31,6 +31,62 @@ impl GitHubAdapter {
         format!("Bearer {}", self.token)
     }
 
+    /// Fetch org/enterprise display names via `/orgs/{login}`.
+    /// Updates `owner_display_name` in place for org repos.
+    async fn resolve_org_display_names(&self, repos: &mut [RepoSummary]) {
+        let orgs: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            repos
+                .iter()
+                .filter(|r| r.owner_type == "organization" && seen.insert(r.owner.clone()))
+                .map(|r| r.owner.clone())
+                .collect()
+        };
+        if orgs.is_empty() {
+            return;
+        }
+
+        let auth = self.auth_header();
+        let client = self.client.clone();
+        let base = self.base_url.clone();
+
+        let futs: Vec<_> = orgs
+            .into_iter()
+            .map(|login| {
+                let url = format!("{}/orgs/{}", base, login);
+                let c = client.clone();
+                let a = auth.clone();
+                tokio::spawn(async move {
+                    let resp = c
+                        .get(&url)
+                        .header("Authorization", &a)
+                        .header("User-Agent", "mergepilot")
+                        .header("Accept", "application/vnd.github.v3+json")
+                        .send()
+                        .await
+                        .ok()?;
+                    let json: serde_json::Value = resp.json().await.ok()?;
+                    let name = json["name"].as_str()?.to_string();
+                    Some((login, name))
+                })
+            })
+            .collect();
+
+        let results = futures::future::join_all(futs).await;
+        let mut name_map = std::collections::HashMap::new();
+        for r in results {
+            if let Ok(Some((login, name))) = r {
+                name_map.insert(login, name);
+            }
+        }
+
+        for r in repos.iter_mut() {
+            if let Some(name) = name_map.get(&r.owner) {
+                r.owner_display_name = name.clone();
+            }
+        }
+    }
+
     async fn get_json<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, AppError> {
         let resp = self
             .client
@@ -236,11 +292,15 @@ impl GitPlatform for GitHubAdapter {
             } else {
                 (None, None)
             };
+            let owner_type = r["owner"]["type"].as_str().unwrap_or("user").to_lowercase();
+            let owner_login = parts.first().unwrap_or(&"").to_string();
             repos.push(RepoSummary {
                 id: r["id"].clone(),
                 name: r["name"].as_str().unwrap_or("").to_string(),
                 full_name: full_name.to_string(),
-                owner: parts.first().unwrap_or(&"").to_string(),
+                owner: owner_login.clone(),
+                owner_type,
+                owner_display_name: owner_login,
                 description: r["description"].as_str().unwrap_or("").to_string(),
                 private: r["private"].as_bool().unwrap_or(false),
                 fork,
@@ -248,6 +308,9 @@ impl GitPlatform for GitHubAdapter {
                 parent_owner,
             });
         }
+
+        // Fetch org display names from API
+        self.resolve_org_display_names(&mut repos).await;
 
         Ok(Paginated {
             items: repos,

@@ -16,6 +16,10 @@ pub struct RepoSummary {
     pub name: String,
     pub full_name: String,
     pub owner: String,
+    /// "user", "organization", or "group" (GitLab)
+    pub owner_type: String,
+    /// Display name of the owner (org/enterprise/user full name)
+    pub owner_display_name: String,
     pub description: String,
     pub private: bool,
     pub fork: bool,
