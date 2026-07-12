@@ -317,7 +317,7 @@ impl GitPlatform for GitLabAdapter {
         repo: &str,
         pr_number: u64,
         body: &str,
-        event: &ReviewEvent,
+        _event: &ReviewEvent,
         _comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
         let project_id = urlencoding(owner, repo);
@@ -328,14 +328,7 @@ impl GitPlatform for GitLabAdapter {
             self.base_url, project_id, pr_number
         );
         let payload = serde_json::json!({
-            "body": format!("**Review ({})**\n\n{}",
-                match event {
-                    ReviewEvent::Approve => "Approve",
-                    ReviewEvent::Comment => "Comment",
-                    ReviewEvent::RequestChanges => "Request Changes",
-                },
-                body
-            ),
+            "body": body,
         });
 
         let json = self.post_json(&url, &payload).await?;

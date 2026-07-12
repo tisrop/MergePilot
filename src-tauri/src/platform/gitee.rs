@@ -417,7 +417,7 @@ impl GitPlatform for GiteeAdapter {
         repo: &str,
         pr_number: u64,
         body: &str,
-        event: &ReviewEvent,
+        _event: &ReviewEvent,
         comments: &[ReviewCommentPosition],
     ) -> Result<Review, AppError> {
         // Gitee API does not support batch inline comments in review creation.
@@ -427,14 +427,7 @@ impl GitPlatform for GiteeAdapter {
             self.base_url, owner, repo, pr_number
         );
         let payload = serde_json::json!({
-            "body": format!("**Review ({})**\n\n{}",
-                match event {
-                    ReviewEvent::Approve => "Approve",
-                    ReviewEvent::Comment => "Comment",
-                    ReviewEvent::RequestChanges => "Request Changes",
-                },
-                body
-            ),
+            "body": body,
         });
         let json = self.post_json(&url, &payload).await?;
 
