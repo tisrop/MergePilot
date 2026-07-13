@@ -123,15 +123,20 @@ jobs:
 
       - name: Setup Tauri signing key
         shell: bash
+        env:
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_BASE64 }}
+          UPDATER_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_BASE64 }}" ]; then
-            echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/updater.key"
-            KEY_B64=$(base64 < "$RUNNER_TEMP/updater.key" | tr -d '\r\n')
-            echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_B64" >> "$GITHUB_ENV"
-            if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" ]; then
-              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
-            fi
-          fi
+          printf '%s' "$UPDATER_KEY" | base64 --decode > "$RUNNER_TEMP/updater.key"
+          KEY_B64=$(base64 < "$RUNNER_TEMP/updater.key" | tr -d '\r\n')
+          echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_B64" >> "$GITHUB_ENV"
+
+          PASSWORD_DELIMITER="TAURI_PASSWORD_$(date +%s%N)"
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<$PASSWORD_DELIMITER"
+            printf '%s\n' "$UPDATER_PASSWORD"
+            echo "$PASSWORD_DELIMITER"
+          } >> "$GITHUB_ENV"
 
       - name: Generate release notes
         id: release-notes
