@@ -10,7 +10,7 @@ describe("版本一致性检查", () => {
   it("读取当前三个 manifest 的同一版本", async () => {
     const versions = await readProjectVersions();
 
-    expect(assertConsistentVersions(versions)).toBe("0.3.0");
+    expect(assertConsistentVersions(versions)).toBe("0.3.5");
   });
 
   it("只读取 Cargo package 段中的版本", () => {
