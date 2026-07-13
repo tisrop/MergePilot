@@ -43,6 +43,7 @@ function mountPage() {
 
 describe("SettingsPage 诊断信息", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     storage.clear();
     storage.set("mergepilot:auto-update-check", "false");
     setActivePinia(createPinia());
@@ -282,6 +283,54 @@ describe("SettingsPage 诊断信息", () => {
 
     expect(checkForUpdates).toHaveBeenCalledOnce();
     expect(wrapper.find(".support-status.error").exists()).toBe(false);
+  });
+
+  it("本地存储不可用时仍可挂载并后台检查更新", async () => {
+    vi.spyOn(localStorage, "getItem").mockImplementation((key: string) => {
+      if (["mergepilot:auto-update-check", "mergepilot:last-update-check"].includes(key)) {
+        throw new DOMException("storage denied", "SecurityError");
+      }
+      return storage.get(key) ?? null;
+    });
+    vi.spyOn(localStorage, "setItem").mockImplementation((key: string, value: string) => {
+      if (["mergepilot:auto-update-check", "mergepilot:last-update-check"].includes(key)) {
+        throw new DOMException("storage denied", "SecurityError");
+      }
+      storage.set(key, value);
+    });
+    vi.mocked(checkForUpdates).mockResolvedValue({
+      current_version: "0.3.0",
+      available: false,
+      version: null,
+      notes: null,
+      published_at: null,
+    });
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("应用更新");
+    expect(checkForUpdates).toHaveBeenCalledOnce();
+  });
+
+  it("记录检查时间失败时不阻断手动检查", async () => {
+    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("storage denied", "SecurityError");
+    });
+    vi.mocked(checkForUpdates).mockResolvedValue({
+      current_version: "0.3.0",
+      available: false,
+      version: null,
+      notes: null,
+      published_at: null,
+    });
+    const wrapper = mountPage();
+
+    await wrapper.get("button.check-update-button").trigger("click");
+    await flushPromises();
+
+    expect(checkForUpdates).toHaveBeenCalledOnce();
+    expect(wrapper.text()).toContain("当前已是最新版本");
   });
 
   it("允许关闭自动检查且不记录敏感网络数据", async () => {

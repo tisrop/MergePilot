@@ -33,7 +33,24 @@ const updateError = ref("");
 const AUTO_UPDATE_CHECK_KEY = "mergepilot:auto-update-check";
 const LAST_UPDATE_CHECK_KEY = "mergepilot:last-update-check";
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const isAutoUpdateCheckEnabled = ref(localStorage.getItem(AUTO_UPDATE_CHECK_KEY) !== "false");
+
+function readUpdateStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeUpdateStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage may be unavailable in hardened webviews; update checks must remain usable.
+  }
+}
+
+const isAutoUpdateCheckEnabled = ref(readUpdateStorage(AUTO_UPDATE_CHECK_KEY) !== "false");
 const isConfirmingInstall = ref(false);
 const isInstallingUpdate = ref(false);
 const isUpdateInstalled = ref(false);
@@ -49,7 +66,7 @@ const updateProgressPercent = computed(() => {
 });
 
 function isBackgroundCheckDue(now = Date.now()) {
-  const lastCheck = Number(localStorage.getItem(LAST_UPDATE_CHECK_KEY));
+  const lastCheck = Number(readUpdateStorage(LAST_UPDATE_CHECK_KEY));
   return (
     !Number.isFinite(lastCheck) ||
     lastCheck <= 0 ||
@@ -60,7 +77,7 @@ function isBackgroundCheckDue(now = Date.now()) {
 
 async function maybeCheckForUpdatesInBackground() {
   if (!isAutoUpdateCheckEnabled.value || !isBackgroundCheckDue()) return;
-  localStorage.setItem(LAST_UPDATE_CHECK_KEY, String(Date.now()));
+  writeUpdateStorage(LAST_UPDATE_CHECK_KEY, String(Date.now()));
   await checkUpdate(true);
 }
 
@@ -76,7 +93,7 @@ onMounted(async () => {
 async function checkUpdate(isBackground = false) {
   if (isCheckingUpdate.value) return;
   if (!isBackground) {
-    localStorage.setItem(LAST_UPDATE_CHECK_KEY, String(Date.now()));
+    writeUpdateStorage(LAST_UPDATE_CHECK_KEY, String(Date.now()));
   }
   isCheckingUpdate.value = true;
   if (!isBackground) {
@@ -99,7 +116,7 @@ async function checkUpdate(isBackground = false) {
 async function setAutoUpdateCheckEnabled(event: Event) {
   const enabled = (event.target as HTMLInputElement).checked;
   isAutoUpdateCheckEnabled.value = enabled;
-  localStorage.setItem(AUTO_UPDATE_CHECK_KEY, String(enabled));
+  writeUpdateStorage(AUTO_UPDATE_CHECK_KEY, String(enabled));
   if (enabled) {
     await maybeCheckForUpdatesInBackground();
   }
