@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   version-consistency:
     runs-on: ubuntu-latest
@@ -20,6 +24,9 @@ jobs:
 
       - name: Verify release tag matches manifests
         run: node .github/checks/version-consistency.mjs --tag "$GITHUB_REF_NAME"
+
+      - name: Verify updater security configuration
+        run: node .github/checks/updater-config.mjs
 
   prepare-release:
     needs: version-consistency
@@ -346,8 +353,8 @@ jobs:
             --assets "$RUNNER_TEMP/release-assets.json" \
             --notes "$RUNNER_TEMP/release-notes.txt" \
             --version "${GITHUB_REF_NAME#v}" \
-            --asset-url-prefix \
-              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/assets/" \
+            --asset-download-url-prefix \
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
             --output "$RUNNER_TEMP/latest.json"
 
       - name: Upload updater metadata

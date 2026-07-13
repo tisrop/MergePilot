@@ -91,7 +91,7 @@ export function assembleUpdaterMetadata({
   version,
   notes,
   pubDate,
-  assetUrlPrefix,
+  assetDownloadUrlPrefix,
 }) {
   if (!Array.isArray(fragments) || fragments.length === 0) {
     throw new Error("缺少 updater 元数据分片");
@@ -107,7 +107,7 @@ export function assembleUpdaterMetadata({
   if (Number.isNaN(Date.parse(pubDate))) {
     throw new Error("pub_date 不是有效时间");
   }
-  assertNonEmptyString(assetUrlPrefix, "Release asset URL 前缀");
+  assertNonEmptyString(assetDownloadUrlPrefix, "Release asset 下载 URL 前缀");
 
   const references = {};
   for (const fragment of fragments) {
@@ -147,8 +147,8 @@ export function assembleUpdaterMetadata({
       throw new Error(`${key} 无法唯一匹配 Release updater 资源`);
     }
 
-    const url = matchingAssets[0].url;
-    if (typeof url !== "string" || !url.startsWith(assetUrlPrefix)) {
+    const url = matchingAssets[0].browser_download_url;
+    if (typeof url !== "string" || !url.startsWith(assetDownloadUrlPrefix)) {
       throw new Error(`${key} 的 Release updater 资源地址无效`);
     }
     platforms[key] = { signature: reference.signature, url };
@@ -206,7 +206,7 @@ async function main() {
       version: options.version,
       notes,
       pubDate: options["pub-date"] ?? new Date().toISOString(),
-      assetUrlPrefix: options["asset-url-prefix"],
+      assetDownloadUrlPrefix: options["asset-download-url-prefix"],
     });
     await writeFile(options.output, `${JSON.stringify(metadata, null, 2)}\n`);
     return;

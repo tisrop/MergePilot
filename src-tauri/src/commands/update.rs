@@ -1,5 +1,4 @@
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::state::AppState;
@@ -25,23 +24,6 @@ pub struct UpdateProgressEvent {
     pub phase: &'static str,
 }
 
-struct UpdateOperationGuard<'a> {
-    active: &'a AtomicBool,
-}
-
-impl Drop for UpdateOperationGuard<'_> {
-    fn drop(&mut self) {
-        self.active.store(false, Ordering::Release);
-    }
-}
-
-fn acquire_update_operation(active: &AtomicBool) -> Result<UpdateOperationGuard<'_>, String> {
-    active
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .map(|_| UpdateOperationGuard { active })
-        .map_err(|_| "已有更新安装或重启操作正在进行，请稍候".into())
-}
-
 fn validate_update_request_id(request_id: &str) -> Result<(), String> {
     if request_id.is_empty()
         || request_id.len() > 64
@@ -60,14 +42,6 @@ fn validate_expected_version(version: &str) -> Result<(), String> {
         return Err("预期更新版本格式无效".into());
     }
     Ok(())
-}
-
-fn ensure_no_active_ai_tasks(has_active_tasks: bool) -> Result<(), String> {
-    if has_active_tasks {
-        Err("存在进行中的 AI 评审，请等待完成或取消后再安装更新".into())
-    } else {
-        Ok(())
-    }
 }
 
 fn ensure_expected_update_version(expected: &str, actual: &str) -> Result<(), String> {
@@ -161,8 +135,7 @@ pub async fn update_download_and_install(
     expected_version: String,
 ) -> Result<(), String> {
     validate_update_request_id(&request_id)?;
-    let _operation = acquire_update_operation(&state.update_operation_active)?;
-    ensure_no_active_ai_tasks(state.ai_tasks.has_active_tasks().await)?;
+    let _operation = state.operations.begin_update().await?;
 
     let updater = app.updater().map_err(|_| "初始化更新下载失败，请稍后重试".to_string())?;
     let update =
@@ -203,26 +176,23 @@ pub async fn update_download_and_install(
         .await
         .map_err(download_error)?;
 
-    ensure_no_active_ai_tasks(state.ai_tasks.has_active_tasks().await)?;
     update.install(bytes).map_err(install_error)?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn update_restart(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let _operation = acquire_update_operation(&state.update_operation_active)?;
-    ensure_no_active_ai_tasks(state.ai_tasks.has_active_tasks().await)?;
+    let _operation = state.operations.begin_update().await?;
     app.restart()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        acquire_update_operation, check_result, download_error, ensure_expected_update_version,
-        ensure_no_active_ai_tasks, install_error, sanitize_release_notes, update_error, validate_expected_version,
-        validate_update_request_id, MAX_RELEASE_NOTES_CHARS, RELEASE_NOTES_TRUNCATED_SUFFIX,
+        check_result, download_error, ensure_expected_update_version, install_error, sanitize_release_notes,
+        update_error, validate_expected_version, validate_update_request_id, MAX_RELEASE_NOTES_CHARS,
+        RELEASE_NOTES_TRUNCATED_SUFFIX,
     };
-    use std::sync::atomic::AtomicBool;
     use tauri_plugin_updater::Error as UpdaterError;
 
     #[test]
@@ -292,15 +262,6 @@ mod tests {
     }
 
     #[test]
-    fn serializes_update_install_and_restart_operations() {
-        let active = AtomicBool::new(false);
-        let first = acquire_update_operation(&active).expect("first operation should acquire guard");
-        assert_eq!(acquire_update_operation(&active).err(), Some("已有更新安装或重启操作正在进行，请稍候".into()));
-        drop(first);
-        assert!(acquire_update_operation(&active).is_ok());
-    }
-
-    #[test]
     fn requires_reconfirmation_when_available_version_changes() {
         assert!(ensure_expected_update_version("0.4.0", "0.4.0").is_ok());
         assert_eq!(ensure_expected_update_version("", "0.4.0"), Err("预期更新版本格式无效".into()));
@@ -308,11 +269,5 @@ mod tests {
             ensure_expected_update_version("0.4.0", "0.5.0"),
             Err("可用更新已从 v0.4.0 变更为 v0.5.0，请重新检查并确认后再安装".into())
         );
-    }
-
-    #[test]
-    fn blocks_install_while_ai_review_is_active() {
-        assert_eq!(ensure_no_active_ai_tasks(true), Err("存在进行中的 AI 评审，请等待完成或取消后再安装更新".into()));
-        assert!(ensure_no_active_ai_tasks(false).is_ok());
     }
 }

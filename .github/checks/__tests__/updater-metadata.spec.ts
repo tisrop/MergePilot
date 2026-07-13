@@ -74,6 +74,7 @@ describe("updater 元数据汇总", () => {
       name: `${platform}.updater`,
       label: `${platform}.updater`,
       url: `https://api.github.com/repos/tisrop/MergePilot/releases/assets/${index + 1}`,
+      browser_download_url: `https://github.com/tisrop/MergePilot/releases/download/v0.3.5/${platform}.updater`,
     }));
 
     const metadata = assembleUpdaterMetadata({
@@ -82,11 +83,11 @@ describe("updater 元数据汇总", () => {
       version: "0.3.5",
       notes: "发布说明",
       pubDate: "2026-07-13T12:00:00.000Z",
-      assetUrlPrefix: "https://api.github.com/repos/tisrop/MergePilot/releases/assets/",
+      assetDownloadUrlPrefix: "https://github.com/tisrop/MergePilot/releases/download/v0.3.5/",
     });
 
     expect(Object.keys(metadata.platforms)).toEqual(platforms);
-    expect(metadata.platforms["linux-x86_64"].url).toBe(assets[2].url);
+    expect(metadata.platforms["linux-x86_64"].url).toBe(assets[2].browser_download_url);
   });
 
   it("拒绝缺失平台、重复条目和非官方资源地址", () => {
@@ -100,6 +101,7 @@ describe("updater 元数据汇总", () => {
       name: `${platform}.updater`,
       label: `${platform}.updater`,
       url: `https://api.github.com/repos/tisrop/MergePilot/releases/assets/${platform}`,
+      browser_download_url: `https://github.com/tisrop/MergePilot/releases/download/v0.3.5/${platform}.updater`,
     }));
     const input = {
       fragments: validFragments,
@@ -107,7 +109,7 @@ describe("updater 元数据汇总", () => {
       version: "0.3.5",
       notes: "发布说明",
       pubDate: "2026-07-13T12:00:00.000Z",
-      assetUrlPrefix: "https://api.github.com/repos/tisrop/MergePilot/releases/assets/",
+      assetDownloadUrlPrefix: "https://github.com/tisrop/MergePilot/releases/download/v0.3.5/",
     };
 
     expect(() => assembleUpdaterMetadata({ ...input, fragments: validFragments.slice(1) })).toThrow(
@@ -119,14 +121,33 @@ describe("updater 元数据汇总", () => {
     expect(() =>
       assembleUpdaterMetadata({
         ...input,
-        assets: [{ ...assets[0], url: "https://example.com/update" }, ...assets.slice(1)],
+        assets: [
+          { ...assets[0], browser_download_url: "https://example.com/update" },
+          ...assets.slice(1),
+        ],
+      }),
+    ).toThrow("darwin-aarch64 的 Release updater 资源地址无效");
+
+    expect(() =>
+      assembleUpdaterMetadata({
+        ...input,
+        assets: [
+          {
+            ...assets[0],
+            browser_download_url:
+              "https://github.com/tisrop/MergePilot/releases/download/v0.3.4/darwin-aarch64.updater",
+          },
+          ...assets.slice(1),
+        ],
       }),
     ).toThrow("darwin-aarch64 的 Release updater 资源地址无效");
   });
 
-  it("Release 工作流并行构建且只有汇总任务写 latest.json", async () => {
+  it("Release 工作流按 Tag 串行、平台并行且只有汇总任务写 latest.json", async () => {
     const workflow = await readFile(resolve(".github/workflows/release.yml"), "utf8");
 
+    expect(workflow).toContain("group: release-${{ github.ref }}");
+    expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).not.toContain("max-parallel: 1");
     expect(workflow).toContain("prepare-release:");
     expect(workflow).toContain("releaseId: ${{ needs.prepare-release.outputs.release-id }}");
@@ -134,6 +155,10 @@ describe("updater 元数据汇总", () => {
     expect(workflow).toContain("name: updater-fragment-${{ matrix.updater-platform }}");
     expect(workflow).toContain("assemble-updater-metadata:");
     expect(workflow).toContain("needs: [prepare-release, build]");
+    expect(workflow).toContain("--asset-download-url-prefix");
+    expect(workflow).toContain(
+      "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/",
+    );
     expect(workflow.match(/gh release upload[^\n]*latest\.json/g)).toHaveLength(1);
   });
 });

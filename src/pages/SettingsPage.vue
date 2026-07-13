@@ -1,20 +1,28 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import {
-  checkForUpdates,
-  copySupportInfo as copySupportInfoToClipboard,
-  downloadAndInstallUpdate,
-  getAppVersion,
-  listenToUpdateProgress,
-  restartAfterUpdate,
-} from "@/api";
+import { computed, onMounted, ref } from "vue";
+import { storeToRefs } from "pinia";
+import { copySupportInfo as copySupportInfoToClipboard, getAppVersion } from "@/api";
 import { getErrorMessage } from "@/utils/error";
 import { useAuthStore } from "@/stores/useAuthStore";
+import { useUpdateStore } from "@/stores/useUpdateStore";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import AiSettings from "@/components/ai/AiSettings.vue";
-import type { Platform, UpdateCheckResult } from "@/types";
+import type { Platform } from "@/types";
 
 const auth = useAuthStore();
+const updates = useUpdateStore();
+const {
+  isAutoUpdateCheckEnabled,
+  isCheckingUpdate,
+  updateResult,
+  updateError,
+  isInstallingUpdate,
+  isRestartingUpdate,
+  isUpdateInstalled,
+  updateDownloaded,
+  updateTotal,
+  updatePhase,
+} = storeToRefs(updates);
 
 const platformList: { value: Platform; label: string }[] = [
   { value: "github", label: "GitHub" },
@@ -27,66 +35,12 @@ const supportInfoStatus = ref("");
 const isSupportInfoError = ref(false);
 const appVersion = ref("");
 const versionError = ref("");
-const isCheckingUpdate = ref(false);
-const updateResult = ref<UpdateCheckResult | null>(null);
-const updateError = ref("");
-const AUTO_UPDATE_CHECK_KEY = "mergepilot:auto-update-check";
-const LAST_UPDATE_CHECK_KEY = "mergepilot:last-update-check";
-const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
-function readUpdateStorage(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeUpdateStorage(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Storage may be unavailable in hardened webviews; update checks must remain usable.
-  }
-}
-
-const isAutoUpdateCheckEnabled = ref(readUpdateStorage(AUTO_UPDATE_CHECK_KEY) !== "false");
 const isConfirmingInstall = ref(false);
-const isInstallingUpdate = ref(false);
-const isUpdateInstalled = ref(false);
-const updateDownloaded = ref(0);
-const updateTotal = ref<number | null>(null);
-const updatePhase = ref<"downloading" | "installing" | null>(null);
-let unlistenUpdateProgress: (() => void) | null = null;
-let activeUpdateRequestId: string | null = null;
-let isSettingsPageUnmounted = false;
-
-function clearUpdateProgressListener() {
-  const unlisten = unlistenUpdateProgress;
-  unlistenUpdateProgress = null;
-  unlisten?.();
-}
 
 const updateProgressPercent = computed(() => {
   if (!updateTotal.value || updateTotal.value <= 0) return null;
   return Math.min(100, Math.round((updateDownloaded.value / updateTotal.value) * 100));
 });
-
-function isBackgroundCheckDue(now = Date.now()) {
-  const lastCheck = Number(readUpdateStorage(LAST_UPDATE_CHECK_KEY));
-  return (
-    !Number.isFinite(lastCheck) ||
-    lastCheck <= 0 ||
-    lastCheck > now ||
-    now - lastCheck >= UPDATE_CHECK_INTERVAL_MS
-  );
-}
-
-async function maybeCheckForUpdatesInBackground() {
-  if (!isAutoUpdateCheckEnabled.value || !isBackgroundCheckDue()) return;
-  writeUpdateStorage(LAST_UPDATE_CHECK_KEY, String(Date.now()));
-  await checkUpdate(true);
-}
 
 onMounted(async () => {
   try {
@@ -94,84 +48,27 @@ onMounted(async () => {
   } catch (error) {
     versionError.value = getErrorMessage(error, "无法读取当前版本");
   }
-  await maybeCheckForUpdatesInBackground();
 });
 
 async function checkUpdate(isBackground = false) {
-  if (isCheckingUpdate.value) return;
-  if (!isBackground) {
-    writeUpdateStorage(LAST_UPDATE_CHECK_KEY, String(Date.now()));
-  }
-  isCheckingUpdate.value = true;
-  if (!isBackground) {
-    updateError.value = "";
-    updateResult.value = null;
-  }
   isConfirmingInstall.value = false;
-  isUpdateInstalled.value = false;
-  try {
-    updateResult.value = await checkForUpdates();
-  } catch (error) {
-    if (!isBackground) {
-      updateError.value = getErrorMessage(error, "检查更新失败，请稍后重试");
-    }
-  } finally {
-    isCheckingUpdate.value = false;
-  }
+  await updates.checkUpdate(isBackground);
 }
 
 async function setAutoUpdateCheckEnabled(event: Event) {
   const enabled = (event.target as HTMLInputElement).checked;
-  isAutoUpdateCheckEnabled.value = enabled;
-  writeUpdateStorage(AUTO_UPDATE_CHECK_KEY, String(enabled));
-  if (enabled) {
-    await maybeCheckForUpdatesInBackground();
-  }
+  await updates.setAutoUpdateCheckEnabled(enabled);
 }
 
 async function installUpdate() {
-  const expectedVersion = updateResult.value?.version;
-  if (isInstallingUpdate.value || !updateResult.value?.available || !expectedVersion) return;
+  if (isInstallingUpdate.value || isUpdateInstalled.value || !updateResult.value?.available) return;
   if (!isConfirmingInstall.value) {
     isConfirmingInstall.value = true;
     return;
   }
 
-  const requestId = crypto.randomUUID();
-  activeUpdateRequestId = requestId;
-  isInstallingUpdate.value = true;
   isConfirmingInstall.value = false;
-  updateError.value = "";
-  updateDownloaded.value = 0;
-  updateTotal.value = null;
-  updatePhase.value = "downloading";
-
-  try {
-    clearUpdateProgressListener();
-    const unlisten = await listenToUpdateProgress((progress) => {
-      if (progress.request_id !== activeUpdateRequestId) return;
-      updatePhase.value = progress.phase;
-      if (progress.phase === "downloading") {
-        updateDownloaded.value = progress.downloaded;
-        updateTotal.value = progress.total;
-      }
-    });
-    if (isSettingsPageUnmounted || activeUpdateRequestId !== requestId) {
-      unlisten();
-    } else {
-      unlistenUpdateProgress = unlisten;
-    }
-    await downloadAndInstallUpdate(requestId, expectedVersion);
-    isUpdateInstalled.value = true;
-    updatePhase.value = null;
-  } catch (error) {
-    updateError.value = getErrorMessage(error, "下载安装更新失败，请稍后重试");
-    updatePhase.value = null;
-  } finally {
-    activeUpdateRequestId = null;
-    isInstallingUpdate.value = false;
-    clearUpdateProgressListener();
-  }
+  await updates.installUpdate();
 }
 
 function cancelInstallConfirmation() {
@@ -179,19 +76,8 @@ function cancelInstallConfirmation() {
 }
 
 async function restartApp() {
-  updateError.value = "";
-  try {
-    await restartAfterUpdate();
-  } catch (error) {
-    updateError.value = getErrorMessage(error, "重启失败，请手动重新打开应用");
-  }
+  await updates.restartUpdate();
 }
-
-onUnmounted(() => {
-  isSettingsPageUnmounted = true;
-  activeUpdateRequestId = null;
-  clearUpdateProgressListener();
-});
 
 async function copySupportInfo() {
   if (isCopyingSupportInfo.value) return;
@@ -334,8 +220,14 @@ async function copySupportInfo() {
           </div>
           <div class="update-actions">
             <template v-if="isUpdateInstalled">
-              <button type="button" class="install-update-button" @click="restartApp">
-                重启完成更新
+              <button
+                type="button"
+                class="install-update-button"
+                :aria-busy="isRestartingUpdate"
+                :disabled="isRestartingUpdate"
+                @click="restartApp"
+              >
+                {{ isRestartingUpdate ? "正在重启..." : "重启完成更新" }}
               </button>
             </template>
             <template v-else-if="isConfirmingInstall">
@@ -649,6 +541,11 @@ async function copySupportInfo() {
   color: white;
   border-color: var(--color-primary);
   background: var(--color-primary);
+}
+
+.install-update-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .cancel-install-button {

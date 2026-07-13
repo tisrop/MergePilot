@@ -16,8 +16,9 @@
     "format:fix": "oxfmt src/ .github/checks/ package.json .oxlintrc.json .oxfmtrc.json",
     "prepare": "husky",
     "test": "vitest run",
-    "check:frontend": "npm run check:version && npm run lint && npm run format && npm run check:frontend-standards",
-    "check:version": "node .github/checks/version-consistency.mjs"
+    "check:frontend": "npm run check:version && npm run check:updater && npm run lint && npm run format && npm run check:frontend-standards",
+    "check:version": "node .github/checks/version-consistency.mjs",
+    "check:updater": "node .github/checks/updater-config.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0",

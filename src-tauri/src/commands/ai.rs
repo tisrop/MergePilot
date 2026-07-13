@@ -34,6 +34,7 @@ pub async fn ai_save_api_key(state: State<'_, AppState>, api_key: String) -> Res
 pub async fn ai_review(state: State<'_, AppState>, request: AiReviewRequest) -> Result<AiReviewResult, String> {
     let config = state.ai_config.get_config().map_err(|e| e.to_string())?;
     let api_key = state.ai_config.get_api_key().map_err(|e| e.to_string())?;
+    let _operation = state.operations.begin_ai().await?;
 
     let client = AiClient::new(config.endpoint, config.model, api_key);
 
@@ -63,6 +64,7 @@ pub async fn ai_review_stream(
     let system_prompt = config.system_prompt.clone();
     let temperature = config.temperature.unwrap_or(0.3);
     let max_tokens = config.max_tokens.unwrap_or(4096);
+    let operation = state.operations.begin_ai().await?;
     let registry = state.ai_tasks.clone();
     let generation = registry.next_generation();
     let task_request_id = request_id.clone();
@@ -70,6 +72,7 @@ pub async fn ai_review_stream(
     let (start_tx, start_rx) = tokio::sync::oneshot::channel();
 
     let task = tokio::spawn(async move {
+        let _operation = operation;
         if start_rx.await.is_err() {
             return;
         }

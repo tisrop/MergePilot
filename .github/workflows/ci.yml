@@ -32,6 +32,9 @@ jobs:
       - name: Check application versions
         run: node .github/checks/version-consistency.mjs
 
+      - name: Check updater security configuration
+        run: node .github/checks/updater-config.mjs
+
       - name: Cancel workflow on failure
         if: failure()
         env:

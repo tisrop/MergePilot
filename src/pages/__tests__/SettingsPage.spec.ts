@@ -232,8 +232,8 @@ describe("SettingsPage 诊断信息", () => {
     );
   });
 
-  it("监听注册迟到时在页面卸载后立即解除监听", async () => {
-    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "update-delayed-listener") });
+  it("离开设置页后继续安装并在返回时保留完成状态", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "update-across-pages") });
     let resolveListener!: (unlisten: () => void) => void;
     const delayedListener = new Promise<() => void>((resolve) => {
       resolveListener = resolve;
@@ -253,24 +253,30 @@ describe("SettingsPage 诊断信息", () => {
       notes: null,
       published_at: null,
     });
-    const wrapper = mountPage();
+    const firstPage = mountPage();
 
-    await wrapper.get("button.check-update-button").trigger("click");
+    await firstPage.get("button.check-update-button").trigger("click");
     await flushPromises();
-    await wrapper.get("button.install-update-button").trigger("click");
-    await wrapper.get("button.install-update-button").trigger("click");
+    await firstPage.get("button.install-update-button").trigger("click");
+    await firstPage.get("button.install-update-button").trigger("click");
     expect(listenToUpdateProgress).toHaveBeenCalledOnce();
 
-    wrapper.unmount();
+    firstPage.unmount();
     resolveListener(unlisten);
     await flushPromises();
 
-    expect(downloadAndInstallUpdate).toHaveBeenCalledWith("update-delayed-listener", "0.4.0");
-    expect(unlisten).toHaveBeenCalledOnce();
+    expect(downloadAndInstallUpdate).toHaveBeenCalledWith("update-across-pages", "0.4.0");
+    expect(unlisten).not.toHaveBeenCalled();
 
     resolveDownload();
     await flushPromises();
     expect(unlisten).toHaveBeenCalledOnce();
+
+    const secondPage = mountPage();
+    await flushPromises();
+    expect(secondPage.text()).toContain("更新已安装，重启应用后生效");
+    expect(secondPage.get("button.install-update-button").text()).toBe("重启完成更新");
+    expect(downloadAndInstallUpdate).toHaveBeenCalledOnce();
   });
 
   it("更新安装完成后由用户主动确认重启", async () => {
@@ -295,63 +301,51 @@ describe("SettingsPage 诊断信息", () => {
     expect(restartAfterUpdate).toHaveBeenCalledOnce();
   });
 
-  it("启用后启动时最多每天后台检查一次", async () => {
-    storage.set("mergepilot:auto-update-check", "true");
+  it("重启期间阻止重复触发并在失败后允许重试", async () => {
     vi.mocked(checkForUpdates).mockResolvedValue({
       current_version: "0.3.0",
-      available: false,
-      version: null,
+      available: true,
+      version: "0.4.0",
       notes: null,
       published_at: null,
     });
-
-    const first = mountPage();
-    await flushPromises();
-    first.unmount();
-    const second = mountPage();
-    await flushPromises();
-
-    expect(checkForUpdates).toHaveBeenCalledOnce();
-    expect(storage.get("mergepilot:last-update-check")).toBeTruthy();
-    second.unmount();
-  });
-
-  it("后台检查失败不显示阻断错误", async () => {
-    storage.set("mergepilot:auto-update-check", "true");
-    vi.mocked(checkForUpdates).mockRejectedValue("network unavailable");
+    vi.mocked(downloadAndInstallUpdate).mockResolvedValue(undefined);
+    let rejectRestart!: (reason?: unknown) => void;
+    const pendingRestart = new Promise<void>((_resolve, reject) => {
+      rejectRestart = reject;
+    });
+    vi.mocked(restartAfterUpdate)
+      .mockReturnValueOnce(pendingRestart)
+      .mockResolvedValueOnce(undefined);
     const wrapper = mountPage();
+
+    await wrapper.get("button.check-update-button").trigger("click");
+    await flushPromises();
+    await wrapper.get("button.install-update-button").trigger("click");
+    await wrapper.get("button.install-update-button").trigger("click");
     await flushPromises();
 
-    expect(checkForUpdates).toHaveBeenCalledOnce();
-    expect(wrapper.find(".support-status.error").exists()).toBe(false);
-  });
+    const restartButton = wrapper.get<HTMLButtonElement>("button.install-update-button");
+    void restartButton.trigger("click");
+    void restartButton.trigger("click");
+    await wrapper.vm.$nextTick();
 
-  it("本地存储不可用时仍可挂载并后台检查更新", async () => {
-    vi.spyOn(localStorage, "getItem").mockImplementation((key: string) => {
-      if (["mergepilot:auto-update-check", "mergepilot:last-update-check"].includes(key)) {
-        throw new DOMException("storage denied", "SecurityError");
-      }
-      return storage.get(key) ?? null;
-    });
-    vi.spyOn(localStorage, "setItem").mockImplementation((key: string, value: string) => {
-      if (["mergepilot:auto-update-check", "mergepilot:last-update-check"].includes(key)) {
-        throw new DOMException("storage denied", "SecurityError");
-      }
-      storage.set(key, value);
-    });
-    vi.mocked(checkForUpdates).mockResolvedValue({
-      current_version: "0.3.0",
-      available: false,
-      version: null,
-      notes: null,
-      published_at: null,
-    });
+    expect(restartAfterUpdate).toHaveBeenCalledOnce();
+    expect(restartButton.element.disabled).toBe(true);
+    expect(restartButton.attributes("aria-busy")).toBe("true");
+    expect(restartButton.text()).toBe("正在重启...");
 
-    const wrapper = mountPage();
+    rejectRestart("应用重启暂不可用");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("应用更新");
-    expect(checkForUpdates).toHaveBeenCalledOnce();
+    expect(wrapper.get(".support-status.error").text()).toContain("应用重启暂不可用");
+    expect(restartButton.element.disabled).toBe(false);
+    expect(restartButton.attributes("aria-busy")).toBe("false");
+    expect(restartButton.text()).toBe("重启完成更新");
+
+    await restartButton.trigger("click");
+    await flushPromises();
+    expect(restartAfterUpdate).toHaveBeenCalledTimes(2);
   });
 
   it("记录检查时间失败时不阻断手动检查", async () => {
