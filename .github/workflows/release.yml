@@ -26,7 +26,10 @@ jobs:
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
     strategy:
+      # tauri-action updates latest.json with read-modify-write semantics. Serializing
+      # matrix jobs prevents concurrent jobs from dropping another platform entry.
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -206,8 +209,43 @@ jobs:
         run: |
           gh release upload "$env:GITHUB_REF_NAME" "$env:PORTABLE_ZIP" --repo "$env:GITHUB_REPOSITORY"
 
-  cleanup-release-signatures:
+  validate-updater-metadata:
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download updater metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --pattern latest.json --dir "${RUNNER_TEMP}"
+
+      - name: Validate updater metadata coverage
+        shell: bash
+        run: |
+          METADATA="${RUNNER_TEMP}/latest.json"
+          EXPECTED_VERSION="${GITHUB_REF_NAME#v}"
+          ASSET_URL_PREFIX="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/assets/"
+          jq -e --arg version "$EXPECTED_VERSION" '
+            type == "object"
+              and .version == $version
+              and (.notes | type == "string")
+              and (.pub_date | type == "string" and length > 0)
+              and (.platforms | type == "object")
+          ' "$METADATA" >/dev/null
+
+          for TARGET in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
+            jq -e --arg target "$TARGET" --arg url_prefix "$ASSET_URL_PREFIX" '
+              .platforms[$target]
+              | type == "object"
+                and (.signature | type == "string" and length > 0)
+                and (.url | type == "string" and startswith($url_prefix))
+            ' "$METADATA" >/dev/null || {
+              echo "latest.json 缺少有效平台条目：${TARGET}" >&2
+              exit 1
+            }
+          done
+
+  cleanup-release-signatures:
+    needs: validate-updater-metadata
     runs-on: ubuntu-latest
     steps:
       - name: Remove standalone updater signature assets
