@@ -110,13 +110,41 @@ fn update_error(error: UpdaterError) -> String {
         UpdaterError::ReleaseNotFound => {
             "更新源暂未提供有效的发布元数据，请确认已发布包含 latest.json 的正式版本后重试".into()
         }
-        error => format!("检查更新失败：{error}"),
+        UpdaterError::TargetNotFound(_) | UpdaterError::TargetsNotFound(_) => {
+            "更新元数据缺少当前平台的安装包，请联系发布者修复".into()
+        }
+        UpdaterError::Serialization(_)
+        | UpdaterError::Semver(_)
+        | UpdaterError::UrlParse(_)
+        | UpdaterError::Base64(_)
+        | UpdaterError::SignatureUtf8(_)
+        | UpdaterError::Minisign(_) => "更新元数据或签名格式无效，已拒绝更新".into(),
+        UpdaterError::Reqwest(_) | UpdaterError::Network(_) => "检查更新失败，请检查网络后重试".into(),
+        UpdaterError::InsecureTransportProtocol => "更新源不是安全的 HTTPS 地址，已拒绝连接".into(),
+        UpdaterError::UnsupportedArch | UpdaterError::UnsupportedOs => "当前系统或架构暂不支持自动更新".into(),
+        UpdaterError::EmptyEndpoints => "应用未配置更新源，无法检查更新".into(),
+        _ => "检查更新失败，请稍后重试".into(),
     }
+}
+
+fn download_error(error: UpdaterError) -> String {
+    match error {
+        UpdaterError::Base64(_) | UpdaterError::SignatureUtf8(_) | UpdaterError::Minisign(_) => {
+            "更新包签名验证失败，已停止安装".into()
+        }
+        UpdaterError::Reqwest(_) | UpdaterError::Network(_) => "下载更新失败，请检查网络后重试".into(),
+        UpdaterError::InsecureTransportProtocol => "更新包地址不是安全的 HTTPS 地址，已拒绝下载".into(),
+        _ => "下载更新失败，请稍后重试".into(),
+    }
+}
+
+fn install_error(_error: UpdaterError) -> String {
+    "安装更新失败，应用未重启，请稍后重试".into()
 }
 
 #[tauri::command]
 pub async fn update_check(app: AppHandle) -> Result<UpdateCheckResult, String> {
-    let updater = app.updater().map_err(|error| format!("初始化更新检查失败：{error}"))?;
+    let updater = app.updater().map_err(|_| "初始化更新检查失败，请稍后重试".to_string())?;
     let update = updater.check().await.map_err(update_error)?;
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     Ok(check_result(
@@ -136,7 +164,7 @@ pub async fn update_download_and_install(
     let _operation = acquire_update_operation(&state.update_operation_active)?;
     ensure_no_active_ai_tasks(state.ai_tasks.has_active_tasks().await)?;
 
-    let updater = app.updater().map_err(|error| format!("初始化更新下载失败：{error}"))?;
+    let updater = app.updater().map_err(|_| "初始化更新下载失败，请稍后重试".to_string())?;
     let update =
         updater.check().await.map_err(update_error)?.ok_or_else(|| "当前已是最新版本，无需下载安装".to_string())?;
     ensure_expected_update_version(&expected_version, &update.version)?;
@@ -173,10 +201,10 @@ pub async fn update_download_and_install(
             },
         )
         .await
-        .map_err(|error| format!("下载更新失败：{error}"))?;
+        .map_err(download_error)?;
 
     ensure_no_active_ai_tasks(state.ai_tasks.has_active_tasks().await)?;
-    update.install(bytes).map_err(|error| format!("安装更新失败：{error}"))?;
+    update.install(bytes).map_err(install_error)?;
     Ok(())
 }
 
@@ -190,9 +218,9 @@ pub async fn update_restart(app: AppHandle, state: State<'_, AppState>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::{
-        acquire_update_operation, check_result, ensure_expected_update_version, ensure_no_active_ai_tasks,
-        sanitize_release_notes, update_error, validate_expected_version, validate_update_request_id,
-        MAX_RELEASE_NOTES_CHARS, RELEASE_NOTES_TRUNCATED_SUFFIX,
+        acquire_update_operation, check_result, download_error, ensure_expected_update_version,
+        ensure_no_active_ai_tasks, install_error, sanitize_release_notes, update_error, validate_expected_version,
+        validate_update_request_id, MAX_RELEASE_NOTES_CHARS, RELEASE_NOTES_TRUNCATED_SUFFIX,
     };
     use std::sync::atomic::AtomicBool;
     use tauri_plugin_updater::Error as UpdaterError;
@@ -222,6 +250,27 @@ mod tests {
             "更新源暂未提供有效的发布元数据，请确认已发布包含 latest.json 的正式版本后重试"
         );
     }
+    #[test]
+    fn localizes_updater_failures_without_exposing_remote_values() {
+        assert_eq!(
+            update_error(UpdaterError::TargetNotFound("secret-target".into())),
+            "更新元数据缺少当前平台的安装包，请联系发布者修复"
+        );
+        assert_eq!(
+            update_error(UpdaterError::SignatureUtf8("secret-signature".into())),
+            "更新元数据或签名格式无效，已拒绝更新"
+        );
+        assert_eq!(
+            download_error(UpdaterError::Network("https://example.invalid/?token=secret".into())),
+            "下载更新失败，请检查网络后重试"
+        );
+        assert_eq!(
+            download_error(UpdaterError::SignatureUtf8("secret-signature".into())),
+            "更新包签名验证失败，已停止安装"
+        );
+        assert_eq!(install_error(UpdaterError::PackageInstallFailed), "安装更新失败，应用未重启，请稍后重试");
+    }
+
     #[test]
     fn truncates_oversized_release_notes_on_utf8_character_boundaries() {
         let notes = "更".repeat(MAX_RELEASE_NOTES_CHARS + 1);
