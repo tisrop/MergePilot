@@ -59,6 +59,13 @@ const updateTotal = ref<number | null>(null);
 const updatePhase = ref<"downloading" | "installing" | null>(null);
 let unlistenUpdateProgress: (() => void) | null = null;
 let activeUpdateRequestId: string | null = null;
+let isSettingsPageUnmounted = false;
+
+function clearUpdateProgressListener() {
+  const unlisten = unlistenUpdateProgress;
+  unlistenUpdateProgress = null;
+  unlisten?.();
+}
 
 const updateProgressPercent = computed(() => {
   if (!updateTotal.value || updateTotal.value <= 0) return null;
@@ -140,8 +147,8 @@ async function installUpdate() {
   updatePhase.value = "downloading";
 
   try {
-    unlistenUpdateProgress?.();
-    unlistenUpdateProgress = await listenToUpdateProgress((progress) => {
+    clearUpdateProgressListener();
+    const unlisten = await listenToUpdateProgress((progress) => {
       if (progress.request_id !== activeUpdateRequestId) return;
       updatePhase.value = progress.phase;
       if (progress.phase === "downloading") {
@@ -149,6 +156,11 @@ async function installUpdate() {
         updateTotal.value = progress.total;
       }
     });
+    if (isSettingsPageUnmounted || activeUpdateRequestId !== requestId) {
+      unlisten();
+    } else {
+      unlistenUpdateProgress = unlisten;
+    }
     await downloadAndInstallUpdate(requestId, expectedVersion);
     isUpdateInstalled.value = true;
     updatePhase.value = null;
@@ -158,8 +170,7 @@ async function installUpdate() {
   } finally {
     activeUpdateRequestId = null;
     isInstallingUpdate.value = false;
-    unlistenUpdateProgress?.();
-    unlistenUpdateProgress = null;
+    clearUpdateProgressListener();
   }
 }
 
@@ -177,9 +188,9 @@ async function restartApp() {
 }
 
 onUnmounted(() => {
+  isSettingsPageUnmounted = true;
   activeUpdateRequestId = null;
-  unlistenUpdateProgress?.();
-  unlistenUpdateProgress = null;
+  clearUpdateProgressListener();
 });
 
 async function copySupportInfo() {

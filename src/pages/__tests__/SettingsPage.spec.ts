@@ -232,6 +232,47 @@ describe("SettingsPage 诊断信息", () => {
     );
   });
 
+  it("监听注册迟到时在页面卸载后立即解除监听", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "update-delayed-listener") });
+    let resolveListener!: (unlisten: () => void) => void;
+    const delayedListener = new Promise<() => void>((resolve) => {
+      resolveListener = resolve;
+    });
+    const unlisten = vi.fn();
+    vi.mocked(listenToUpdateProgress).mockReturnValue(delayedListener);
+
+    let resolveDownload!: () => void;
+    const pendingDownload = new Promise<void>((resolve) => {
+      resolveDownload = resolve;
+    });
+    vi.mocked(downloadAndInstallUpdate).mockReturnValue(pendingDownload);
+    vi.mocked(checkForUpdates).mockResolvedValue({
+      current_version: "0.3.0",
+      available: true,
+      version: "0.4.0",
+      notes: null,
+      published_at: null,
+    });
+    const wrapper = mountPage();
+
+    await wrapper.get("button.check-update-button").trigger("click");
+    await flushPromises();
+    await wrapper.get("button.install-update-button").trigger("click");
+    await wrapper.get("button.install-update-button").trigger("click");
+    expect(listenToUpdateProgress).toHaveBeenCalledOnce();
+
+    wrapper.unmount();
+    resolveListener(unlisten);
+    await flushPromises();
+
+    expect(downloadAndInstallUpdate).toHaveBeenCalledWith("update-delayed-listener", "0.4.0");
+    expect(unlisten).toHaveBeenCalledOnce();
+
+    resolveDownload();
+    await flushPromises();
+    expect(unlisten).toHaveBeenCalledOnce();
+  });
+
   it("更新安装完成后由用户主动确认重启", async () => {
     vi.mocked(checkForUpdates).mockResolvedValue({
       current_version: "0.3.0",
