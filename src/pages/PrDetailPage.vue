@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { usePrStore } from "@/stores/usePrStore";
 import { reviewCommentAdd } from "@/api";
+import { getErrorMessage } from "@/utils/error";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import DiffViewer from "@/components/diff/DiffViewer.vue";
 import ReviewForm from "@/components/review/ReviewForm.vue";
@@ -206,8 +207,8 @@ async function handleAddComment(
     if (reviewListRef.value) {
       reviewListRef.value.refresh();
     }
-  } catch (e: any) {
-    commentError.value = e?.toString() || "提交行内评论失败";
+  } catch (e) {
+    commentError.value = getErrorMessage(e, "提交行内评论失败");
   }
 }
 

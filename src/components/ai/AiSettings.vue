@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from "vue";
 import { aiGetConfig, aiSaveConfig, aiSaveApiKey, aiTestConnection, aiListModels } from "@/api";
 import type { AiConfig } from "@/types";
+import { getErrorMessage } from "@/utils/error";
 
 const config = ref<AiConfig>({
   endpoint: "https://api.openai.com/v1",
@@ -139,8 +140,8 @@ async function handleFetchModels() {
       modelError.value = "未获取到模型，请检查端点地址和 API Key";
     }
     showModelDropdown.value = true;
-  } catch (e: any) {
-    modelError.value = e?.toString() || "获取模型列表失败";
+  } catch (e) {
+    modelError.value = getErrorMessage(e, "获取模型列表失败");
   } finally {
     fetchingModels.value = false;
   }
@@ -162,8 +163,8 @@ async function handleSave() {
     if (hasNewKey && config.value.endpoint) {
       await handleFetchModels();
     }
-  } catch (e: any) {
-    saveMsg.value = "保存失败: " + (e?.toString() ?? "未知错误");
+  } catch (e) {
+    saveMsg.value = `保存失败: ${getErrorMessage(e, "未知错误")}`;
   } finally {
     saving.value = false;
   }

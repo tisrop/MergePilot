@@ -9,6 +9,7 @@ import type {
   AiStreamEvent,
 } from "@/types";
 import { aiReview, aiReviewCancel, aiReviewStream } from "@/api";
+import { getErrorMessage } from "@/utils/error";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import AiSuggestionCard from "./AiSuggestionCard.vue";
 import AppSelect from "@/components/shared/AppSelect.vue";
@@ -70,8 +71,8 @@ async function startNonStreamingReview() {
       file_filter: null,
       focus: focus.value,
     });
-  } catch (e: any) {
-    error.value = e?.toString() || "AI 评审失败";
+  } catch (e) {
+    error.value = getErrorMessage(e, "AI 评审失败");
   } finally {
     loading.value = false;
   }
@@ -108,10 +109,10 @@ async function startStreamingReview() {
       file_filter: null,
       focus: focus.value,
     });
-  } catch (e: any) {
+  } catch (e) {
     if (activeRequestId === requestId) {
       activeRequestId = null;
-      error.value = e?.toString() || "AI 流式评审启动失败";
+      error.value = getErrorMessage(e, "AI 流式评审启动失败");
       loading.value = false;
       cleanupListeners();
     }

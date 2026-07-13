@@ -6,6 +6,7 @@ import type { Platform } from "@/types";
 import AppSelect from "@/components/shared/AppSelect.vue";
 import BrandMark from "@/components/shared/BrandMark.vue";
 import { authLogin } from "@/api";
+import { getErrorMessage } from "@/utils/error";
 import { open } from "@tauri-apps/plugin-shell";
 
 const route = useRoute();
@@ -61,8 +62,8 @@ async function handleLogin() {
     auth.platforms[platform.value] = { user: result.user, isLoggedIn: true };
     auth.activePlatform = platform.value;
     await router.replace("/pr");
-  } catch (e: any) {
-    error.value = e?.toString() || "登录失败，请检查 Token 是否正确";
+  } catch (e) {
+    error.value = getErrorMessage(e, "登录失败，请检查 Token 是否正确");
   } finally {
     loading.value = false;
   }

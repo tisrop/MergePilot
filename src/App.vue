@@ -13,11 +13,11 @@ function goToSettings() {
 }
 
 onMounted(() => {
-  (window as any).__goToSettings = goToSettings;
+  window.__goToSettings = goToSettings;
 });
 
 onUnmounted(() => {
-  delete (window as any).__goToSettings;
+  delete window.__goToSettings;
 });
 </script>
 

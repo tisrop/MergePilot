@@ -6,6 +6,7 @@ import { useRepoStore } from "@/stores/useRepoStore";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import IssueForm from "@/components/issue/IssueForm.vue";
 import { issueCreate } from "@/api";
+import { getErrorMessage } from "@/utils/error";
 
 const router = useRouter();
 const auth = useAuthStore();
@@ -36,8 +37,8 @@ async function handleSubmit() {
       labels.value,
     );
     router.push("/issue");
-  } catch (e: any) {
-    error.value = e?.toString() || "创建失败";
+  } catch (e) {
+    error.value = getErrorMessage(e, "创建失败");
   } finally {
     submitting.value = false;
   }

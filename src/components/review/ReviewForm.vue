@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import type { Platform, ReviewEvent } from "@/types";
 import { reviewSubmit } from "@/api";
+import { getErrorMessage } from "@/utils/error";
 
 const props = defineProps<{
   platform: Platform;
@@ -53,8 +54,8 @@ async function handleSubmit() {
     );
     success.value = true;
     body.value = "";
-  } catch (e: any) {
-    error.value = e?.toString() || "提交失败";
+  } catch (e) {
+    error.value = getErrorMessage(e, "提交失败");
   } finally {
     submitting.value = false;
   }
