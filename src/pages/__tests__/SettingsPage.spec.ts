@@ -181,7 +181,7 @@ describe("SettingsPage 诊断信息", () => {
     await wrapper.get("button.install-update-button").trigger("click");
     await flushPromises();
 
-    expect(downloadAndInstallUpdate).toHaveBeenCalledOnce();
+    expect(downloadAndInstallUpdate).toHaveBeenCalledWith(expect.any(String), "0.4.0");
     expect(wrapper.text()).toContain("更新已安装，重启应用后生效");
   });
 

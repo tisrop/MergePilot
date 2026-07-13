@@ -106,7 +106,8 @@ async function setAutoUpdateCheckEnabled(event: Event) {
 }
 
 async function installUpdate() {
-  if (isInstallingUpdate.value || !updateResult.value?.available) return;
+  const expectedVersion = updateResult.value?.version;
+  if (isInstallingUpdate.value || !updateResult.value?.available || !expectedVersion) return;
   if (!isConfirmingInstall.value) {
     isConfirmingInstall.value = true;
     return;
@@ -131,7 +132,7 @@ async function installUpdate() {
         updateTotal.value = progress.total;
       }
     });
-    await downloadAndInstallUpdate(requestId);
+    await downloadAndInstallUpdate(requestId, expectedVersion);
     isUpdateInstalled.value = true;
     updatePhase.value = null;
   } catch (error) {

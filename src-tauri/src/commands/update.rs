@@ -29,6 +29,16 @@ fn ensure_no_active_ai_tasks(has_active_tasks: bool) -> Result<(), String> {
     }
 }
 
+fn ensure_expected_update_version(expected: &str, actual: &str) -> Result<(), String> {
+    if expected.trim().is_empty() {
+        return Err("预期更新版本不能为空".into());
+    }
+    if expected != actual {
+        return Err(format!("可用更新已从 v{expected} 变更为 v{actual}，请重新检查并确认后再安装"));
+    }
+    Ok(())
+}
+
 fn check_result(
     current_version: String,
     update: Option<(String, Option<String>, Option<String>)>,
@@ -66,6 +76,7 @@ pub async fn update_download_and_install(
     app: AppHandle,
     state: State<'_, AppState>,
     request_id: String,
+    expected_version: String,
 ) -> Result<(), String> {
     if request_id.trim().is_empty() {
         return Err("更新请求标识不能为空".into());
@@ -75,6 +86,7 @@ pub async fn update_download_and_install(
     let updater = app.updater().map_err(|error| format!("初始化更新下载失败：{error}"))?;
     let update =
         updater.check().await.map_err(update_error)?.ok_or_else(|| "当前已是最新版本，无需下载安装".to_string())?;
+    ensure_expected_update_version(&expected_version, &update.version)?;
 
     let progress_app = app.clone();
     let progress_request_id = request_id.clone();
@@ -123,7 +135,7 @@ pub async fn update_restart(app: AppHandle, state: State<'_, AppState>) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{check_result, ensure_no_active_ai_tasks, update_error};
+    use super::{check_result, ensure_expected_update_version, ensure_no_active_ai_tasks, update_error};
     use tauri_plugin_updater::Error as UpdaterError;
 
     #[test]
@@ -151,6 +163,16 @@ mod tests {
             "更新源暂未提供有效的发布元数据，请确认已发布包含 latest.json 的正式版本后重试"
         );
     }
+    #[test]
+    fn requires_reconfirmation_when_available_version_changes() {
+        assert!(ensure_expected_update_version("0.4.0", "0.4.0").is_ok());
+        assert_eq!(ensure_expected_update_version("", "0.4.0"), Err("预期更新版本不能为空".into()));
+        assert_eq!(
+            ensure_expected_update_version("0.4.0", "0.5.0"),
+            Err("可用更新已从 v0.4.0 变更为 v0.5.0，请重新检查并确认后再安装".into())
+        );
+    }
+
     #[test]
     fn blocks_install_while_ai_review_is_active() {
         assert_eq!(ensure_no_active_ai_tasks(true), Err("存在进行中的 AI 评审，请等待完成或取消后再安装更新".into()));

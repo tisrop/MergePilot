@@ -69,8 +69,11 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   return invoke("update_check");
 }
 
-export async function downloadAndInstallUpdate(requestId: string): Promise<void> {
-  return invoke("update_download_and_install", { requestId });
+export async function downloadAndInstallUpdate(
+  requestId: string,
+  expectedVersion: string,
+): Promise<void> {
+  return invoke("update_download_and_install", { requestId, expectedVersion });
 }
 
 export async function restartAfterUpdate(): Promise<void> {
