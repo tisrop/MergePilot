@@ -14,6 +14,9 @@ pub struct UpdateCheckResult {
     pub published_at: Option<String>,
 }
 
+const MAX_RELEASE_NOTES_CHARS: usize = 16_000;
+const RELEASE_NOTES_TRUNCATED_SUFFIX: &str = "\n\n[更新说明过长，已截断]";
+
 #[derive(Clone, Debug, Serialize)]
 pub struct UpdateProgressEvent {
     pub request_id: String,
@@ -75,14 +78,29 @@ fn ensure_expected_update_version(expected: &str, actual: &str) -> Result<(), St
     Ok(())
 }
 
+fn sanitize_release_notes(notes: Option<String>) -> Option<String> {
+    notes.map(|notes| {
+        if notes.chars().count() <= MAX_RELEASE_NOTES_CHARS {
+            return notes;
+        }
+        let mut truncated: String = notes.chars().take(MAX_RELEASE_NOTES_CHARS).collect();
+        truncated.push_str(RELEASE_NOTES_TRUNCATED_SUFFIX);
+        truncated
+    })
+}
+
 fn check_result(
     current_version: String,
     update: Option<(String, Option<String>, Option<String>)>,
 ) -> UpdateCheckResult {
     match update {
-        Some((version, notes, published_at)) => {
-            UpdateCheckResult { current_version, available: true, version: Some(version), notes, published_at }
-        }
+        Some((version, notes, published_at)) => UpdateCheckResult {
+            current_version,
+            available: true,
+            version: Some(version),
+            notes: sanitize_release_notes(notes),
+            published_at,
+        },
         None => UpdateCheckResult { current_version, available: false, version: None, notes: None, published_at: None },
     }
 }
@@ -173,7 +191,8 @@ pub async fn update_restart(app: AppHandle, state: State<'_, AppState>) -> Resul
 mod tests {
     use super::{
         acquire_update_operation, check_result, ensure_expected_update_version, ensure_no_active_ai_tasks,
-        update_error, validate_expected_version, validate_update_request_id,
+        sanitize_release_notes, update_error, validate_expected_version, validate_update_request_id,
+        MAX_RELEASE_NOTES_CHARS, RELEASE_NOTES_TRUNCATED_SUFFIX,
     };
     use std::sync::atomic::AtomicBool;
     use tauri_plugin_updater::Error as UpdaterError;
@@ -203,6 +222,15 @@ mod tests {
             "更新源暂未提供有效的发布元数据，请确认已发布包含 latest.json 的正式版本后重试"
         );
     }
+    #[test]
+    fn truncates_oversized_release_notes_on_utf8_character_boundaries() {
+        let notes = "更".repeat(MAX_RELEASE_NOTES_CHARS + 1);
+        let sanitized = sanitize_release_notes(Some(notes)).expect("notes should remain present");
+        assert!(sanitized.ends_with(RELEASE_NOTES_TRUNCATED_SUFFIX));
+        assert_eq!(sanitized.trim_end_matches(RELEASE_NOTES_TRUNCATED_SUFFIX).chars().count(), MAX_RELEASE_NOTES_CHARS);
+        assert_eq!(sanitize_release_notes(None), None);
+    }
+
     #[test]
     fn rejects_oversized_or_unsafe_update_inputs() {
         assert!(validate_update_request_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
