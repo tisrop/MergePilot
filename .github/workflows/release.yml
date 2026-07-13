@@ -9,7 +9,20 @@ permissions:
   contents: write
 
 jobs:
+  version-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Verify release tag matches manifests
+        run: node .github/checks/version-consistency.mjs --tag "$GITHUB_REF_NAME"
+
   build:
+    needs: version-consistency
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
     strategy:

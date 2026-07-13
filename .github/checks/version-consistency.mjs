@@ -39,6 +39,23 @@ export function assertConsistentVersions(versions) {
   return Object.values(versions)[0];
 }
 
+export function assertReleaseTag(tag, manifestVersion) {
+  const match =
+    /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+      tag,
+    );
+  if (!match) {
+    throw new Error(`发布标签格式无效：${tag}，应为 vX.Y.Z`);
+  }
+
+  const tagVersion = tag.slice(1);
+  if (tagVersion !== manifestVersion) {
+    throw new Error(`发布标签与应用版本不一致：tag=${tag}，manifest=${manifestVersion}`);
+  }
+
+  return tagVersion;
+}
+
 export async function readProjectVersions(root = projectRoot) {
   const [packageSource, cargoSource, tauriSource] = await Promise.all([
     readFile(resolve(root, "package.json"), "utf8"),
@@ -56,6 +73,16 @@ export async function readProjectVersions(root = projectRoot) {
 async function main() {
   const versions = await readProjectVersions();
   const version = assertConsistentVersions(versions);
+  const tagIndex = process.argv.indexOf("--tag");
+  if (tagIndex !== -1) {
+    const tag = process.argv[tagIndex + 1];
+    if (!tag) {
+      throw new Error("--tag 缺少发布标签值");
+    }
+    assertReleaseTag(tag, version);
+    process.stdout.write(`发布版本一致性检查通过：${tag}\n`);
+    return;
+  }
   process.stdout.write(`版本一致性检查通过：${version}\n`);
 }
 
