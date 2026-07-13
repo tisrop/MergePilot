@@ -189,9 +189,32 @@ jobs:
           UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_BASE64 }}
           UPDATER_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          printf '%s' "$UPDATER_KEY" | base64 --decode > "$RUNNER_TEMP/updater.key"
-          KEY_B64=$(base64 < "$RUNNER_TEMP/updater.key" | tr -d '\r\n')
-          echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_B64" >> "$GITHUB_ENV"
+          set -euo pipefail
+          umask 077
+
+          # `tauri signer generate` already writes the private key as the Base64
+          # string expected by Tauri. The secret must be the exact `.key` file
+          # contents and must not be Base64-encoded again.
+          ENCODED_KEY=$(printf '%s' "$UPDATER_KEY" | tr -d '\r\n')
+          DECODED_KEY="$RUNNER_TEMP/updater-key.decoded"
+
+          if ! printf '%s' "$ENCODED_KEY" | base64 --decode > "$DECODED_KEY"; then
+            echo "Updater signing key is not valid Tauri key data" >&2
+            exit 1
+          fi
+
+          COMMENT=$(sed -n '1p' "$DECODED_KEY")
+          ENCODED_LINE=$(sed -n '2p' "$DECODED_KEY")
+          if [[ "$COMMENT" != "untrusted comment:"* ]] \
+            || [[ "$COMMENT" != *"secret key"* ]] \
+            || [[ -z "$ENCODED_LINE" ]] \
+            || ! printf '%s' "$ENCODED_LINE" | base64 --decode >/dev/null 2>&1; then
+            echo "Updater signing key must be the exact contents of the Tauri-generated .key file" >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$ENCODED_KEY"
+          printf 'TAURI_SIGNING_PRIVATE_KEY=%s\n' "$ENCODED_KEY" >> "$GITHUB_ENV"
 
           PASSWORD_DELIMITER="TAURI_PASSWORD_$(date +%s%N)"
           {
@@ -201,6 +224,12 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - run: npm ci
+
+      - name: Verify updater signing key
+        shell: bash
+        run: |
+          printf 'MergePilot updater signing preflight' > "$RUNNER_TEMP/updater-signing-preflight"
+          npm run tauri -- signer sign "$RUNNER_TEMP/updater-signing-preflight"
 
       - name: Configure Apple signing env vars (macOS)
         if: startsWith(matrix.platform, 'macos')
