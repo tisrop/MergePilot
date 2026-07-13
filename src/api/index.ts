@@ -20,6 +20,7 @@ import type {
   AiConfig,
   AiReviewRequest,
   AiReviewResult,
+  SupportInfo,
 } from "@/types";
 
 // ============================================================
@@ -49,6 +50,11 @@ export async function authHasAnyToken(): Promise<boolean> {
 
 export async function authHasToken(platform: Platform): Promise<boolean> {
   return invoke("auth_has_token", { platform });
+}
+
+// ── Support ──
+export async function getSupportInfo(platform: Platform): Promise<SupportInfo> {
+  return invoke("support_info", { platform });
 }
 
 // ── Repo ──

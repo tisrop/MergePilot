@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import { getSupportInfo } from "@/api";
+import { getErrorMessage } from "@/utils/error";
 import { useAuthStore } from "@/stores/useAuthStore";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import AiSettings from "@/components/ai/AiSettings.vue";
@@ -11,6 +14,28 @@ const platformList: { value: Platform; label: string }[] = [
   { value: "gitlab", label: "GitLab" },
   { value: "gitee", label: "Gitee" },
 ];
+
+const isCopyingSupportInfo = ref(false);
+const supportInfoStatus = ref("");
+const isSupportInfoError = ref(false);
+
+async function copySupportInfo() {
+  if (isCopyingSupportInfo.value) return;
+
+  isCopyingSupportInfo.value = true;
+  supportInfoStatus.value = "";
+  isSupportInfoError.value = false;
+  try {
+    const info = await getSupportInfo(auth.activePlatform);
+    await navigator.clipboard.writeText(info.formatted);
+    supportInfoStatus.value = "诊断信息已复制，可直接粘贴到 Issue 中。";
+  } catch (error) {
+    isSupportInfoError.value = true;
+    supportInfoStatus.value = `复制失败：${getErrorMessage(error, "诊断信息暂不可用")}`;
+  } finally {
+    isCopyingSupportInfo.value = false;
+  }
+}
 </script>
 
 <template>
@@ -74,6 +99,39 @@ const platformList: { value: Platform; label: string }[] = [
           </div>
         </div>
         <AiSettings />
+      </section>
+
+      <section class="section">
+        <div class="section-heading support-heading">
+          <span class="section-icon support" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v5M12 8h.01" />
+            </svg>
+          </span>
+          <div>
+            <h3>诊断信息</h3>
+            <p>复制经过脱敏的版本、系统和配置状态，用于反馈问题。</p>
+          </div>
+          <button
+            type="button"
+            class="copy-support-button"
+            :disabled="isCopyingSupportInfo"
+            @click="copySupportInfo"
+          >
+            {{ isCopyingSupportInfo ? "正在复制..." : "复制诊断信息" }}
+          </button>
+        </div>
+        <p class="privacy-note">不包含 Token、API Key、仓库信息、代码内容或完整的自托管地址。</p>
+        <p
+          v-if="supportInfoStatus"
+          class="support-status"
+          :class="{ error: isSupportInfoError }"
+          role="status"
+          aria-live="polite"
+        >
+          {{ supportInfoStatus }}
+        </p>
       </section>
     </div>
   </AppLayout>
@@ -217,5 +275,56 @@ const platformList: { value: Platform; label: string }[] = [
 
 .toggle input:disabled ~ .toggle-slider {
   cursor: not-allowed;
+}
+.support-heading {
+  align-items: center;
+}
+
+.section-icon.support {
+  color: var(--color-text-secondary);
+  background: var(--color-surface-hover);
+}
+
+.copy-support-button {
+  min-height: 36px;
+  margin-left: auto;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.copy-support-button:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.copy-support-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.privacy-note,
+.support-status {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.support-status {
+  margin-top: var(--space-2);
+  color: var(--color-success);
+}
+
+.support-status.error {
+  color: var(--color-danger);
 }
 </style>

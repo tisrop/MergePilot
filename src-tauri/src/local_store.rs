@@ -48,6 +48,10 @@ impl CommentSnapshotStore {
         Self { conn: Mutex::new(conn) }
     }
 
+    pub fn is_available(&self) -> bool {
+        self.conn.lock().map(|conn| conn.query_row("SELECT 1", [], |_| Ok(())).is_ok()).unwrap_or(false)
+    }
+
     pub fn save_snapshot(&self, snapshot: &CommentSnapshot) -> Result<(), rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
         conn.execute(

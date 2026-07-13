@@ -20,6 +20,19 @@ export interface AuthLoginResult {
 // ── 平台 ──
 export type Platform = "github" | "gitlab" | "gitee";
 
+export interface SupportInfo {
+  app_version: string;
+  operating_system: string;
+  architecture: string;
+  current_platform: string;
+  platform_endpoint: string;
+  credential_storage: string;
+  ai_configured: boolean;
+  ai_endpoint: string;
+  local_cache_available: boolean;
+  formatted: string;
+}
+
 // ── PR ──
 export type PrState = "open" | "closed" | "merged" | "all";
 

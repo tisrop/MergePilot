@@ -162,6 +162,25 @@ impl TokenVault {
         Ok(None)
     }
 
+    pub fn credential_storage(&self, platform: &str) -> Result<Option<CredentialStorage>, AppError> {
+        let config = Self::read_config()?;
+        if config.contains_key(&format!("token_encrypted_{platform}"))
+            || config.contains_key(&format!("token_{platform}"))
+        {
+            return Ok(Some(CredentialStorage::EncryptedFile));
+        }
+
+        if Self::keyring_is_persistent() {
+            if let Ok(entry) = Self::keyring_entry(platform) {
+                if entry.get_password().is_ok() {
+                    return Ok(Some(CredentialStorage::SystemKeyring));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     pub fn store_custom_url(&self, platform: &str, url: &str) -> Result<(), AppError> {
         let mut config = Self::read_config()?;
         config.insert(format!("url_{platform}"), url.to_string());
