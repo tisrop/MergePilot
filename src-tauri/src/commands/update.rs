@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::state::AppState;
@@ -19,6 +20,23 @@ pub struct UpdateProgressEvent {
     pub downloaded: u64,
     pub total: Option<u64>,
     pub phase: &'static str,
+}
+
+struct UpdateOperationGuard<'a> {
+    active: &'a AtomicBool,
+}
+
+impl Drop for UpdateOperationGuard<'_> {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+    }
+}
+
+fn acquire_update_operation(active: &AtomicBool) -> Result<UpdateOperationGuard<'_>, String> {
+    active
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map(|_| UpdateOperationGuard { active })
+        .map_err(|_| "已有更新安装或重启操作正在进行，请稍候".into())
 }
 
 fn ensure_no_active_ai_tasks(has_active_tasks: bool) -> Result<(), String> {
@@ -81,6 +99,7 @@ pub async fn update_download_and_install(
     if request_id.trim().is_empty() {
         return Err("更新请求标识不能为空".into());
     }
+    let _operation = acquire_update_operation(&state.update_operation_active)?;
     ensure_no_active_ai_tasks(state.ai_tasks.has_active_tasks().await)?;
 
     let updater = app.updater().map_err(|error| format!("初始化更新下载失败：{error}"))?;
@@ -129,13 +148,17 @@ pub async fn update_download_and_install(
 
 #[tauri::command]
 pub async fn update_restart(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let _operation = acquire_update_operation(&state.update_operation_active)?;
     ensure_no_active_ai_tasks(state.ai_tasks.has_active_tasks().await)?;
     app.restart()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{check_result, ensure_expected_update_version, ensure_no_active_ai_tasks, update_error};
+    use super::{
+        acquire_update_operation, check_result, ensure_expected_update_version, ensure_no_active_ai_tasks, update_error,
+    };
+    use std::sync::atomic::AtomicBool;
     use tauri_plugin_updater::Error as UpdaterError;
 
     #[test]
@@ -163,6 +186,15 @@ mod tests {
             "更新源暂未提供有效的发布元数据，请确认已发布包含 latest.json 的正式版本后重试"
         );
     }
+    #[test]
+    fn serializes_update_install_and_restart_operations() {
+        let active = AtomicBool::new(false);
+        let first = acquire_update_operation(&active).expect("first operation should acquire guard");
+        assert_eq!(acquire_update_operation(&active).err(), Some("已有更新安装或重启操作正在进行，请稍候".into()));
+        drop(first);
+        assert!(acquire_update_operation(&active).is_ok());
+    }
+
     #[test]
     fn requires_reconfirmation_when_available_version_changes() {
         assert!(ensure_expected_update_version("0.4.0", "0.4.0").is_ok());
