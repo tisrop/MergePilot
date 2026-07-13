@@ -3,6 +3,49 @@ import { ref, computed, watch } from "vue";
 import type { Platform, User } from "@/types";
 import { authLogin, authLogout, authCheck, authHasToken } from "@/api";
 
+const PLATFORM_VISIBILITY_KEY = "mergepilot:platformVisibility";
+const ACTIVE_PLATFORM_KEY = "mergepilot:activePlatform";
+const PLATFORMS: Platform[] = ["github", "gitlab", "gitee"];
+const DEFAULT_VISIBILITY: Record<Platform, boolean> = {
+  github: true,
+  gitlab: true,
+  gitee: true,
+};
+
+function readStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Keep the in-memory session usable when persistence is unavailable.
+  }
+}
+
+function loadPlatformVisibility(): Record<Platform, boolean> {
+  const visibility = { ...DEFAULT_VISIBILITY };
+  const stored = readStorage(PLATFORM_VISIBILITY_KEY);
+  if (!stored) return visibility;
+
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return visibility;
+    for (const platform of PLATFORMS) {
+      const value = (parsed as Record<string, unknown>)[platform];
+      if (typeof value === "boolean") visibility[platform] = value;
+    }
+    return Object.values(visibility).some(Boolean) ? visibility : { ...DEFAULT_VISIBILITY };
+  } catch {
+    return visibility;
+  }
+}
+
 export const useAuthStore = defineStore("auth", () => {
   // each platform has independent auth state
   const platforms = ref<
@@ -19,24 +62,16 @@ export const useAuthStore = defineStore("auth", () => {
     gitee: { user: null, isLoggedIn: false },
   });
 
-  const defaultVisibility: Record<Platform, boolean> = {
-    github: true,
-    gitlab: true,
-    gitee: true,
-  };
-  const platformVisibility = ref<Record<Platform, boolean>>({
-    ...defaultVisibility,
-    ...JSON.parse(localStorage.getItem("mergepilot:platformVisibility") ?? "null"),
-  });
+  const platformVisibility = ref<Record<Platform, boolean>>(loadPlatformVisibility());
   watch(
     platformVisibility,
     (val) => {
-      localStorage.setItem("mergepilot:platformVisibility", JSON.stringify(val));
+      writeStorage(PLATFORM_VISIBILITY_KEY, JSON.stringify(val));
     },
     { deep: true },
   );
 
-  const storedActivePlatform = localStorage.getItem("mergepilot:activePlatform");
+  const storedActivePlatform = readStorage(ACTIVE_PLATFORM_KEY);
   const activePlatform = ref<Platform>(
     storedActivePlatform === "github" ||
       storedActivePlatform === "gitlab" ||
@@ -45,7 +80,7 @@ export const useAuthStore = defineStore("auth", () => {
       : "github",
   );
   watch(activePlatform, (value) => {
-    localStorage.setItem("mergepilot:activePlatform", value);
+    writeStorage(ACTIVE_PLATFORM_KEY, value);
   });
 
   const activeUser = computed(() => platforms.value[activePlatform.value].user);

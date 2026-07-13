@@ -4,9 +4,17 @@ import { authCheck, authHasToken, authLogin, authLogout } from "@/api";
 import { useAuthStore } from "@/stores/useAuthStore";
 
 const storage = new Map<string, string>();
+let storageReadError = false;
+let storageWriteError = false;
 vi.stubGlobal("localStorage", {
-  getItem: (key: string) => storage.get(key) ?? null,
-  setItem: (key: string, value: string) => storage.set(key, value),
+  getItem: (key: string) => {
+    if (storageReadError) throw new DOMException("storage denied", "SecurityError");
+    return storage.get(key) ?? null;
+  },
+  setItem: (key: string, value: string) => {
+    if (storageWriteError) throw new DOMException("storage denied", "SecurityError");
+    storage.set(key, value);
+  },
   removeItem: (key: string) => storage.delete(key),
   clear: () => storage.clear(),
 });
@@ -23,7 +31,33 @@ const user = { id: 1, login: "saved-user", name: "Saved User", avatar_url: "" };
 describe("useAuthStore session restore", () => {
   beforeEach(() => {
     storage.clear();
+    storageReadError = false;
+    storageWriteError = false;
     setActivePinia(createPinia());
+  });
+
+  it("本地存储不可用时使用默认平台状态且保持会话可操作", () => {
+    storageReadError = true;
+    storageWriteError = true;
+
+    const store = useAuthStore();
+    store.setActivePlatform("gitlab");
+    store.setPlatformVisibility("gitee", false);
+
+    expect(store.activePlatform).toBe("gitlab");
+    expect(store.platformVisibility).toEqual({ github: true, gitlab: true, gitee: false });
+  });
+
+  it("忽略损坏或非法的平台可见性持久化数据", () => {
+    storage.set("mergepilot:platformVisibility", "{invalid-json");
+    expect(useAuthStore().platformVisibility).toEqual({ github: true, gitlab: true, gitee: true });
+
+    setActivePinia(createPinia());
+    storage.set(
+      "mergepilot:platformVisibility",
+      JSON.stringify({ github: false, gitlab: false, gitee: false, unknown: true }),
+    );
+    expect(useAuthStore().platformVisibility).toEqual({ github: true, gitlab: true, gitee: true });
   });
 
   it("优先恢复上次使用的平台", async () => {
