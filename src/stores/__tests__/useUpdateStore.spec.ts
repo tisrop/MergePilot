@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   checkForUpdates,
   downloadAndInstallUpdate,
+  downloadAndReplacePortableUpdate,
   listenToUpdateProgress,
   restartAfterUpdate,
 } from "@/api";
+import type { UpdateCheckResult } from "@/types";
 import { useUpdateStore } from "../useUpdateStore";
 
 const storage = new Map<string, string>();
@@ -20,16 +22,18 @@ vi.stubGlobal("localStorage", {
 vi.mock("@/api", () => ({
   checkForUpdates: vi.fn(),
   downloadAndInstallUpdate: vi.fn(),
+  downloadAndReplacePortableUpdate: vi.fn(),
   listenToUpdateProgress: vi.fn(),
   restartAfterUpdate: vi.fn(),
 }));
 
-const noUpdate = {
+const noUpdate: UpdateCheckResult = {
   current_version: "0.3.5",
   available: false,
   version: null,
   notes: null,
   published_at: null,
+  update_mode: "installer",
 };
 
 describe("useUpdateStore", () => {
@@ -39,6 +43,7 @@ describe("useUpdateStore", () => {
     setActivePinia(createPinia());
     vi.mocked(checkForUpdates).mockReset();
     vi.mocked(downloadAndInstallUpdate).mockReset();
+    vi.mocked(downloadAndReplacePortableUpdate).mockReset();
     vi.mocked(listenToUpdateProgress).mockReset();
     vi.mocked(listenToUpdateProgress).mockResolvedValue(() => undefined);
     vi.mocked(restartAfterUpdate).mockReset();
@@ -100,6 +105,7 @@ describe("useUpdateStore", () => {
       version: "0.4.0",
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     let resolveDownload!: () => void;
     const pendingDownload = new Promise<void>((resolve) => {
@@ -127,5 +133,85 @@ describe("useUpdateStore", () => {
     expect(store.isUpdateInstalled).toBe(true);
     expect(downloadAndInstallUpdate).toHaveBeenCalledOnce();
     expect(unlisten).toHaveBeenCalledOnce();
+  });
+
+  it("Windows 便携版验签下载后进入自动替换重启状态", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "portable-update") });
+    vi.mocked(checkForUpdates).mockResolvedValue({
+      current_version: "0.3.5",
+      available: true,
+      version: "0.4.0",
+      notes: null,
+      published_at: null,
+      update_mode: "portable",
+    });
+    let progressCallback:
+      | ((event: {
+          request_id: string;
+          downloaded: number;
+          total: number | null;
+          phase: "downloading" | "installing";
+        }) => void)
+      | null = null;
+    const unlisten = vi.fn();
+    vi.mocked(listenToUpdateProgress).mockImplementation(async (callback) => {
+      progressCallback = callback;
+      return unlisten;
+    });
+    vi.mocked(downloadAndReplacePortableUpdate).mockImplementation(async () => {
+      progressCallback?.({
+        request_id: "old-update",
+        downloaded: 90,
+        total: 100,
+        phase: "downloading",
+      });
+      progressCallback?.({
+        request_id: "portable-update",
+        downloaded: 25,
+        total: 100,
+        phase: "downloading",
+      });
+    });
+    const store = useUpdateStore();
+    await store.checkUpdate();
+
+    await store.installUpdate();
+
+    expect(downloadAndReplacePortableUpdate).toHaveBeenCalledWith("portable-update", "0.4.0");
+    expect(downloadAndInstallUpdate).not.toHaveBeenCalled();
+    expect(store.updateDownloaded).toBe(25);
+    expect(store.isRestartingUpdate).toBe(true);
+    expect(store.isUpdateInstalled).toBe(false);
+    expect(store.isInstallingUpdate).toBe(false);
+    expect(unlisten).toHaveBeenCalledOnce();
+  });
+
+  it("Windows 便携版自动替换失败后清理监听并允许重试", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "portable-retry") });
+    vi.mocked(checkForUpdates).mockResolvedValue({
+      current_version: "0.3.5",
+      available: true,
+      version: "0.4.0",
+      notes: null,
+      published_at: null,
+      update_mode: "portable",
+    });
+    const unlisten = vi.fn();
+    vi.mocked(listenToUpdateProgress).mockResolvedValue(unlisten);
+    vi.mocked(downloadAndReplacePortableUpdate)
+      .mockRejectedValueOnce(new Error("directory denied"))
+      .mockResolvedValueOnce(undefined);
+    const store = useUpdateStore();
+    await store.checkUpdate();
+
+    await store.installUpdate();
+    expect(store.updateError).toContain("directory denied");
+    expect(store.isRestartingUpdate).toBe(false);
+    expect(store.isInstallingUpdate).toBe(false);
+    expect(unlisten).toHaveBeenCalledOnce();
+
+    await store.installUpdate();
+    expect(downloadAndReplacePortableUpdate).toHaveBeenCalledTimes(2);
+    expect(store.isRestartingUpdate).toBe(true);
   });
 });

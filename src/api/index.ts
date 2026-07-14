@@ -69,6 +69,13 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   return invoke("update_check");
 }
 
+export async function downloadAndReplacePortableUpdate(
+  requestId: string,
+  expectedVersion: string,
+): Promise<void> {
+  return invoke("update_download_and_replace_portable", { requestId, expectedVersion });
+}
+
 export async function downloadAndInstallUpdate(
   requestId: string,
   expectedVersion: string,

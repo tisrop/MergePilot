@@ -42,6 +42,7 @@ export interface UpdateCheckResult {
   version: string | null;
   notes: string | null;
   published_at: string | null;
+  update_mode: "installer" | "portable";
 }
 
 export interface SupportInfo {

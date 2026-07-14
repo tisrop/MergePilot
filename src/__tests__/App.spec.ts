@@ -33,6 +33,7 @@ describe("App", () => {
       version: "0.4.0",
       notes: "更新说明",
       published_at: "2026-07-13",
+      update_mode: "installer",
     });
     const pinia = createPinia();
     const router = createRouter({

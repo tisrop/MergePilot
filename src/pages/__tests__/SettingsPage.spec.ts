@@ -5,6 +5,7 @@ import {
   checkForUpdates,
   copySupportInfo,
   downloadAndInstallUpdate,
+  downloadAndReplacePortableUpdate,
   getAppVersion,
   listenToUpdateProgress,
   restartAfterUpdate,
@@ -26,6 +27,7 @@ vi.mock("@/api", () => ({
   getAppVersion: vi.fn(),
   checkForUpdates: vi.fn(),
   downloadAndInstallUpdate: vi.fn(),
+  downloadAndReplacePortableUpdate: vi.fn(),
   listenToUpdateProgress: vi.fn(),
   restartAfterUpdate: vi.fn(),
 }));
@@ -51,6 +53,7 @@ describe("SettingsPage 诊断信息", () => {
     vi.mocked(getAppVersion).mockResolvedValue("0.3.0");
     vi.mocked(checkForUpdates).mockReset();
     vi.mocked(downloadAndInstallUpdate).mockReset();
+    vi.mocked(downloadAndReplacePortableUpdate).mockReset();
     vi.mocked(listenToUpdateProgress).mockReset();
     vi.mocked(listenToUpdateProgress).mockResolvedValue(() => undefined);
     vi.mocked(restartAfterUpdate).mockReset();
@@ -104,6 +107,7 @@ describe("SettingsPage 诊断信息", () => {
       version: null,
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     const wrapper = mountPage();
     await flushPromises();
@@ -125,6 +129,7 @@ describe("SettingsPage 诊断信息", () => {
       version: "0.4.0",
       notes: "<script>危险说明</script>",
       published_at: "2026-07-13",
+      update_mode: "installer",
     });
     const wrapper = mountPage();
 
@@ -143,6 +148,7 @@ describe("SettingsPage 诊断信息", () => {
       version: null,
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     const wrapper = mountPage();
     const button = wrapper.get<HTMLButtonElement>("button.check-update-button");
@@ -168,6 +174,7 @@ describe("SettingsPage 诊断信息", () => {
       version: "0.4.0",
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     vi.mocked(downloadAndInstallUpdate).mockResolvedValue(undefined);
     const wrapper = mountPage();
@@ -184,6 +191,41 @@ describe("SettingsPage 诊断信息", () => {
 
     expect(downloadAndInstallUpdate).toHaveBeenCalledWith(expect.any(String), "0.4.0");
     expect(wrapper.text()).toContain("更新已安装，重启应用后生效");
+  });
+
+  it("Windows 便携版验签后自动替换 EXE 并失败回滚", async () => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "portable-page") });
+    vi.mocked(checkForUpdates).mockResolvedValue({
+      current_version: "0.3.0",
+      available: true,
+      version: "0.4.0",
+      notes: null,
+      published_at: null,
+      update_mode: "portable",
+    });
+    vi.mocked(downloadAndReplacePortableUpdate).mockResolvedValue(undefined);
+    const wrapper = mountPage();
+
+    await wrapper.get("button.check-update-button").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("下载并验签后");
+    expect(wrapper.text()).toContain("自动退出、替换当前 EXE 并重新启动");
+    expect(wrapper.get("button.install-update-button").text()).toBe("下载并自动更新");
+
+    await wrapper.get("button.install-update-button").trigger("click");
+    expect(wrapper.text()).toContain("替换失败时会自动恢复并启动旧版本");
+    expect(downloadAndReplacePortableUpdate).not.toHaveBeenCalled();
+
+    await wrapper.get("button.install-update-button").trigger("click");
+    await flushPromises();
+
+    expect(downloadAndReplacePortableUpdate).toHaveBeenCalledWith("portable-page", "0.4.0");
+    expect(downloadAndInstallUpdate).not.toHaveBeenCalled();
+    expect(restartAfterUpdate).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("新版 EXE 已通过签名验证");
+    expect(wrapper.text()).toContain("正在退出并启动新版");
+    expect(wrapper.find("button.install-update-button").exists()).toBe(false);
   });
 
   it("下载失败后清理进度监听并允许重试", async () => {
@@ -206,6 +248,7 @@ describe("SettingsPage 诊断信息", () => {
       version: "0.4.0",
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     vi.mocked(downloadAndInstallUpdate).mockImplementation(async () => {
       progressCallback?.({ request_id: "old", downloaded: 90, total: 100, phase: "downloading" });
@@ -252,6 +295,7 @@ describe("SettingsPage 诊断信息", () => {
       version: "0.4.0",
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     const firstPage = mountPage();
 
@@ -286,6 +330,7 @@ describe("SettingsPage 诊断信息", () => {
       version: "0.4.0",
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     vi.mocked(downloadAndInstallUpdate).mockResolvedValue(undefined);
     vi.mocked(restartAfterUpdate).mockResolvedValue(undefined);
@@ -308,6 +353,7 @@ describe("SettingsPage 诊断信息", () => {
       version: "0.4.0",
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     vi.mocked(downloadAndInstallUpdate).mockResolvedValue(undefined);
     let rejectRestart!: (reason?: unknown) => void;
@@ -358,6 +404,7 @@ describe("SettingsPage 诊断信息", () => {
       version: null,
       notes: null,
       published_at: null,
+      update_mode: "installer",
     });
     const wrapper = mountPage();
 

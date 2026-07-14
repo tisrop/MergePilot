@@ -9,6 +9,8 @@ const EXPECTED_PRIMARY_PLATFORMS = [
   "windows-x86_64",
 ];
 
+const WINDOWS_PORTABLE_PLATFORM = "windows-x86_64";
+
 const PLATFORM_RULES = {
   "darwin-aarch64": [{ suffix: ".app.tar.gz.sig", bundle: "app" }],
   "darwin-x86_64": [{ suffix: ".app.tar.gz.sig", bundle: "app" }],
@@ -79,7 +81,17 @@ function assetLabelFor(platform, assetPath, productName, version) {
   return `${productName}_${version}_${arch}.app.tar.gz`;
 }
 
-export async function createUpdaterFragment({ artifactPaths, platform, productName, version }) {
+function windowsPortableAssetName(version) {
+  return `MergePilot_${version}_x64-portable.exe`;
+}
+
+export async function createUpdaterFragment({
+  artifactPaths,
+  platform,
+  productName,
+  version,
+  portableExecutablePath = null,
+}) {
   const rules = PLATFORM_RULES[platform];
   if (!rules) {
     throw new Error(`不支持的 updater 平台：${platform}`);
@@ -104,7 +116,7 @@ export async function createUpdaterFragment({ artifactPaths, platform, productNa
 
     const signaturePath = candidates[0];
     const signature = await readFile(signaturePath, "utf8");
-    if (signature.length === 0 || signature.length > 16 * 1024) {
+    if (signature.trim().length === 0 || signature.length > 16 * 1024) {
       throw new Error(`${platform} 的 ${rule.bundle} updater 签名长度无效`);
     }
 
@@ -120,7 +132,20 @@ export async function createUpdaterFragment({ artifactPaths, platform, productNa
   }
 
   platformEntries[platform] = primaryEntry;
-  return { platform, platforms: platformEntries };
+  const fragment = { platform, platforms: platformEntries };
+  if (platform === WINDOWS_PORTABLE_PLATFORM) {
+    assertNonEmptyString(portableExecutablePath, "Windows 便携版可执行文件路径");
+    const expectedAssetName = windowsPortableAssetName(version);
+    if (basename(portableExecutablePath) !== expectedAssetName) {
+      throw new Error(`Windows 便携版可执行文件名必须为 ${expectedAssetName}`);
+    }
+    const signature = await readFile(`${portableExecutablePath}.sig`, "utf8");
+    if (signature.trim().length === 0 || signature.length > 16 * 1024) {
+      throw new Error("Windows 便携版可执行文件签名长度无效");
+    }
+    fragment.portable = { asset_name: expectedAssetName, signature };
+  }
+  return fragment;
 }
 
 export function assembleUpdaterMetadata({
@@ -189,7 +214,41 @@ export function assembleUpdaterMetadata({
     platforms[key] = { signature: reference.signature, url };
   }
 
-  return { version, notes, pub_date: pubDate, platforms };
+  const portableReference = fragments.find(
+    (fragment) => fragment.platform === WINDOWS_PORTABLE_PLATFORM,
+  )?.portable;
+  const portableAssetName = windowsPortableAssetName(version);
+  if (
+    !portableReference ||
+    portableReference.asset_name !== portableAssetName ||
+    typeof portableReference.signature !== "string" ||
+    portableReference.signature.trim().length === 0 ||
+    portableReference.signature.length > 16 * 1024
+  ) {
+    throw new Error("Windows 便携版可执行文件签名无效");
+  }
+  const portableAssets = assets.filter((asset) => asset?.name === portableAssetName);
+  if (portableAssets.length !== 1) {
+    throw new Error("Windows 便携版可执行文件无法唯一匹配 Release 资源");
+  }
+  const portableUrl = stableReleaseAssetUrl(
+    portableAssets[0],
+    assetDownloadUrlPrefix,
+    "Windows 便携版可执行文件",
+  );
+
+  return {
+    version,
+    notes,
+    pub_date: pubDate,
+    platforms,
+    portable: {
+      [WINDOWS_PORTABLE_PLATFORM]: {
+        url: portableUrl,
+        signature: portableReference.signature,
+      },
+    },
+  };
 }
 
 function parseArguments(argv) {
@@ -224,6 +283,7 @@ async function main() {
       platform: options.platform,
       productName: config.productName,
       version: config.version,
+      portableExecutablePath: process.env.PORTABLE_EXE ?? null,
     });
     await writeFile(options.output, `${JSON.stringify(fragment, null, 2)}\n`);
     return;

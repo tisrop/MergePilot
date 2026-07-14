@@ -3,6 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import {
   checkForUpdates,
   downloadAndInstallUpdate,
+  downloadAndReplacePortableUpdate,
   listenToUpdateProgress,
   restartAfterUpdate,
 } from "@/api";
@@ -106,6 +107,7 @@ export const useUpdateStore = defineStore("update", () => {
     if (
       isInstallingUpdate.value ||
       isUpdateInstalled.value ||
+      isRestartingUpdate.value ||
       !updateResult.value?.available ||
       !expectedVersion
     ) {
@@ -113,6 +115,7 @@ export const useUpdateStore = defineStore("update", () => {
     }
 
     const requestId = crypto.randomUUID();
+    const isPortable = updateResult.value.update_mode === "portable";
     activeUpdateRequestId = requestId;
     isInstallingUpdate.value = true;
     updateError.value = "";
@@ -136,11 +139,19 @@ export const useUpdateStore = defineStore("update", () => {
         unlistenUpdateProgress = unlisten;
       }
 
-      await downloadAndInstallUpdate(requestId, expectedVersion);
-      isUpdateInstalled.value = true;
+      if (isPortable) {
+        await downloadAndReplacePortableUpdate(requestId, expectedVersion);
+        isRestartingUpdate.value = true;
+      } else {
+        await downloadAndInstallUpdate(requestId, expectedVersion);
+        isUpdateInstalled.value = true;
+      }
       updatePhase.value = null;
     } catch (error) {
-      updateError.value = getErrorMessage(error, "下载安装更新失败，请稍后重试");
+      updateError.value = getErrorMessage(
+        error,
+        isPortable ? "自动更新 Windows 便携版失败，请稍后重试" : "下载安装更新失败，请稍后重试",
+      );
       updatePhase.value = null;
     } finally {
       if (activeUpdateRequestId === requestId) {
