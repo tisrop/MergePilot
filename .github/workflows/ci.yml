@@ -9,7 +9,6 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  actions: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,12 +33,6 @@ jobs:
 
       - name: Check updater security configuration
         run: node .github/checks/updater-config.mjs
-
-      - name: Cancel workflow on failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }}
 
   frontend:
     needs: changes
@@ -72,12 +65,6 @@ jobs:
 
       - name: Unit tests
         run: npm test
-
-      - name: Cancel workflow on failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }}
 
   rust-fmt-clippy:
     needs: changes
@@ -119,12 +106,6 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
-      - name: Cancel workflow on failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }}
-
   rust-test:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
@@ -158,12 +139,6 @@ jobs:
       - name: Cargo test
         working-directory: src-tauri
         run: cargo test --all
-
-      - name: Cancel workflow on failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }}
 
   rust:
     needs: [changes, rust-fmt-clippy, rust-test]
