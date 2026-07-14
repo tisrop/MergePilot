@@ -67,14 +67,14 @@ describe("updater 元数据汇总", () => {
     expect(result.platforms["windows-x86_64-nsis"].signature).toBe("nsis-signature");
   });
 
-  it("只使用 Release API 返回的资源地址汇总四个平台", () => {
+  it("将 Draft Release 临时资源地址转换为发布后的稳定地址", () => {
     const platforms = ["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"];
     const fragments = platforms.map((platform) => fragment(platform, `${platform}.updater`));
     const assets = platforms.map((platform, index) => ({
       name: `${platform}.updater`,
       label: `${platform}.updater`,
       url: `https://api.github.com/repos/tisrop/MergePilot/releases/assets/${index + 1}`,
-      browser_download_url: `https://github.com/tisrop/MergePilot/releases/download/v0.3.5/${platform}.updater`,
+      browser_download_url: `https://github.com/tisrop/MergePilot/releases/download/untagged-a1b2c3/${platform}.updater`,
     }));
 
     const metadata = assembleUpdaterMetadata({
@@ -87,7 +87,32 @@ describe("updater 元数据汇总", () => {
     });
 
     expect(Object.keys(metadata.platforms)).toEqual(platforms);
-    expect(metadata.platforms["linux-x86_64"].url).toBe(assets[2].browser_download_url);
+    expect(metadata.platforms["linux-x86_64"].url).toBe(
+      "https://github.com/tisrop/MergePilot/releases/download/v0.3.5/linux-x86_64.updater",
+    );
+  });
+
+  it("对稳定下载地址中的资源文件名进行 URL 编码", () => {
+    const platforms = ["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"];
+    const fragments = platforms.map((platform) => fragment(platform, `${platform}.updater`));
+    const assets = platforms.map((platform) => ({
+      name: platform === "darwin-aarch64" ? "Merge Pilot.app.tar.gz" : `${platform}.updater`,
+      label: `${platform}.updater`,
+      browser_download_url: `https://github.com/tisrop/MergePilot/releases/download/untagged-a1b2c3/${platform}.updater`,
+    }));
+
+    const metadata = assembleUpdaterMetadata({
+      fragments,
+      assets,
+      version: "0.3.5",
+      notes: "发布说明",
+      pubDate: "2026-07-13T12:00:00.000Z",
+      assetDownloadUrlPrefix: "https://github.com/tisrop/MergePilot/releases/download/v0.3.5/",
+    });
+
+    expect(metadata.platforms["darwin-aarch64"].url).toBe(
+      "https://github.com/tisrop/MergePilot/releases/download/v0.3.5/Merge%20Pilot.app.tar.gz",
+    );
   });
 
   it("拒绝缺失平台、重复条目和非官方资源地址", () => {

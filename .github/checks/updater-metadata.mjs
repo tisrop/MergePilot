@@ -32,6 +32,44 @@ function githubAssetName(label) {
     .replaceAll(/\.\./g, ".");
 }
 
+function stableReleaseAssetUrl(asset, assetDownloadUrlPrefix, key) {
+  const assetName = asset?.name;
+  const browserDownloadUrl = asset?.browser_download_url;
+  if (
+    typeof assetName !== "string" ||
+    assetName.length === 0 ||
+    typeof browserDownloadUrl !== "string"
+  ) {
+    throw new Error(`${key} 的 Release updater 资源地址无效`);
+  }
+
+  try {
+    const expected = new URL(assetDownloadUrlPrefix);
+    const actual = new URL(browserDownloadUrl);
+    const releasePathMarker = "/releases/download/";
+    const markerIndex = expected.pathname.indexOf(releasePathMarker);
+    const releaseBasePath = expected.pathname.slice(0, markerIndex + releasePathMarker.length);
+    const actualReleaseName = actual.pathname.slice(releaseBasePath.length).split("/", 1)[0];
+    const expectedReleaseName = expected.pathname.slice(releaseBasePath.length).split("/", 1)[0];
+    const isDraftReleaseName = /^untagged-[0-9a-f]+$/i.test(actualReleaseName);
+
+    if (
+      expected.protocol !== "https:" ||
+      markerIndex < 0 ||
+      !expected.pathname.endsWith("/") ||
+      actual.origin !== expected.origin ||
+      !actual.pathname.startsWith(releaseBasePath) ||
+      (actualReleaseName !== expectedReleaseName && !isDraftReleaseName)
+    ) {
+      throw new Error("invalid release asset URL");
+    }
+  } catch {
+    throw new Error(`${key} 的 Release updater 资源地址无效`);
+  }
+
+  return `${assetDownloadUrlPrefix}${encodeURIComponent(assetName)}`;
+}
+
 function assetLabelFor(platform, assetPath, productName, version) {
   if (!platform.startsWith("darwin-")) {
     return basename(assetPath);
@@ -147,10 +185,7 @@ export function assembleUpdaterMetadata({
       throw new Error(`${key} 无法唯一匹配 Release updater 资源`);
     }
 
-    const url = matchingAssets[0].browser_download_url;
-    if (typeof url !== "string" || !url.startsWith(assetDownloadUrlPrefix)) {
-      throw new Error(`${key} 的 Release updater 资源地址无效`);
-    }
+    const url = stableReleaseAssetUrl(matchingAssets[0], assetDownloadUrlPrefix, key);
     platforms[key] = { signature: reference.signature, url };
   }
 
