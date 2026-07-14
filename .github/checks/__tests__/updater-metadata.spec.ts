@@ -176,6 +176,11 @@ describe("updater 元数据汇总", () => {
     expect(workflow).not.toContain("max-parallel: 1");
     expect(workflow).toContain("prepare-release:");
     expect(workflow).toContain("releaseId: ${{ needs.prepare-release.outputs.release-id }}");
+    expect(workflow).toContain("RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}");
+    expect(workflow).toContain(
+      "RELEASE_UPLOAD_URL: ${{ needs.prepare-release.outputs.release-upload-url }}",
+    );
+    expect(workflow).not.toContain('gh release upload "$env:GITHUB_REF_NAME" "$env:PORTABLE_ZIP"');
     expect(workflow).toContain("uploadUpdaterJson: false");
     expect(workflow).toContain("name: updater-fragment-${{ matrix.updater-platform }}");
     expect(workflow).toContain("assemble-updater-metadata:");

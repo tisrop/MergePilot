@@ -35,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release-id: ${{ steps.release.outputs.release-id }}
+      release-upload-url: ${{ steps.release.outputs.release-upload-url }}
     steps:
       - name: Create or update draft release
         id: release
@@ -87,7 +88,13 @@ jobs:
             echo "Draft Release ID 无效：${RELEASE_ID}" >&2
             exit 1
           fi
+          RELEASE_UPLOAD_URL="$(jq -r '.upload_url // ""' "$RUNNER_TEMP/release.json")"
+          if [[ "$RELEASE_UPLOAD_URL" != https://*"{?name,label}" ]]; then
+            echo "Draft Release upload URL 无效" >&2
+            exit 1
+          fi
           echo "release-id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+          echo "release-upload-url=${RELEASE_UPLOAD_URL}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare-release
@@ -309,8 +316,31 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+          RELEASE_UPLOAD_URL: ${{ needs.prepare-release.outputs.release-upload-url }}
         run: |
-          gh release upload "$env:GITHUB_REF_NAME" "$env:PORTABLE_ZIP" --repo "$env:GITHUB_REPOSITORY" --clobber
+          $assetName = [System.IO.Path]::GetFileName($env:PORTABLE_ZIP)
+          $assets = @(
+            gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?per_page=100" |
+              ConvertFrom-Json |
+              Where-Object { $_.name -eq $assetName }
+          )
+          if ($assets.Count -gt 1) {
+            Write-Error "Duplicate portable assets found: $assetName"
+            exit 1
+          }
+          if ($assets.Count -eq 1) {
+            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($assets[0].id)"
+          }
+
+          $uploadBase = $env:RELEASE_UPLOAD_URL -replace '\{\?name,label\}$', ''
+          $encodedName = [Uri]::EscapeDataString($assetName)
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          Invoke-RestMethod             -Method Post             -Uri "${uploadBase}?name=$encodedName"             -Headers $headers             -ContentType "application/zip"             -InFile $env:PORTABLE_ZIP
 
   assemble-updater-metadata:
     needs: [prepare-release, build]
