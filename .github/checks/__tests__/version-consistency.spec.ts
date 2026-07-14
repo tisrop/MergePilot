@@ -6,11 +6,14 @@ import {
   readProjectVersions,
 } from "../version-consistency.mjs";
 
+const FIXTURE_VERSION = "1.2.3";
+const FIXTURE_PRERELEASE_VERSION = "1.2.3-rc.1";
+
 describe("版本一致性检查", () => {
   it("读取当前三个 manifest 的同一版本", async () => {
     const versions = await readProjectVersions();
 
-    expect(assertConsistentVersions(versions)).toBe("0.3.5");
+    expect(assertConsistentVersions(versions)).toBe(versions["package.json"]);
   });
 
   it("只读取 Cargo package 段中的版本", () => {
@@ -18,7 +21,7 @@ describe("版本一致性检查", () => {
       parseCargoVersion(
         '[package]\nname = "app"\nversion = "1.2.3"\n\n[dependencies]\nfoo = "9"\n',
       ),
-    ).toBe("1.2.3");
+    ).toBe(FIXTURE_VERSION);
   });
 
   it("报告每个不一致的文件和值", () => {
@@ -42,8 +45,10 @@ describe("版本一致性检查", () => {
   });
 
   it("接受与 manifest 一致的正式和预发布标签", () => {
-    expect(assertReleaseTag("v1.2.3", "1.2.3")).toBe("1.2.3");
-    expect(assertReleaseTag("v1.2.3-rc.1", "1.2.3-rc.1")).toBe("1.2.3-rc.1");
+    expect(assertReleaseTag("v1.2.3", FIXTURE_VERSION)).toBe(FIXTURE_VERSION);
+    expect(assertReleaseTag("v1.2.3-rc.1", FIXTURE_PRERELEASE_VERSION)).toBe(
+      FIXTURE_PRERELEASE_VERSION,
+    );
   });
 
   it("发布标签与 manifest 不一致时明确失败", () => {
