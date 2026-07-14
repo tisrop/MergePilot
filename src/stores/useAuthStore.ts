@@ -3,8 +3,9 @@ import { ref, computed, watch } from "vue";
 import type { Platform, User } from "@/types";
 import { authLogin, authLogout, authCheck, authHasToken } from "@/api";
 
-const PLATFORM_VISIBILITY_KEY = "mergepilot:platformVisibility";
-const ACTIVE_PLATFORM_KEY = "mergepilot:activePlatform";
+const PLATFORM_VISIBILITY_KEY = "mergebeacon:platformVisibility";
+const ACTIVE_PLATFORM_KEY = "mergebeacon:activePlatform";
+const LEGACY_KEY_PREFIX = "mergepilot:";
 const PLATFORMS: Platform[] = ["github", "gitlab", "gitee"];
 const DEFAULT_VISIBILITY: Record<Platform, boolean> = {
   github: true,
@@ -14,7 +15,15 @@ const DEFAULT_VISIBILITY: Record<Platform, boolean> = {
 
 function readStorage(key: string): string | null {
   try {
-    return localStorage.getItem(key);
+    const value = localStorage.getItem(key);
+    if (value !== null) return value;
+    const legacyKey = key.replace("mergebeacon:", LEGACY_KEY_PREFIX);
+    const legacyValue = localStorage.getItem(legacyKey);
+    if (legacyValue !== null) {
+      localStorage.setItem(key, legacyValue);
+      localStorage.removeItem(legacyKey);
+    }
+    return legacyValue;
   } catch {
     return null;
   }

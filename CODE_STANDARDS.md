@@ -1,6 +1,6 @@
-# MergePilot 代码规范
+# MergeBeacon 代码规范
 
-本文是 MergePilot 的代码实现与评审基线，适用于 `src/`、`src-tauri/`、测试、构建配置和
+本文是 MergeBeacon 的代码实现与评审基线，适用于 `src/`、`src-tauri/`、测试、构建配置和
 OpenSpec 变更。`AGENTS.md` 记录项目上下文和操作约束；本文定义可执行的代码质量要求。若二者
 冲突，以更具体、更严格且不违背产品能力声明的规则为准。
 

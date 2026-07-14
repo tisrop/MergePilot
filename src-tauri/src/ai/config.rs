@@ -8,6 +8,7 @@ const CONFIG_FILE: &str = "ai_config.json";
 
 pub struct AiConfigManager {
     config_dir: PathBuf,
+    legacy_config_dir: Option<PathBuf>,
 }
 
 impl Default for AiConfigManager {
@@ -18,21 +19,44 @@ impl Default for AiConfigManager {
 
 impl AiConfigManager {
     pub fn new() -> Self {
-        let config_dir = directories::ProjectDirs::from("com", "mergepilot", "MergePilot")
+        let config_dir = directories::ProjectDirs::from("com", "mergebeacon", "MergeBeacon")
             .map(|d| d.config_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from(".mergepilot"));
+            .unwrap_or_else(|| PathBuf::from(".mergebeacon"));
+        let legacy_config_dir = directories::ProjectDirs::from("com", "mergepilot", "MergePilot")
+            .map(|d| d.config_dir().to_path_buf())
+            .or_else(|| Some(PathBuf::from(".mergepilot")));
 
         std::fs::create_dir_all(&config_dir).ok();
-        Self { config_dir }
+        Self { config_dir, legacy_config_dir }
     }
 
     fn config_path(&self) -> PathBuf {
         self.config_dir.join(CONFIG_FILE)
     }
 
+    fn migrate_legacy_config(&self) -> Result<(), AppError> {
+        let path = self.config_path();
+        if path.exists() {
+            return Ok(());
+        }
+        let Some(legacy_path) =
+            self.legacy_config_dir.as_ref().map(|directory| directory.join(CONFIG_FILE)).filter(|path| path.exists())
+        else {
+            return Ok(());
+        };
+        let content = std::fs::read(&legacy_path)?;
+        let _: AiConfig = serde_json::from_slice(&content)?;
+        let temp_path = path.with_extension(format!("json.tmp.{}", std::process::id()));
+        std::fs::write(&temp_path, content)?;
+        std::fs::rename(&temp_path, &path)?;
+        std::fs::remove_file(legacy_path)?;
+        Ok(())
+    }
+
     /// Read AI config from disk.
     /// The `api_key_encrypted` field is NOT decrypted here — call `get_api_key` separately.
     pub fn get_config(&self) -> Result<AiConfig, AppError> {
+        self.migrate_legacy_config()?;
         let path = self.config_path();
         if path.exists() {
             let content = std::fs::read_to_string(&path)?;

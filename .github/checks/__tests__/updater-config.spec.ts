@@ -20,7 +20,7 @@ function validConfig() {
     plugins: {
       updater: {
         pubkey: Buffer.from(publicKey, "utf8").toString("base64"),
-        endpoints: ["https://github.com/tisrop/MergePilot/releases/latest/download/latest.json"],
+        endpoints: ["https://github.com/tisrop/MergeBeacon/releases/latest/download/latest.json"],
       },
     },
   };
@@ -47,7 +47,7 @@ describe("updater 配置安全检查", () => {
 
     const appended = validConfig();
     appended.plugins.updater.endpoints.push(
-      "https://github.com/tisrop/MergePilot/releases/latest/download/fallback.json",
+      "https://github.com/tisrop/MergeBeacon/releases/latest/download/fallback.json",
     );
     expect(() => assertUpdaterConfig(appended)).toThrow("updater endpoint 必须精确配置");
   });

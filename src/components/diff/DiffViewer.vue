@@ -358,8 +358,23 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.diff-viewer-wrapper {
+.diff2html-container :deep(.d2h-code-linenumber) {
   position: relative;
+}
+
+.diff2html-container :deep(.d2h-code-linenumber:hover::after),
+.diff2html-container :deep(.d2h-code-linenumber.d2h-info::after) {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--color-brand-accent-strong);
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: 0 0 0 3px rgba(85, 224, 204, 0.13);
+  transform: translateY(-50%);
 }
 
 .diff2html-container :deep(.d2h-file-wrapper) {

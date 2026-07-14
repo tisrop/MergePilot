@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 const projectRoot = process.cwd();
 const OFFICIAL_UPDATER_ENDPOINT =
-  "https://github.com/tisrop/MergePilot/releases/latest/download/latest.json";
+  "https://github.com/tisrop/MergeBeacon/releases/latest/download/latest.json";
 
 function decodeCanonicalBase64(value, field) {
   if (

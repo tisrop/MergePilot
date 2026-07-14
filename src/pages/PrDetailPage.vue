@@ -114,6 +114,15 @@ const canMerge = computed(
     pr.currentPr?.mergeable !== false &&
     (platformCapabilities.value?.merge_strategies.includes(selectedStrategy.value) ?? false),
 );
+const mergeBeacon = computed(() => {
+  if (operating.value) return { tone: "scanning", label: "正在执行合并" };
+  if (isMerged.value) return { tone: "ready", label: "已完成合并" };
+  if (pr.currentPr?.mergeable === false) return { tone: "blocked", label: "存在合并阻断" };
+  if (isOpen.value && pr.currentPr?.mergeable === true && availableStrategies.value.length > 0) {
+    return { tone: "ready", label: "已具备合并条件" };
+  }
+  return { tone: "attention", label: "等待合并信号" };
+});
 const canClose = computed(() => isOpen.value);
 const canReopen = computed(() => isClosed.value && !isMerged.value);
 
@@ -266,6 +275,10 @@ onMounted(async () => {
         </div>
 
         <div v-if="pr.currentPr" class="pr-actions">
+          <div class="merge-beacon" :class="`tone-${mergeBeacon.tone}`" role="status">
+            <span class="beacon-light" aria-hidden="true" />
+            <span>{{ mergeBeacon.label }}</span>
+          </div>
           <div v-if="isOpen" class="merge-group">
             <div class="merge-btn-wrapper">
               <button
@@ -531,6 +544,57 @@ onMounted(async () => {
   gap: var(--space-2);
   margin-top: var(--space-2);
   flex-wrap: wrap;
+}
+
+.merge-beacon {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  color: var(--color-warning);
+  background: var(--color-warning-light);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.beacon-light {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.merge-beacon.tone-ready {
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+  background: var(--color-success-light);
+}
+
+.merge-beacon.tone-blocked {
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-light);
+}
+
+.merge-beacon.tone-scanning {
+  color: var(--color-focus);
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-light);
+}
+
+.merge-beacon.tone-scanning .beacon-light {
+  animation: beacon-pulse 1s ease-in-out infinite;
+}
+
+@keyframes beacon-pulse {
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, currentColor 6%, transparent);
+  }
 }
 
 .merge-group {

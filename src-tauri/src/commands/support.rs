@@ -72,7 +72,7 @@ fn build_support_info(input: SupportInfoInput<'_>) -> SupportInfo {
     let ai_status = if input.ai_configured { "已配置" } else { "未配置" };
     let cache_status = if input.local_cache_available { "可用" } else { "不可用" };
     let formatted = format!(
-        "MergePilot {app_version}\n操作系统：{operating_system}\n架构：{architecture}\n当前平台：{current_platform}\n平台服务：{platform_endpoint}\nToken 存储：{credential_storage}\nAI 配置：{ai_status}\nAI 服务：{ai_endpoint}\n本地评论缓存：{cache_status}"
+        "MergeBeacon {app_version}\n操作系统：{operating_system}\n架构：{architecture}\n当前平台：{current_platform}\n平台服务：{platform_endpoint}\nToken 存储：{credential_storage}\nAI 配置：{ai_status}\nAI 服务：{ai_endpoint}\n本地评论缓存：{cache_status}"
     );
 
     SupportInfo {

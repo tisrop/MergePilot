@@ -294,7 +294,7 @@ async function copySupportInfo() {
         <p v-else-if="updateResult" class="support-status" role="status" aria-live="polite">
           当前已是最新版本。
         </p>
-        <p v-else class="privacy-note">仅从 MergePilot 官方签名更新源读取元数据。</p>
+        <p v-else class="privacy-note">仅从 MergeBeacon 官方签名更新源读取元数据。</p>
       </section>
 
       <section class="section">

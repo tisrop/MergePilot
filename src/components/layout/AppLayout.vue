@@ -30,7 +30,8 @@ import Sidebar from "./Sidebar.vue";
   flex-direction: column;
   overflow: hidden;
   background:
-    radial-gradient(circle at 85% 0%, var(--color-bg-accent), transparent 32%), var(--color-bg);
+    radial-gradient(circle at 88% 0%, rgba(113, 135, 255, 0.09), transparent 30%),
+    radial-gradient(circle at 20% 100%, rgba(85, 224, 204, 0.05), transparent 28%), var(--color-bg);
 }
 
 .content-header {

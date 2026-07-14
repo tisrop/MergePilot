@@ -47,7 +47,7 @@ jobs:
             -f tag_name="${GITHUB_REF_NAME}" \
             --jq '.body')"
           if [ -z "$BODY" ]; then
-            BODY="MergePilot ${GITHUB_REF_NAME}"
+            BODY="MergeBeacon ${GITHUB_REF_NAME}"
           fi
 
           gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
@@ -70,14 +70,14 @@ jobs:
             fi
             gh api --method PATCH \
               "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-              -f name="MergePilot ${GITHUB_REF_NAME}" \
+              -f name="MergeBeacon ${GITHUB_REF_NAME}" \
               -f body="$BODY" \
               -F draft=true \
               -F prerelease=false > "$RUNNER_TEMP/release.json"
           else
             gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
               -f tag_name="${GITHUB_REF_NAME}" \
-              -f name="MergePilot ${GITHUB_REF_NAME}" \
+              -f name="MergeBeacon ${GITHUB_REF_NAME}" \
               -f body="$BODY" \
               -F draft=true \
               -F prerelease=false > "$RUNNER_TEMP/release.json"
@@ -242,7 +242,7 @@ jobs:
       - name: Verify updater signing key
         shell: bash
         run: |
-          printf 'MergePilot updater signing preflight' > "$RUNNER_TEMP/updater-signing-preflight"
+          printf 'MergeBeacon updater signing preflight' > "$RUNNER_TEMP/updater-signing-preflight"
           npm run tauri -- signer sign "$RUNNER_TEMP/updater-signing-preflight"
 
       - name: Configure Apple signing env vars (macOS)
@@ -279,13 +279,13 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          $exe = "src-tauri/target/release/mergepilot.exe"
+          $exe = "src-tauri/target/release/mergebeacon.exe"
           if (-not (Test-Path $exe)) {
             Write-Error "$exe not found"
             exit 1
           }
           $version = $env:GITHUB_REF_NAME.Substring(1)
-          $portableName = "MergePilot_${version}_x64-portable.exe"
+          $portableName = "MergeBeacon_${version}_x64-portable.exe"
           $tmpDir = $env:RUNNER_TEMP
           Copy-Item $exe "$tmpDir/$portableName"
           npm run tauri -- signer sign "$tmpDir/$portableName"

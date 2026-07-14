@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         感谢反馈。涉及敏感信息请脱敏。请尽量提供复现步骤、截图和错误日志。
-        MergePilot 版本、运行环境、操作系统和系统架构可在应用内查看。
+        MergeBeacon 版本、运行环境、操作系统和系统架构可在应用内查看。
 
   - type: textarea
     id: description
@@ -26,9 +26,9 @@ body:
     id: support-info
     attributes:
       label: 环境信息
-      description: MergePilot 版本、操作系统、Git 平台（GitHub/GitLab/Gitee）等。
+      description: MergeBeacon 版本、操作系统、Git 平台（GitHub/GitLab/Gitee）等。
       placeholder: |
-        MergePilot 版本：v0.1.0
+        MergeBeacon 版本：v0.1.0
         操作系统：macOS 14.5
         系统架构：aarch64
         Git 平台：GitHub

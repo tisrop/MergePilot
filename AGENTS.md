@@ -1,6 +1,6 @@
-# MergePilot — AGENTS.md
+# MergeBeacon — AGENTS.md
 
-Tauri 2 + Vue 3 + Rust 跨平台 Code Merge 桌面客户端（GitHub/GitLab/Gitee + AI 评审）。
+Tauri 2 + Vue 3 + Rust 跨平台 PR 评审与 Issue 管理桌面客户端（GitHub/GitLab/Gitee + AI 评审）。
 
 ## 代码规范
 
@@ -59,9 +59,9 @@ src-tauri/
 ## Rust 后端要点
 
 - `error.rs`：`AppError` 通过 `impl From<AppError> for String` 兼容 Tauri 命令；新增错误变体需同步转换。
-- `vault.rs`：平台 Token 优先保存到系统 Keyring（service `com.mergepilot`，账户
-  `git-platform:{platform}`）；不可用时 AES-256-GCM 加密写入 `~/.mergepilot/config.json`。
-  旧明文 Token 采用“先成功写目标、再删旧值”迁移。不要重新引入明文 Token。
+- `vault.rs`：平台 Token 优先保存到系统 Keyring（service `com.mergebeacon`，账户
+  `git-platform:{platform}`）；不可用时 AES-256-GCM 加密写入 `~/.mergebeacon/config.json`。
+  旧 `com.mergepilot` Keyring、`~/.mergepilot/config.json` 和旧明文 Token 均采用“先成功写目标、再删旧值”迁移。不要重新引入明文 Token。
 - Keyring 依赖必须保留 `apple-native`、`windows-native`、`sync-secret-service` features；无 feature
   时 keyring crate 会退化为不持久化的内存 Mock。
 - `crypto.rs`：AES-256-GCM；密钥 = SHA256（应用固定值 + OS 用户名）。AI API Key 仍使用此方案。
@@ -108,10 +108,10 @@ cargo test
 
 ## 构建与部署
 
-- macOS bundle：`Merge Pilot.app`，identifier：`com.mergepilot`。
+- macOS bundle：`MergeBeacon.app`，identifier：`com.mergebeacon`。
 - 构建前自动执行 `npm run build`；前端产物在 `dist/`，Rust/bundle 在 `src-tauri/target/`。
 - 生产 CSP 在 `src-tauri/tauri.conf.json`；修改网络或资源来源时同步审查 CSP，不得放宽远程脚本。
-- macOS entitlement：`src-tauri/mergepilot.entitlements`。
+- macOS entitlement：`src-tauri/mergebeacon.entitlements`。
 
 ## 注意
 

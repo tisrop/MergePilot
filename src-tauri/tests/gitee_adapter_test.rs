@@ -1,5 +1,5 @@
-use mergepilot_lib::http_client::HttpClient;
-use mergepilot_lib::platform::{gitee::GiteeAdapter, GitPlatform};
+use mergebeacon_lib::http_client::HttpClient;
+use mergebeacon_lib::platform::{gitee::GiteeAdapter, GitPlatform};
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -61,7 +61,7 @@ async fn test_gitee_list_prs_open() {
         GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_pull_requests("octocat", "hello-world", &mergepilot_lib::models::PrState::Open, 1, 20)
+        .list_pull_requests("octocat", "hello-world", &mergebeacon_lib::models::PrState::Open, 1, 20)
         .await
         .expect("should list PRs");
 
@@ -109,7 +109,7 @@ async fn test_gitee_list_prs_pagination_headers() {
         GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_pull_requests("octocat", "hello-world", &mergepilot_lib::models::PrState::Open, 1, 20)
+        .list_pull_requests("octocat", "hello-world", &mergebeacon_lib::models::PrState::Open, 1, 20)
         .await
         .expect("should list PRs");
 
@@ -160,16 +160,16 @@ async fn test_gitee_list_prs_merged() {
         GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_pull_requests("octocat", "hello-world", &mergepilot_lib::models::PrState::Merged, 1, 20)
+        .list_pull_requests("octocat", "hello-world", &mergebeacon_lib::models::PrState::Merged, 1, 20)
         .await
         .expect("should list merged PRs");
 
     assert_eq!(result.items.len(), 2);
     assert_eq!(result.items[0].number, 100);
     assert_eq!(result.items[0].title, "Merged feature");
-    assert!(matches!(result.items[0].state, mergepilot_lib::models::PrState::Merged));
+    assert!(matches!(result.items[0].state, mergebeacon_lib::models::PrState::Merged));
     assert_eq!(result.items[1].number, 101);
-    assert!(matches!(result.items[1].state, mergepilot_lib::models::PrState::Merged));
+    assert!(matches!(result.items[1].state, mergebeacon_lib::models::PrState::Merged));
     assert_eq!(result.total_count, 2);
     assert_eq!(result.total_pages, 1);
 }
@@ -369,7 +369,7 @@ async fn test_gitee_get_pr_diff() {
     assert_eq!(files[0].additions, 1);
     assert_eq!(files[0].deletions, 1);
     assert_eq!(files[1].filename, "src/lib.rs");
-    assert!(matches!(files[1].status, mergepilot_lib::models::FileStatus::Added));
+    assert!(matches!(files[1].status, mergebeacon_lib::models::FileStatus::Added));
 }
 
 #[tokio::test]
@@ -475,7 +475,7 @@ async fn test_gitee_list_issues_paginated() {
         GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_issues("octocat", "hello-world", &mergepilot_lib::models::IssueState::Open, 1)
+        .list_issues("octocat", "hello-world", &mergebeacon_lib::models::IssueState::Open, 1)
         .await
         .expect("should list issues");
 
@@ -507,7 +507,7 @@ async fn test_gitee_list_issues_single_page() {
         GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result = adapter
-        .list_issues("octocat", "hello-world", &mergepilot_lib::models::IssueState::Open, 1)
+        .list_issues("octocat", "hello-world", &mergebeacon_lib::models::IssueState::Open, 1)
         .await
         .expect("should list issues");
 
@@ -675,8 +675,8 @@ async fn test_gitee_rejects_unsupported_review_without_request() {
         .with_base_url(format!("{}/api/v5", mock_server.uri()));
 
     let result =
-        adapter.create_review("owner", "repo", 1, "approve", &mergepilot_lib::models::ReviewEvent::Approve, &[]).await;
+        adapter.create_review("owner", "repo", 1, "approve", &mergebeacon_lib::models::ReviewEvent::Approve, &[]).await;
 
-    assert!(matches!(result, Err(mergepilot_lib::error::AppError::NotImplemented(_))));
+    assert!(matches!(result, Err(mergebeacon_lib::error::AppError::NotImplemented(_))));
     assert!(mock_server.received_requests().await.unwrap().is_empty());
 }

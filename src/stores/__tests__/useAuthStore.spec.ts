@@ -49,19 +49,35 @@ describe("useAuthStore session restore", () => {
   });
 
   it("忽略损坏或非法的平台可见性持久化数据", () => {
-    storage.set("mergepilot:platformVisibility", "{invalid-json");
+    storage.set("mergebeacon:platformVisibility", "{invalid-json");
     expect(useAuthStore().platformVisibility).toEqual({ github: true, gitlab: true, gitee: true });
 
     setActivePinia(createPinia());
     storage.set(
-      "mergepilot:platformVisibility",
+      "mergebeacon:platformVisibility",
       JSON.stringify({ github: false, gitlab: false, gitee: false, unknown: true }),
     );
     expect(useAuthStore().platformVisibility).toEqual({ github: true, gitlab: true, gitee: true });
   });
 
-  it("优先恢复上次使用的平台", async () => {
+  it("迁移旧品牌的本地平台设置", () => {
     storage.set("mergepilot:activePlatform", "gitlab");
+    storage.set(
+      "mergepilot:platformVisibility",
+      JSON.stringify({ github: true, gitlab: false, gitee: true }),
+    );
+
+    const store = useAuthStore();
+
+    expect(store.activePlatform).toBe("gitlab");
+    expect(store.platformVisibility.gitlab).toBe(false);
+    expect(storage.get("mergebeacon:activePlatform")).toBe("gitlab");
+    expect(storage.has("mergepilot:activePlatform")).toBe(false);
+    expect(storage.has("mergepilot:platformVisibility")).toBe(false);
+  });
+
+  it("优先恢复上次使用的平台", async () => {
+    storage.set("mergebeacon:activePlatform", "gitlab");
     vi.mocked(authHasToken).mockResolvedValue(true);
     vi.mocked(authCheck).mockResolvedValue(user);
     const store = useAuthStore();
@@ -73,7 +89,7 @@ describe("useAuthStore session restore", () => {
   });
 
   it("上次平台无 Token 时恢复其他已登录平台", async () => {
-    storage.set("mergepilot:activePlatform", "github");
+    storage.set("mergebeacon:activePlatform", "github");
     vi.mocked(authHasToken).mockImplementation(async (platform) => platform === "gitee");
     vi.mocked(authCheck).mockResolvedValue(user);
     const store = useAuthStore();
@@ -81,10 +97,10 @@ describe("useAuthStore session restore", () => {
     expect(await store.restoreSession()).toBe(true);
     expect(store.activePlatform).toBe("gitee");
     expect(store.platforms.gitee.isLoggedIn).toBe(true);
-    expect(storage.get("mergepilot:activePlatform")).toBe("gitee");
+    expect(storage.get("mergebeacon:activePlatform")).toBe("gitee");
   });
   it("指定未登录平台时不回退到其他已登录平台", async () => {
-    storage.set("mergepilot:activePlatform", "gitee");
+    storage.set("mergebeacon:activePlatform", "gitee");
     vi.mocked(authHasToken).mockImplementation(async (platform) => platform === "github");
     vi.mocked(authCheck).mockResolvedValue(user);
     const store = useAuthStore();

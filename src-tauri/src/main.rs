@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    mergepilot_lib::run()
+    mergebeacon_lib::run()
 }

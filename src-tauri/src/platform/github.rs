@@ -56,7 +56,7 @@ impl GitHubAdapter {
                     let resp = c
                         .get(&url)
                         .header("Authorization", &a)
-                        .header("User-Agent", "mergepilot")
+                        .header("User-Agent", "mergebeacon")
                         .header("Accept", "application/vnd.github.v3+json")
                         .send()
                         .await
@@ -88,7 +88,7 @@ impl GitHubAdapter {
             .client
             .get(url)
             .header("Authorization", &self.auth_header())
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .await?;
@@ -133,7 +133,7 @@ impl GitHubAdapter {
             .client
             .get(url)
             .header("Authorization", &self.auth_header())
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .header("Accept", "application/vnd.github.v3.diff")
             .send()
             .await?;
@@ -150,7 +150,7 @@ impl GitHubAdapter {
             .client
             .post(url)
             .header("Authorization", &self.auth_header())
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .header("Accept", "application/vnd.github.v3+json")
             .json(body)
             .send()
@@ -168,7 +168,7 @@ impl GitHubAdapter {
             .client
             .put(url)
             .header("Authorization", &self.auth_header())
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .header("Accept", "application/vnd.github.v3+json")
             .json(body)
             .send()
@@ -188,7 +188,7 @@ impl GitHubAdapter {
             .raw_client()
             .patch(url)
             .header("Authorization", &self.auth_header())
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .header("Accept", "application/vnd.github.v3+json")
             .json(body)
             .send()
@@ -240,7 +240,7 @@ impl GitPlatform for GitHubAdapter {
             .raw_client()
             .get(&url)
             .header("Authorization", &self.auth_header())
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .await?;
@@ -262,7 +262,7 @@ impl GitPlatform for GitHubAdapter {
             let (parent_full_name, parent_owner) = if fork {
                 let mut pn = r["parent"]["full_name"].as_str().map(|s| s.to_string());
                 let mut po = r["parent"]["owner"]["login"].as_str().map(|s| s.to_string());
-                eprintln!("[mergepilot] fork repo: {} parent_full_name={:?} parent_owner={:?}", full_name, pn, po);
+                eprintln!("[mergebeacon] fork repo: {} parent_full_name={:?} parent_owner={:?}", full_name, pn, po);
                 // Fallback: fetch repo detail if parent info missing from list endpoint
                 if pn.is_none() || po.is_none() {
                     let detail_url = format!("{}/repos/{}", self.base_url, full_name);
@@ -270,7 +270,7 @@ impl GitPlatform for GitHubAdapter {
                         pn = detail["parent"]["full_name"].as_str().map(|s| s.to_string());
                         po = detail["parent"]["owner"]["login"].as_str().map(|s| s.to_string());
                         eprintln!(
-                            "[mergepilot] fork repo fallback: {} parent_full_name={:?} parent_owner={:?}",
+                            "[mergebeacon] fork repo fallback: {} parent_full_name={:?} parent_owner={:?}",
                             full_name, pn, po
                         );
                     }
@@ -326,7 +326,7 @@ impl GitPlatform for GitHubAdapter {
             .raw_client()
             .get(&url)
             .header("Authorization", &self.auth_header())
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .header("Accept", "application/vnd.github.v3+json")
             .send()
             .await?;

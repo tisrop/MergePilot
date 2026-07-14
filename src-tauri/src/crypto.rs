@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 ///
 /// This ensures that even if someone copies the config file to another machine
 /// with a different username, the data cannot be decrypted.
+// These legacy identifiers are part of the persisted ciphertext format, not display branding.
 fn derive_key() -> [u8; 32] {
     let app_secret: &[u8] = b"mergepilot-aes256-v1-ae7f3c9d";
 

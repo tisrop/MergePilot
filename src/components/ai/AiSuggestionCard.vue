@@ -28,9 +28,7 @@ const severityLabel: Record<Severity, string> = {
   <div class="suggestion-card" :class="`severity-${suggestion.severity}`">
     <div class="card-header">
       <span class="severity font-mono" :style="{ color: severityIcon[suggestion.severity] }">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="12" cy="12" r="10" />
-        </svg>
+        <span class="severity-signal" :class="`signal-${suggestion.severity}`" aria-hidden="true" />
         {{ severityLabel[suggestion.severity] }}
       </span>
       <span class="category">{{ suggestion.category }}</span>
@@ -170,6 +168,35 @@ const severityLabel: Record<Severity, string> = {
   gap: var(--space-2);
   margin-bottom: var(--space-2);
   flex-wrap: wrap;
+}
+
+.severity-signal {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.signal-critical {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, currentColor 18%, transparent),
+    0 0 11px currentColor;
+}
+
+.signal-major {
+  width: 9px;
+  height: 9px;
+}
+.signal-minor {
+  background: transparent;
+}
+.signal-info {
+  width: 7px;
+  height: 7px;
+  background: transparent;
 }
 
 .severity {

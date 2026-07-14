@@ -114,13 +114,13 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 <template>
   <aside class="sidebar">
     <div class="sidebar-header">
-      <router-link to="/" class="logo" aria-label="MergePilot 首页">
+      <router-link to="/" class="logo" aria-label="MergeBeacon 首页">
         <span class="logo-mark" aria-hidden="true">
           <BrandMark />
         </span>
-        <span>MergePilot</span>
+        <span>MergeBeacon</span>
       </router-link>
-      <span class="app-caption">Code Merge Workspace</span>
+      <span class="app-caption">PR Review Workspace</span>
     </div>
 
     <div class="platform-selector">
@@ -315,7 +315,8 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 <style scoped>
 .sidebar {
   width: var(--sidebar-width);
-  background: var(--color-surface);
+  background:
+    linear-gradient(180deg, rgba(113, 135, 255, 0.045), transparent 150px), var(--color-surface);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -350,7 +351,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   justify-content: center;
   border-radius: 9px;
   color: var(--color-brand-accent);
-  background: linear-gradient(145deg, #294f78, var(--color-primary-hover));
+  background: var(--gradient-beacon);
   box-shadow: 0 5px 12px rgba(20, 43, 73, 0.22);
 }
 

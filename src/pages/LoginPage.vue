@@ -77,8 +77,8 @@ async function handleLogin() {
         <div class="intro-mark" aria-hidden="true">
           <BrandMark />
         </div>
-        <p class="intro-kicker">MERGE WORKSPACE</p>
-        <p class="intro-title">让每一次合并都更清晰、更可靠</p>
+        <p class="intro-kicker">REVIEW SIGNALS</p>
+        <p class="intro-title">发现关键信号，放心完成每一次合并</p>
         <p>在一个工作台中管理多平台仓库、代码差异、评审意见与 AI 建议。</p>
         <ul>
           <li><span>01</span> GitHub、GitLab 与 Gitee 统一工作流</li>
@@ -92,9 +92,9 @@ async function handleLogin() {
           <span class="login-brand-mark" aria-hidden="true">
             <BrandMark />
           </span>
-          <h1>MergePilot</h1>
+          <h1>MergeBeacon</h1>
         </div>
-        <p class="subtitle">登录代码托管平台，开始你的合并工作流</p>
+        <p class="subtitle">连接代码托管平台，开始评审与 Issue 管理</p>
 
         <div class="form-group">
           <label>平台</label>
@@ -192,8 +192,8 @@ async function handleLogin() {
   justify-content: center;
   padding: var(--space-8);
   background:
-    radial-gradient(circle at 15% 15%, rgba(57, 120, 189, 0.13), transparent 32%),
-    radial-gradient(circle at 85% 90%, rgba(19, 125, 104, 0.1), transparent 28%), var(--color-bg);
+    radial-gradient(circle at 15% 15%, rgba(113, 135, 255, 0.15), transparent 32%),
+    radial-gradient(circle at 85% 90%, rgba(85, 224, 204, 0.12), transparent 28%), var(--color-bg);
 }
 
 .login-shell {
@@ -217,7 +217,7 @@ async function handleLogin() {
   overflow: hidden;
   color: #fff;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.06), transparent 40%), var(--color-primary);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), transparent 40%), var(--gradient-beacon);
 }
 
 .login-intro::after {
@@ -239,10 +239,10 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   margin-bottom: var(--space-8);
-  border: 1px solid rgba(112, 222, 197, 0.38);
+  border: 1px solid rgba(85, 224, 204, 0.42);
   border-radius: var(--radius-lg);
   color: var(--color-brand-accent);
-  background: rgba(112, 222, 197, 0.09);
+  background: linear-gradient(145deg, rgba(85, 224, 204, 0.16), rgba(113, 135, 255, 0.1));
   box-shadow: 0 8px 22px rgba(7, 24, 43, 0.16);
 }
 
@@ -320,7 +320,7 @@ async function handleLogin() {
   flex-shrink: 0;
   border-radius: 10px;
   color: var(--color-brand-accent);
-  background: linear-gradient(145deg, #294f78, var(--color-primary-hover));
+  background: var(--gradient-beacon);
   box-shadow: 0 6px 16px rgba(20, 43, 73, 0.18);
 }
 

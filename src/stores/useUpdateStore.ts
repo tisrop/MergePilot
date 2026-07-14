@@ -10,13 +10,22 @@ import {
 import type { UpdateCheckResult } from "@/types";
 import { getErrorMessage } from "@/utils/error";
 
-const AUTO_UPDATE_CHECK_KEY = "mergepilot:auto-update-check";
-const LAST_UPDATE_CHECK_KEY = "mergepilot:last-update-check";
+const AUTO_UPDATE_CHECK_KEY = "mergebeacon:auto-update-check";
+const LAST_UPDATE_CHECK_KEY = "mergebeacon:last-update-check";
+const LEGACY_KEY_PREFIX = "mergepilot:";
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function readUpdateStorage(key: string): string | null {
   try {
-    return localStorage.getItem(key);
+    const value = localStorage.getItem(key);
+    if (value !== null) return value;
+    const legacyKey = key.replace("mergebeacon:", LEGACY_KEY_PREFIX);
+    const legacyValue = localStorage.getItem(legacyKey);
+    if (legacyValue !== null) {
+      localStorage.setItem(key, legacyValue);
+      localStorage.removeItem(legacyKey);
+    }
+    return legacyValue;
   } catch {
     return null;
   }

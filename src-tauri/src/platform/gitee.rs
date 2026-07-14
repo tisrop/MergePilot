@@ -53,7 +53,7 @@ impl GiteeAdapter {
             let full_url = format!("{}{}{}", url, sep, auth);
             let c = client.clone();
             futs.push(tokio::spawn(async move {
-                let resp = c.get(&full_url).header("User-Agent", "mergepilot").send().await.ok()?;
+                let resp = c.get(&full_url).header("User-Agent", "mergebeacon").send().await.ok()?;
                 let json: Value = resp.json().await.ok()?;
                 let name = json["name"].as_str()?.to_string();
                 Some((login, name))
@@ -66,7 +66,7 @@ impl GiteeAdapter {
             let full_url = format!("{}{}{}", url, sep, auth);
             let c = client.clone();
             futs.push(tokio::spawn(async move {
-                let resp = c.get(&full_url).header("User-Agent", "mergepilot").send().await.ok()?;
+                let resp = c.get(&full_url).header("User-Agent", "mergebeacon").send().await.ok()?;
                 let json: Value = resp.json().await.ok()?;
                 let name = json["name"].as_str()?.to_string();
                 Some((login, name))
@@ -119,7 +119,7 @@ impl GiteeAdapter {
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
 
-        let resp = self.client.get(&full_url).header("User-Agent", "mergepilot").send().await?.error_for_status()?;
+        let resp = self.client.get(&full_url).header("User-Agent", "mergebeacon").send().await?.error_for_status()?;
         Ok(resp.json().await?)
     }
 
@@ -130,7 +130,7 @@ impl GiteeAdapter {
         let resp = self
             .client
             .post(&full_url)
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .json(body)
             .send()
             .await?
@@ -146,7 +146,7 @@ impl GiteeAdapter {
             .client
             .raw_client()
             .patch(&full_url)
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .json(body)
             .send()
             .await?
@@ -181,7 +181,7 @@ impl GitPlatform for GiteeAdapter {
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
 
-        let resp = self.client.get(&full_url).header("User-Agent", "mergepilot").send().await?;
+        let resp = self.client.get(&full_url).header("User-Agent", "mergebeacon").send().await?;
 
         let link_header = resp.headers().get("link").and_then(|v| v.to_str().ok());
         let last_page = resp
@@ -280,7 +280,7 @@ impl GitPlatform for GiteeAdapter {
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
 
-        let resp = self.client.get(&full_url).header("User-Agent", "mergepilot").send().await?;
+        let resp = self.client.get(&full_url).header("User-Agent", "mergebeacon").send().await?;
 
         let header_total_count =
             resp.headers().get("total_count").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u32>().ok());
@@ -577,7 +577,7 @@ impl GitPlatform for GiteeAdapter {
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
 
-        let resp = self.client.get(&full_url).header("User-Agent", "mergepilot").send().await?;
+        let resp = self.client.get(&full_url).header("User-Agent", "mergebeacon").send().await?;
 
         let link_header = resp.headers().get("link").and_then(|v| v.to_str().ok());
         let last_page = Self::parse_last_page_gitee(link_header, page);
@@ -675,7 +675,7 @@ impl GitPlatform for GiteeAdapter {
         }
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
-        let resp = self.client.put(&full_url).header("User-Agent", "mergepilot").json(&payload).send().await?;
+        let resp = self.client.put(&full_url).header("User-Agent", "mergebeacon").json(&payload).send().await?;
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
             let detail = serde_json::from_str::<Value>(&body)

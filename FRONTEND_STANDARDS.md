@@ -1,6 +1,6 @@
-# MergePilot 前端设计与实现规范
+# MergeBeacon 前端设计与实现规范
 
-本文是 MergePilot 前端页面、组件和样式的强制基线，适用于 `src/` 下的 Vue、TypeScript、
+本文是 MergeBeacon 前端页面、组件和样式的强制基线，适用于 `src/` 下的 Vue、TypeScript、
 CSS、静态资源和前端测试。它是 [`CODE_STANDARDS.md`](CODE_STANDARDS.md) 的前端专项扩展；
 `AGENTS.md` 中的产品与工程约束仍同时生效。
 

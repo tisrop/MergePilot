@@ -63,7 +63,7 @@ impl AiClient {
             .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .json(&body)
             .send()
             .await?;
@@ -106,7 +106,7 @@ impl AiClient {
             .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .header("Accept", "text/event-stream")
             .json(&body)
             .send()
@@ -205,7 +205,7 @@ impl AiClient {
             .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .send()
             .await?;
 

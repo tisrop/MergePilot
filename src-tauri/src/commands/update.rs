@@ -19,7 +19,7 @@ const RELEASE_NOTES_TRUNCATED_SUFFIX: &str = "\n\n[更新说明过长，已截�
 const WINDOWS_PORTABLE_URL_PATH: [&str; 3] = ["portable", "windows-x86_64", "url"];
 const WINDOWS_PORTABLE_SIGNATURE_PATH: [&str; 3] = ["portable", "windows-x86_64", "signature"];
 const MAX_UPDATE_SIGNATURE_BYTES: usize = 16 * 1024;
-const RELEASE_DOWNLOAD_BASE: &str = "https://github.com/tisrop/MergePilot/releases/download";
+const RELEASE_DOWNLOAD_BASE: &str = "https://github.com/tisrop/MergeBeacon/releases/download";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,7 +85,7 @@ fn ensure_installer_update_mode(mode: UpdateMode) -> Result<(), String> {
 
 fn expected_portable_download_url(version: &str) -> Result<String, String> {
     validate_expected_version(version)?;
-    Ok(format!("{RELEASE_DOWNLOAD_BASE}/v{version}/MergePilot_{version}_x64-portable.exe"))
+    Ok(format!("{RELEASE_DOWNLOAD_BASE}/v{version}/MergeBeacon_{version}_x64-portable.exe"))
 }
 
 fn metadata_string<'a>(release: &'a serde_json::Value, path: &[&str]) -> Option<&'a str> {
@@ -225,7 +225,7 @@ try {
   $deadline = (Get-Date).AddSeconds(60)
   while ($null -ne (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue)) {
     if ((Get-Date) -ge $deadline) {
-      throw "Timed out waiting for MergePilot to exit"
+      throw "Timed out waiting for MergeBeacon to exit"
     }
     Start-Sleep -Milliseconds 100
   }
@@ -246,7 +246,7 @@ try {
     Start-Sleep -Seconds 3
     $newProcess.Refresh()
     if ($newProcess.HasExited) {
-      throw "New MergePilot exited during startup"
+      throw "New MergeBeacon exited during startup"
     }
     $newVersionRunning = $true
   } catch {
@@ -298,10 +298,10 @@ try {
 fn portable_update_file_names(request_id: &str) -> Result<(String, String, String, String), String> {
     validate_update_request_id(request_id)?;
     Ok((
-        format!(".mergepilot-update-{request_id}.exe"),
-        format!(".mergepilot-backup-{request_id}.exe"),
-        format!("mergepilot-portable-update-{request_id}.ps1"),
-        format!("mergepilot-portable-update-{request_id}.log"),
+        format!(".mergebeacon-update-{request_id}.exe"),
+        format!(".mergebeacon-backup-{request_id}.exe"),
+        format!("mergebeacon-portable-update-{request_id}.ps1"),
+        format!("mergebeacon-portable-update-{request_id}.log"),
     ))
 }
 
@@ -316,11 +316,11 @@ fn stage_portable_replacement(request_id: &str, bytes: &[u8]) -> Result<(), Stri
 
     let current_exe = std::env::current_exe().map_err(|_| "无法确定当前便携版 EXE 位置，已停止更新".to_string())?;
     let parent = current_exe.parent().ok_or_else(|| "当前便携版 EXE 路径无效，已停止更新".to_string())?;
-    let staged_exe = parent.join(format!(".mergepilot-update-{request_id}.exe"));
-    let backup_exe = parent.join(format!(".mergepilot-backup-{request_id}.exe"));
+    let staged_exe = parent.join(format!(".mergebeacon-update-{request_id}.exe"));
+    let backup_exe = parent.join(format!(".mergebeacon-backup-{request_id}.exe"));
     let temp_dir = std::env::temp_dir();
-    let helper_script = temp_dir.join(format!("mergepilot-portable-update-{request_id}.ps1"));
-    let log_file = temp_dir.join(format!("mergepilot-portable-update-{request_id}.log"));
+    let helper_script = temp_dir.join(format!("mergebeacon-portable-update-{request_id}.ps1"));
+    let log_file = temp_dir.join(format!("mergebeacon-portable-update-{request_id}.log"));
 
     let mut staged = OpenOptions::new()
         .write(true)
@@ -613,7 +613,7 @@ mod tests {
         let release = json!({
             "portable": {
                 "windows-x86_64": {
-                    "url": "https://github.com/tisrop/MergePilot/releases/download/v0.4.0/MergePilot_0.4.0_x64-portable.exe",
+                    "url": "https://github.com/tisrop/MergeBeacon/releases/download/v0.4.0/MergeBeacon_0.4.0_x64-portable.exe",
                     "signature": "trusted-portable-signature"
                 }
             }
@@ -621,7 +621,7 @@ mod tests {
         assert_eq!(
             portable_download_details(&release, "0.4.0"),
             Ok((
-                "https://github.com/tisrop/MergePilot/releases/download/v0.4.0/MergePilot_0.4.0_x64-portable.exe"
+                "https://github.com/tisrop/MergeBeacon/releases/download/v0.4.0/MergeBeacon_0.4.0_x64-portable.exe"
                     .into(),
                 "trusted-portable-signature".into(),
             ))
@@ -630,7 +630,7 @@ mod tests {
         let installer = json!({
             "portable": {
                 "windows-x86_64": {
-                    "url": "https://github.com/tisrop/MergePilot/releases/download/v0.4.0/Merge.Pilot_0.4.0_x64_en-US.msi",
+                    "url": "https://github.com/tisrop/MergeBeacon/releases/download/v0.4.0/Merge.Pilot_0.4.0_x64_en-US.msi",
                     "signature": "signature"
                 }
             }
@@ -642,7 +642,7 @@ mod tests {
         let archive = json!({
             "portable": {
                 "windows-x86_64": {
-                    "url": "https://github.com/tisrop/MergePilot/releases/download/v0.4.0/MergePilot_0.4.0_x64-portable.zip",
+                    "url": "https://github.com/tisrop/MergeBeacon/releases/download/v0.4.0/MergeBeacon_0.4.0_x64-portable.zip",
                     "signature": "signature"
                 }
             }
@@ -659,7 +659,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_empty_or_oversized_portable_signatures() {
-        let url = "https://github.com/tisrop/MergePilot/releases/download/v0.4.0/MergePilot_0.4.0_x64-portable.exe";
+        let url = "https://github.com/tisrop/MergeBeacon/releases/download/v0.4.0/MergeBeacon_0.4.0_x64-portable.exe";
         let missing = json!({ "portable": { "windows-x86_64": { "url": url } } });
         assert_eq!(
             portable_download_details(&missing, "0.4.0"),
@@ -682,10 +682,10 @@ mod tests {
         assert_eq!(
             portable_update_file_names("safe-request-1"),
             Ok((
-                ".mergepilot-update-safe-request-1.exe".into(),
-                ".mergepilot-backup-safe-request-1.exe".into(),
-                "mergepilot-portable-update-safe-request-1.ps1".into(),
-                "mergepilot-portable-update-safe-request-1.log".into(),
+                ".mergebeacon-update-safe-request-1.exe".into(),
+                ".mergebeacon-backup-safe-request-1.exe".into(),
+                "mergebeacon-portable-update-safe-request-1.ps1".into(),
+                "mergebeacon-portable-update-safe-request-1.log".into(),
             ))
         );
         assert_eq!(portable_update_file_names("../unsafe"), Err("更新请求标识格式无效".into()));
@@ -698,7 +698,7 @@ mod tests {
         assert!(PORTABLE_UPDATE_HELPER_SCRIPT.contains("Move-Item -LiteralPath $StagedExe -Destination $CurrentExe"));
         assert!(PORTABLE_UPDATE_HELPER_SCRIPT.contains("Move-Item -LiteralPath $BackupExe -Destination $CurrentExe"));
         assert!(PORTABLE_UPDATE_HELPER_SCRIPT.contains("Start-Process -FilePath $CurrentExe"));
-        assert!(PORTABLE_UPDATE_HELPER_SCRIPT.contains("New MergePilot exited during startup"));
+        assert!(PORTABLE_UPDATE_HELPER_SCRIPT.contains("New MergeBeacon exited during startup"));
         assert!(PORTABLE_UPDATE_HELPER_SCRIPT.contains("Remove-Item -LiteralPath $PSCommandPath"));
     }
 }

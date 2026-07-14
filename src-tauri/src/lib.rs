@@ -63,7 +63,7 @@ pub fn run() {
             let settings = MenuItem::with_id(app, "open-settings", "设置...", true, Some("Cmd+,"))?;
             let app_menu = Submenu::with_items(
                 app,
-                "MergePilot",
+                "MergeBeacon",
                 true,
                 &[&settings, &PredefinedMenuItem::separator(app)?, &PredefinedMenuItem::quit(app, None)?],
             )?;

@@ -2,25 +2,28 @@
 
 :root {
   /* Color system: professional light workspace */
-  --color-bg: #f3f6fa;
-  --color-bg-accent: #eaf0f8;
+  --color-bg: #f4f7fb;
+  --color-bg-accent: #e9eefc;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
   --color-surface-hover: #f5f7fa;
-  --color-border: #dfe5ed;
+  --color-border: #dce3ed;
   --color-border-light: #edf1f5;
   --color-text: #172033;
   --color-text-secondary: #5f6b7a;
   --color-text-tertiary: #8793a3;
-  --color-primary: #1e3a5f;
-  --color-primary-hover: #142b49;
-  --color-primary-active: #0f223b;
-  --color-primary-light: #eaf1f8;
-  --color-primary-border: #c5d4e5;
-  --color-brand-accent: #70dec5;
-  --color-brand-accent-strong: #48c6ae;
-  --color-brand-accent-soft: #e5f8f3;
-  --color-focus: #3978bd;
+  --color-primary: #243d78;
+  --color-primary-hover: #1a2d5d;
+  --color-primary-active: #111f45;
+  --color-primary-light: #edf1fb;
+  --color-primary-border: #cbd5ee;
+  --color-brand-accent: #55e0cc;
+  --color-brand-accent-strong: #20ad9b;
+  --color-brand-accent-soft: #e5faf6;
+  --color-beacon-indigo: #7187ff;
+  --color-beacon-navy: #101d36;
+  --gradient-beacon: linear-gradient(145deg, #182b4d 0%, #101d36 58%, #243d78 100%);
+  --color-focus: #526fe0;
   --color-danger: #c93636;
   --color-danger-light: #fff1f1;
   --color-danger-border: #f1c3c3;
@@ -119,7 +122,7 @@ button {
 }
 
 :where(a, button, input, textarea, select, [tabindex]):focus-visible {
-  outline: 3px solid rgba(57, 120, 189, 0.28);
+  outline: 3px solid rgba(82, 111, 224, 0.28);
   outline-offset: 2px;
 }
 

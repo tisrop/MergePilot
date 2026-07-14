@@ -47,7 +47,7 @@ describe("SettingsPage 诊断信息", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     storage.clear();
-    storage.set("mergepilot:auto-update-check", "false");
+    storage.set("mergebeacon:auto-update-check", "false");
     setActivePinia(createPinia());
     vi.mocked(copySupportInfo).mockReset();
     vi.mocked(getAppVersion).mockResolvedValue("0.3.0");
@@ -416,17 +416,17 @@ describe("SettingsPage 诊断信息", () => {
   });
 
   it("允许关闭自动检查且不记录敏感网络数据", async () => {
-    storage.set("mergepilot:auto-update-check", "true");
-    storage.set("mergepilot:last-update-check", String(Date.now()));
+    storage.set("mergebeacon:auto-update-check", "true");
+    storage.set("mergebeacon:last-update-check", String(Date.now()));
     const wrapper = mountPage();
     const toggle = wrapper.get<HTMLInputElement>('input[aria-label="每日自动检查更新"]');
 
     await toggle.setValue(false);
 
-    expect(storage.get("mergepilot:auto-update-check")).toBe("false");
+    expect(storage.get("mergebeacon:auto-update-check")).toBe("false");
     expect([...storage.keys()].sort()).toEqual([
-      "mergepilot:auto-update-check",
-      "mergepilot:last-update-check",
+      "mergebeacon:auto-update-check",
+      "mergebeacon:last-update-check",
     ]);
   });
 });

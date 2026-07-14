@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::{decrypt, encrypt};
 use crate::error::AppError;
 
-const KEYRING_SERVICE: &str = "com.mergepilot";
+const KEYRING_SERVICE: &str = "com.mergebeacon";
+const LEGACY_KEYRING_SERVICE: &str = "com.mergepilot";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -58,7 +59,11 @@ impl TokenVault {
     }
 
     fn storage_dir_path() -> Option<PathBuf> {
-        directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".mergepilot"))
+        directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".mergebeacon"))
+    }
+
+    fn legacy_config_path() -> Option<PathBuf> {
+        directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".mergepilot/config.json"))
     }
 
     fn config_path() -> Result<PathBuf, AppError> {
@@ -68,6 +73,13 @@ impl TokenVault {
     fn read_config() -> Result<HashMap<String, String>, AppError> {
         let path = Self::config_path()?;
         if !path.exists() {
+            if let Some(legacy_path) = Self::legacy_config_path().filter(|path| path.exists()) {
+                let content = fs::read_to_string(&legacy_path)?;
+                let config: HashMap<String, String> = serde_json::from_str(&content)?;
+                Self::write_config(&config)?;
+                fs::remove_file(legacy_path)?;
+                return Ok(config);
+            }
             return Ok(HashMap::new());
         }
         let content = fs::read_to_string(path)?;
@@ -105,8 +117,16 @@ impl TokenVault {
         matches!(keyring::default::default_credential_builder().persistence(), CredentialPersistence::UntilDelete)
     }
 
+    fn keyring_entry_for(service: &str, platform: &str) -> Result<keyring::Entry, keyring::Error> {
+        keyring::Entry::new(service, &format!("git-platform:{platform}"))
+    }
+
     fn keyring_entry(platform: &str) -> Result<keyring::Entry, keyring::Error> {
-        keyring::Entry::new(KEYRING_SERVICE, &format!("git-platform:{platform}"))
+        Self::keyring_entry_for(KEYRING_SERVICE, platform)
+    }
+
+    fn legacy_keyring_entry(platform: &str) -> Result<keyring::Entry, keyring::Error> {
+        Self::keyring_entry_for(LEGACY_KEYRING_SERVICE, platform)
     }
 
     fn store_encrypted(platform: &str, token: &str) -> Result<(), AppError> {
@@ -149,6 +169,15 @@ impl TokenVault {
                     }
                     Err(keyring::Error::NoEntry) => {}
                     Err(_) => {}
+                }
+            }
+            if let Ok(legacy_entry) = Self::legacy_keyring_entry(platform) {
+                if let Ok(token) = legacy_entry.get_password() {
+                    self.store_token(platform, &token)?;
+                    legacy_entry.delete_credential().map_err(|error| {
+                        AppError::Unknown(format!("Failed to remove legacy token from system keyring: {error}"))
+                    })?;
+                    return Ok(Some(token));
                 }
             }
         }
@@ -211,6 +240,15 @@ impl TokenVault {
             },
             Err(error) => Some(error.to_string()),
         };
+        if let Ok(entry) = Self::legacy_keyring_entry(platform) {
+            if let Err(error) = entry.delete_credential() {
+                if !matches!(error, keyring::Error::NoEntry) && keyring_error.is_none() {
+                    return Err(AppError::Unknown(format!(
+                        "Failed to remove legacy token from system keyring: {error}"
+                    )));
+                }
+            }
+        }
         let mut config = Self::read_config()?;
         config.remove(&format!("token_encrypted_{platform}"));
         config.remove(&format!("token_{platform}"));
@@ -269,8 +307,8 @@ mod tests {
         let storage_dir = TokenVault::storage_dir_path().expect("platform user home should exist");
         let base_dirs = directories::BaseDirs::new().expect("platform user directories should exist");
 
-        assert_eq!(storage_dir, base_dirs.home_dir().join(".mergepilot"));
-        assert_ne!(storage_dir, std::path::PathBuf::from(".mergepilot"));
+        assert_eq!(storage_dir, base_dirs.home_dir().join(".mergebeacon"));
+        assert_ne!(storage_dir, std::path::PathBuf::from(".mergebeacon"));
     }
 
     #[test]

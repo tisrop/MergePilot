@@ -49,6 +49,16 @@ describe("useUpdateStore", () => {
     vi.mocked(restartAfterUpdate).mockReset();
   });
 
+  it("迁移旧品牌的自动更新设置", () => {
+    localStorage.setItem("mergepilot:auto-update-check", "false");
+
+    const store = useUpdateStore();
+
+    expect(store.isAutoUpdateCheckEnabled).toBe(false);
+    expect(localStorage.getItem("mergebeacon:auto-update-check")).toBe("false");
+    expect(localStorage.getItem("mergepilot:auto-update-check")).toBeNull();
+  });
+
   it("启动后台检查后记录时间并在一天内避免重复请求", async () => {
     vi.mocked(checkForUpdates).mockResolvedValue(noUpdate);
     const store = useUpdateStore();
@@ -57,12 +67,12 @@ describe("useUpdateStore", () => {
     await store.maybeCheckForUpdatesInBackground();
 
     expect(checkForUpdates).toHaveBeenCalledOnce();
-    expect(storage.get("mergepilot:last-update-check")).toBeTruthy();
+    expect(storage.get("mergebeacon:last-update-check")).toBeTruthy();
     expect(store.updateResult).toEqual(noUpdate);
   });
 
   it("用户关闭自动检查后启动不发起请求", async () => {
-    storage.set("mergepilot:auto-update-check", "false");
+    storage.set("mergebeacon:auto-update-check", "false");
     const store = useUpdateStore();
 
     await store.maybeCheckForUpdatesInBackground();

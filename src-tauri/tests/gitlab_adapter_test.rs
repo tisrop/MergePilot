@@ -1,7 +1,7 @@
-use mergepilot_lib::error::AppError;
-use mergepilot_lib::http_client::HttpClient;
-use mergepilot_lib::models::{PrState, ReviewEvent};
-use mergepilot_lib::platform::{gitlab::GitLabAdapter, GitPlatform};
+use mergebeacon_lib::error::AppError;
+use mergebeacon_lib::http_client::HttpClient;
+use mergebeacon_lib::models::{PrState, ReviewEvent};
+use mergebeacon_lib::platform::{gitlab::GitLabAdapter, GitPlatform};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

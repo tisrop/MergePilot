@@ -33,7 +33,7 @@ impl GitLabAdapter {
             .client
             .get(url)
             .header("PRIVATE-TOKEN", &self.token)
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .send()
             .await?
             .error_for_status()?;
@@ -45,7 +45,7 @@ impl GitLabAdapter {
             .client
             .post(url)
             .header("PRIVATE-TOKEN", &self.token)
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .json(body)
             .send()
             .await?
@@ -58,7 +58,7 @@ impl GitLabAdapter {
             .client
             .put(url)
             .header("PRIVATE-TOKEN", &self.token)
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .json(body)
             .send()
             .await?
@@ -93,7 +93,7 @@ impl GitPlatform for GitLabAdapter {
             .client
             .get(&url)
             .header("PRIVATE-TOKEN", &self.token)
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .send()
             .await?;
         let total_count = resp
@@ -185,7 +185,7 @@ impl GitPlatform for GitLabAdapter {
             .raw_client()
             .get(&url)
             .header("PRIVATE-TOKEN", &self.token)
-            .header("User-Agent", "mergepilot")
+            .header("User-Agent", "mergebeacon")
             .send()
             .await?
             .error_for_status()?;

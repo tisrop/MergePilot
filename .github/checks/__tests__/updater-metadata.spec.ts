@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { assembleUpdaterMetadata, createUpdaterFragment } from "../updater-metadata.mjs";
 
 const FIXTURE_VERSION = "0.3.5";
-const FIXTURE_RELEASE_DOWNLOAD_URL = `https://github.com/tisrop/MergePilot/releases/download/v${FIXTURE_VERSION}`;
+const FIXTURE_RELEASE_DOWNLOAD_URL = `https://github.com/tisrop/MergeBeacon/releases/download/v${FIXTURE_VERSION}`;
 
 async function signatureFile(directory: string, name: string, signature: string) {
   const path = join(directory, name);
@@ -25,7 +25,7 @@ function fragment(platform: string, assetName: string, version = FIXTURE_VERSION
     ...(platform === "windows-x86_64"
       ? {
           portable: {
-            asset_name: `MergePilot_${version}_x64-portable.exe`,
+            asset_name: `MergeBeacon_${version}_x64-portable.exe`,
             signature: "signature-windows-portable",
           },
         }
@@ -34,64 +34,64 @@ function fragment(platform: string, assetName: string, version = FIXTURE_VERSION
 }
 
 function portableAsset(version = FIXTURE_VERSION, releaseName = `v${version}`) {
-  const name = `MergePilot_${version}_x64-portable.exe`;
+  const name = `MergeBeacon_${version}_x64-portable.exe`;
   return {
     name,
     label: "",
-    browser_download_url: `https://github.com/tisrop/MergePilot/releases/download/${releaseName}/${name}`,
+    browser_download_url: `https://github.com/tisrop/MergeBeacon/releases/download/${releaseName}/${name}`,
   };
 }
 
 describe("updater 元数据汇总", () => {
   it("从 macOS Tauri 产物生成架构隔离的分片", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "mergepilot-updater-"));
+    const directory = await mkdtemp(join(tmpdir(), "mergebeacon-updater-"));
     const signature = await signatureFile(
       directory,
-      "Merge Pilot.app.tar.gz.sig",
+      "MergeBeacon.app.tar.gz.sig",
       "trusted updater signature",
     );
 
     const result = await createUpdaterFragment({
       artifactPaths: [signature],
       platform: "darwin-aarch64",
-      productName: "Merge Pilot",
+      productName: "MergeBeacon",
       version: FIXTURE_VERSION,
     });
 
     expect(result.platforms["darwin-aarch64"]).toMatchObject({
-      asset_label: `Merge Pilot_${FIXTURE_VERSION}_aarch64.app.tar.gz`,
-      asset_name: `Merge.Pilot_${FIXTURE_VERSION}_aarch64.app.tar.gz`,
+      asset_label: `MergeBeacon_${FIXTURE_VERSION}_aarch64.app.tar.gz`,
+      asset_name: `MergeBeacon_${FIXTURE_VERSION}_aarch64.app.tar.gz`,
     });
     expect(result.platforms["darwin-aarch64-app"]).toEqual(result.platforms["darwin-aarch64"]);
   });
 
   it("Windows 主条目优先使用 MSI 并保留 NSIS 条目", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "mergepilot-updater-"));
+    const directory = await mkdtemp(join(tmpdir(), "mergebeacon-updater-"));
     const msiSignature = await signatureFile(
       directory,
-      `Merge Pilot_${FIXTURE_VERSION}_x64_en-US.msi.sig`,
+      `MergeBeacon_${FIXTURE_VERSION}_x64_en-US.msi.sig`,
       "msi-signature",
     );
     const nsisSignature = await signatureFile(
       directory,
-      `Merge Pilot_${FIXTURE_VERSION}_x64-setup.exe.sig`,
+      `MergeBeacon_${FIXTURE_VERSION}_x64-setup.exe.sig`,
       "nsis-signature",
     );
     const portableExecutable = await signatureFile(
       directory,
-      `MergePilot_${FIXTURE_VERSION}_x64-portable.exe`,
+      `MergeBeacon_${FIXTURE_VERSION}_x64-portable.exe`,
       "portable executable",
     );
     await signatureFile(
       directory,
-      `MergePilot_${FIXTURE_VERSION}_x64-portable.exe.sig`,
+      `MergeBeacon_${FIXTURE_VERSION}_x64-portable.exe.sig`,
       "portable-signature",
     );
 
     const result = await createUpdaterFragment({
       artifactPaths: [nsisSignature, msiSignature],
       platform: "windows-x86_64",
-      productName: "Merge Pilot",
+      productName: "MergeBeacon",
       version: FIXTURE_VERSION,
       portableExecutablePath: portableExecutable,
     });
@@ -100,7 +100,7 @@ describe("updater 元数据汇总", () => {
     expect(result.platforms["windows-x86_64-msi"].signature).toBe("msi-signature");
     expect(result.platforms["windows-x86_64-nsis"].signature).toBe("nsis-signature");
     expect(result.portable).toEqual({
-      asset_name: `MergePilot_${FIXTURE_VERSION}_x64-portable.exe`,
+      asset_name: `MergeBeacon_${FIXTURE_VERSION}_x64-portable.exe`,
       signature: "portable-signature",
     });
   });
@@ -112,8 +112,8 @@ describe("updater 元数据汇总", () => {
       ...platforms.map((platform, index) => ({
         name: `${platform}.updater`,
         label: `${platform}.updater`,
-        url: `https://api.github.com/repos/tisrop/MergePilot/releases/assets/${index + 1}`,
-        browser_download_url: `https://github.com/tisrop/MergePilot/releases/download/untagged-a1b2c3/${platform}.updater`,
+        url: `https://api.github.com/repos/tisrop/MergeBeacon/releases/assets/${index + 1}`,
+        browser_download_url: `https://github.com/tisrop/MergeBeacon/releases/download/untagged-a1b2c3/${platform}.updater`,
       })),
       portableAsset(FIXTURE_VERSION, "untagged-a1b2c3"),
     ];
@@ -132,7 +132,7 @@ describe("updater 元数据汇总", () => {
       `${FIXTURE_RELEASE_DOWNLOAD_URL}/linux-x86_64.updater`,
     );
     expect(metadata.portable["windows-x86_64"].url).toBe(
-      `${FIXTURE_RELEASE_DOWNLOAD_URL}/MergePilot_${FIXTURE_VERSION}_x64-portable.exe`,
+      `${FIXTURE_RELEASE_DOWNLOAD_URL}/MergeBeacon_${FIXTURE_VERSION}_x64-portable.exe`,
     );
     expect(metadata.portable["windows-x86_64"].url).not.toContain(".msi");
     expect(metadata.portable["windows-x86_64"].url).not.toContain(".zip");
@@ -144,9 +144,9 @@ describe("updater 元数据汇总", () => {
     const fragments = platforms.map((platform) => fragment(platform, `${platform}.updater`));
     const assets = [
       ...platforms.map((platform) => ({
-        name: platform === "darwin-aarch64" ? "Merge Pilot.app.tar.gz" : `${platform}.updater`,
+        name: platform === "darwin-aarch64" ? "MergeBeacon.app.tar.gz" : `${platform}.updater`,
         label: `${platform}.updater`,
-        browser_download_url: `https://github.com/tisrop/MergePilot/releases/download/untagged-a1b2c3/${platform}.updater`,
+        browser_download_url: `https://github.com/tisrop/MergeBeacon/releases/download/untagged-a1b2c3/${platform}.updater`,
       })),
       portableAsset(FIXTURE_VERSION, "untagged-a1b2c3"),
     ];
@@ -161,7 +161,7 @@ describe("updater 元数据汇总", () => {
     });
 
     expect(metadata.platforms["darwin-aarch64"].url).toBe(
-      `${FIXTURE_RELEASE_DOWNLOAD_URL}/Merge%20Pilot.app.tar.gz`,
+      `${FIXTURE_RELEASE_DOWNLOAD_URL}/MergeBeacon.app.tar.gz`,
     );
   });
 
@@ -176,7 +176,7 @@ describe("updater 元数据汇总", () => {
       ...validFragments.map(({ platform }) => ({
         name: `${platform}.updater`,
         label: `${platform}.updater`,
-        url: `https://api.github.com/repos/tisrop/MergePilot/releases/assets/${platform}`,
+        url: `https://api.github.com/repos/tisrop/MergeBeacon/releases/assets/${platform}`,
         browser_download_url: `${FIXTURE_RELEASE_DOWNLOAD_URL}/${platform}.updater`,
       })),
       portableAsset(),
@@ -234,7 +234,7 @@ describe("updater 元数据汇总", () => {
           {
             ...assets[0],
             browser_download_url:
-              "https://github.com/tisrop/MergePilot/releases/download/v0.3.4/darwin-aarch64.updater",
+              "https://github.com/tisrop/MergeBeacon/releases/download/v0.3.4/darwin-aarch64.updater",
           },
           ...assets.slice(1),
         ],
@@ -254,7 +254,7 @@ describe("updater 元数据汇总", () => {
     expect(workflow).toContain(
       "RELEASE_UPLOAD_URL: ${{ needs.prepare-release.outputs.release-upload-url }}",
     );
-    expect(workflow).toContain('$portableName = "MergePilot_${version}_x64-portable.exe"');
+    expect(workflow).toContain('$portableName = "MergeBeacon_${version}_x64-portable.exe"');
     expect(workflow).toContain('Copy-Item $exe "$tmpDir/$portableName"');
     expect(workflow).toContain('npm run tauri -- signer sign "$tmpDir/$portableName"');
     expect(workflow).toContain('Test-Path "$tmpDir/$portableName.sig"');

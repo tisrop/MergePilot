@@ -82,7 +82,7 @@ function assetLabelFor(platform, assetPath, productName, version) {
 }
 
 function windowsPortableAssetName(version) {
-  return `MergePilot_${version}_x64-portable.exe`;
+  return `MergeBeacon_${version}_x64-portable.exe`;
 }
 
 export async function createUpdaterFragment({

@@ -1,11 +1,11 @@
-# MergePilot
+# MergeBeacon
 
 [![Rust](https://img.shields.io/badge/Rust-1.96.1%20verified-orange.svg)](https://www.rust-lang.org)
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-blue.svg)](https://v2.tauri.app)
 [![Vue](https://img.shields.io/badge/Vue-3.x-42b883.svg)](https://vuejs.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-基于 **Tauri 2 + Vue 3 + Rust** 的跨平台 Code Merge 桌面客户端。
+基于 **Tauri 2 + Vue 3 + Rust** 的跨平台 PR 评审与 Issue 管理桌面客户端。
 使用统一界面连接 GitHub、GitLab 和 Gitee，并可通过 OpenAI 兼容接口对 PR / MR
 的代码变更进行 AI 辅助评审。
 
@@ -95,8 +95,8 @@
 ### 安装与运行
 
 ```bash
-git clone https://github.com/tisrop/mergepilot.git
-cd mergepilot
+git clone https://github.com/tisrop/mergebeacon.git
+cd mergebeacon
 
 npm install
 npm run tauri -- dev
@@ -115,7 +115,7 @@ npm run tauri -- build
 ```
 
 构建产物由 Tauri 写入 `src-tauri/target/release/bundle/`。
-macOS 下 `.app` 包名基于 `productName`（当前为 `Merge Pilot.app`）。
+macOS 下 `.app` 包名基于 `productName`（当前为 `MergeBeacon.app`）。
 
 ## 使用说明
 
@@ -166,22 +166,22 @@ Diff 会在 UTF-8 字符边界安全截断，避免切断中文或 emoji。
 ## 本地数据与安全
 
 - 平台 Token 优先保存到系统凭证库：macOS Keychain、Windows Credential Manager 或
-  Linux Secret Service；service 固定为 `com.mergepilot`。
+  Linux Secret Service；service 固定为 `com.mergebeacon`。
 - 系统凭证库不可用时，Token 使用 AES-256-GCM 加密后写入
-  `~/.mergepilot/config.json`；目录权限收紧为 `0700`，文件权限为 `0600`，并采用原子写入。
+  `~/.mergebeacon/config.json`；目录权限收紧为 `0700`，文件权限为 `0600`，并采用原子写入。
 - 旧版明文 `token_{platform}` 会在首次读取时迁移，目标写入成功后才删除明文。
 - 私有化实例地址仍保存在普通配置中；HTTP 地址仅应用于可信内网，Token 传输不会被加密。
 - AI 配置保存在操作系统应用配置目录下的 `ai_config.json`。AI API Key 使用
   AES-256-GCM 加密，本轮未迁移到系统 Keyring。
 - 登录 Token 只发送到所选代码托管平台；AI API Key 只发送到配置的 AI 端点。
-- macOS 应用标识符为 `com.mergepilot`。
+- macOS 应用标识符为 `com.mergebeacon`。
 
 请保护本机账号及配置文件权限，不要提交本地配置文件或在不可信设备上保存凭据。
 
 ## 项目结构
 
 ```text
-mergepilot/
+mergebeacon/
 ├── src/
 │   ├── api/                    # Tauri IPC 封装
 │   ├── components/

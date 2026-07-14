@@ -1,5 +1,5 @@
-use mergepilot_lib::http_client::HttpClient;
-use mergepilot_lib::platform::{github::GitHubAdapter, GitPlatform};
+use mergebeacon_lib::http_client::HttpClient;
+use mergebeacon_lib::platform::{github::GitHubAdapter, GitPlatform};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -65,17 +65,17 @@ async fn test_github_list_prs() {
     let adapter = GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
 
     let result = adapter
-        .list_pull_requests("octocat", "hello-world", &mergepilot_lib::models::PrState::Open, 1, 20)
+        .list_pull_requests("octocat", "hello-world", &mergebeacon_lib::models::PrState::Open, 1, 20)
         .await
         .expect("should list PRs");
 
     assert_eq!(result.items.len(), 2);
     assert_eq!(result.items[0].number, 42);
     assert_eq!(result.items[0].title, "Fix bug in parser");
-    assert!(matches!(result.items[0].state, mergepilot_lib::models::PrState::Open));
+    assert!(matches!(result.items[0].state, mergebeacon_lib::models::PrState::Open));
     assert_eq!(result.items[1].number, 43);
     // PR #43 has merged_at set, should be Merged
-    assert!(matches!(result.items[1].state, mergepilot_lib::models::PrState::Merged));
+    assert!(matches!(result.items[1].state, mergebeacon_lib::models::PrState::Merged));
 }
 
 #[tokio::test]
@@ -99,7 +99,7 @@ async fn test_github_create_review() {
     let adapter = GitHubAdapter::new(client, "test-token".to_string()).with_base_url(mock_server.uri());
 
     let review = adapter
-        .create_review("octocat", "hello-world", 42, "LGTM!", &mergepilot_lib::models::ReviewEvent::Approve, &[])
+        .create_review("octocat", "hello-world", 42, "LGTM!", &mergebeacon_lib::models::ReviewEvent::Approve, &[])
         .await
         .expect("should create review");
 
@@ -143,7 +143,7 @@ async fn test_github_create_issue() {
 
     assert_eq!(issue.number, 99);
     assert_eq!(issue.title, "Memory leak in auth module");
-    assert!(matches!(issue.state, mergepilot_lib::models::IssueState::Open));
+    assert!(matches!(issue.state, mergebeacon_lib::models::IssueState::Open));
 }
 
 #[tokio::test]
@@ -238,8 +238,8 @@ async fn test_github_list_repos_with_fork() {
         .mount(&mock_server)
         .await;
 
-    let client = mergepilot_lib::http_client::HttpClient::new();
-    let adapter = mergepilot_lib::platform::github::GitHubAdapter::new(client, "test-token".to_string())
+    let client = mergebeacon_lib::http_client::HttpClient::new();
+    let adapter = mergebeacon_lib::platform::github::GitHubAdapter::new(client, "test-token".to_string())
         .with_base_url(mock_server.uri());
 
     let result = adapter.list_repos(1).await.expect("should list repos");
