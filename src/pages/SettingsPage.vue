@@ -44,8 +44,8 @@ const updateProgressPercent = computed(() => {
 
 const isPortableUpdate = computed(() => updateResult.value?.update_mode === "portable");
 const updateActionLabel = computed(() => {
-  if (isInstallingUpdate.value) return "正在更新...";
-  return isPortableUpdate.value ? "下载并自动更新" : "下载并安装";
+  if (isInstallingUpdate.value) return isPortableUpdate.value ? "正在打开浏览器..." : "正在更新...";
+  return isPortableUpdate.value ? "下载便携版 ZIP" : "下载并安装";
 });
 
 onMounted(async () => {
@@ -75,7 +75,7 @@ async function installUpdate() {
   ) {
     return;
   }
-  if (!isConfirmingInstall.value) {
+  if (!isPortableUpdate.value && !isConfirmingInstall.value) {
     isConfirmingInstall.value = true;
     return;
   }
@@ -218,11 +218,9 @@ async function copySupportInfo() {
         </p>
         <div v-if="updateResult?.available" class="update-result" role="status">
           <strong>发现新版本 v{{ updateResult.version }}</strong>
-          <p v-if="isPortableUpdate && isRestartingUpdate">
-            新版 EXE 已通过签名验证，正在退出当前应用并启动新版。
-          </p>
-          <p v-else-if="isPortableUpdate">
-            当前为 Windows 便携版。下载并验签后，应用将自动退出、替换当前 EXE 并重新启动。
+          <p v-if="isPortableUpdate">
+            当前为 Windows 便携版。将在浏览器中下载 ZIP；请退出应用，解压后用新版 MergeBeacon.exe
+            覆盖旧文件，再重新启动。覆盖前建议备份旧文件。
           </p>
           <p v-else-if="!isUpdateInstalled">下载完成后将安装更新，并由你确认何时重启应用。</p>
           <p v-else>更新已安装，重启应用后生效。</p>
@@ -233,19 +231,14 @@ async function copySupportInfo() {
               :value="updateProgressPercent"
               max="100"
             />
-            <span v-if="updatePhase === 'installing'">
-              {{ isPortableUpdate ? "正在验证并准备替换..." : "正在安装更新..." }}
-            </span>
+            <span v-if="updatePhase === 'installing'"> 正在安装更新... </span>
             <span v-else-if="updateProgressPercent !== null">
               正在下载... {{ updateProgressPercent }}%
             </span>
             <span v-else>正在下载更新...</span>
           </div>
           <div class="update-actions">
-            <template v-if="isPortableUpdate && isRestartingUpdate">
-              <span class="install-warning" aria-live="polite">正在退出并启动新版...</span>
-            </template>
-            <template v-else-if="isUpdateInstalled">
+            <template v-if="isUpdateInstalled">
               <button
                 type="button"
                 class="install-update-button"
@@ -257,20 +250,14 @@ async function copySupportInfo() {
               </button>
             </template>
             <template v-else-if="isConfirmingInstall">
-              <span class="install-warning">
-                {{
-                  isPortableUpdate
-                    ? "更新期间请勿关闭电脑；替换失败时会自动恢复并启动旧版本。"
-                    : "安装前请保存工作并结束正在进行的 AI 评审。"
-                }}
-              </span>
+              <span class="install-warning"> 安装前请保存工作并结束正在进行的 AI 评审。 </span>
               <button
                 type="button"
                 class="install-update-button"
                 :disabled="isInstallingUpdate"
                 @click="installUpdate"
               >
-                {{ isPortableUpdate ? "确认自动更新" : "确认安装" }}
+                确认安装
               </button>
               <button
                 type="button"

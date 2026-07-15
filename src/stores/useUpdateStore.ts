@@ -3,7 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import {
   checkForUpdates,
   downloadAndInstallUpdate,
-  downloadAndReplacePortableUpdate,
+  openExternalUrl,
   listenToUpdateProgress,
   restartAfterUpdate,
 } from "@/api";
@@ -112,19 +112,36 @@ export const useUpdateStore = defineStore("update", () => {
   }
 
   async function installUpdate() {
-    const expectedVersion = updateResult.value?.version;
+    const result = updateResult.value;
+    const expectedVersion = result?.version;
     if (
       isInstallingUpdate.value ||
       isUpdateInstalled.value ||
       isRestartingUpdate.value ||
-      !updateResult.value?.available ||
+      !result?.available ||
       !expectedVersion
     ) {
       return;
     }
 
+    if (result.update_mode === "portable") {
+      if (!result.portable_download_url) {
+        updateError.value = "更新元数据缺少 Windows 便携版 ZIP 下载地址";
+        return;
+      }
+      isInstallingUpdate.value = true;
+      updateError.value = "";
+      try {
+        await openExternalUrl(result.portable_download_url);
+      } catch (error) {
+        updateError.value = getErrorMessage(error, "打开便携版 ZIP 下载页面失败，请稍后重试");
+      } finally {
+        isInstallingUpdate.value = false;
+      }
+      return;
+    }
+
     const requestId = crypto.randomUUID();
-    const isPortable = updateResult.value.update_mode === "portable";
     activeUpdateRequestId = requestId;
     isInstallingUpdate.value = true;
     updateError.value = "";
@@ -148,24 +165,14 @@ export const useUpdateStore = defineStore("update", () => {
         unlistenUpdateProgress = unlisten;
       }
 
-      if (isPortable) {
-        await downloadAndReplacePortableUpdate(requestId, expectedVersion);
-        isRestartingUpdate.value = true;
-      } else {
-        await downloadAndInstallUpdate(requestId, expectedVersion);
-        isUpdateInstalled.value = true;
-      }
+      await downloadAndInstallUpdate(requestId, expectedVersion);
+      isUpdateInstalled.value = true;
       updatePhase.value = null;
     } catch (error) {
-      updateError.value = getErrorMessage(
-        error,
-        isPortable ? "自动更新 Windows 便携版失败，请稍后重试" : "下载安装更新失败，请稍后重试",
-      );
+      updateError.value = getErrorMessage(error, "下载安装更新失败，请稍后重试");
       updatePhase.value = null;
     } finally {
-      if (activeUpdateRequestId === requestId) {
-        activeUpdateRequestId = null;
-      }
+      if (activeUpdateRequestId === requestId) activeUpdateRequestId = null;
       isInstallingUpdate.value = false;
       clearUpdateProgressListener();
     }

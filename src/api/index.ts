@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-shell";
 import type {
   Platform,
   PlatformCapabilities,
@@ -69,11 +70,8 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
   return invoke("update_check");
 }
 
-export async function downloadAndReplacePortableUpdate(
-  requestId: string,
-  expectedVersion: string,
-): Promise<void> {
-  return invoke("update_download_and_replace_portable", { requestId, expectedVersion });
+export async function openExternalUrl(url: string): Promise<void> {
+  return open(url);
 }
 
 export async function downloadAndInstallUpdate(

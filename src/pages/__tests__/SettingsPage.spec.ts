@@ -5,7 +5,7 @@ import {
   checkForUpdates,
   copySupportInfo,
   downloadAndInstallUpdate,
-  downloadAndReplacePortableUpdate,
+  openExternalUrl,
   getAppVersion,
   listenToUpdateProgress,
   restartAfterUpdate,
@@ -27,7 +27,7 @@ vi.mock("@/api", () => ({
   getAppVersion: vi.fn(),
   checkForUpdates: vi.fn(),
   downloadAndInstallUpdate: vi.fn(),
-  downloadAndReplacePortableUpdate: vi.fn(),
+  openExternalUrl: vi.fn(),
   listenToUpdateProgress: vi.fn(),
   restartAfterUpdate: vi.fn(),
 }));
@@ -53,7 +53,7 @@ describe("SettingsPage 诊断信息", () => {
     vi.mocked(getAppVersion).mockResolvedValue("0.3.0");
     vi.mocked(checkForUpdates).mockReset();
     vi.mocked(downloadAndInstallUpdate).mockReset();
-    vi.mocked(downloadAndReplacePortableUpdate).mockReset();
+    vi.mocked(openExternalUrl).mockReset();
     vi.mocked(listenToUpdateProgress).mockReset();
     vi.mocked(listenToUpdateProgress).mockResolvedValue(() => undefined);
     vi.mocked(restartAfterUpdate).mockReset();
@@ -193,8 +193,9 @@ describe("SettingsPage 诊断信息", () => {
     expect(wrapper.text()).toContain("更新已安装，重启应用后生效");
   });
 
-  it("Windows 便携版验签后自动替换 EXE 并失败回滚", async () => {
-    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "portable-page") });
+  it("Windows 便携版通过浏览器下载 ZIP 并提示手动覆盖", async () => {
+    const url =
+      "https://github.com/tisrop/MergeBeacon/releases/download/v0.4.0/MergeBeacon_0.4.0_x64-portable.zip";
     vi.mocked(checkForUpdates).mockResolvedValue({
       current_version: "0.3.0",
       available: true,
@@ -202,30 +203,22 @@ describe("SettingsPage 诊断信息", () => {
       notes: null,
       published_at: null,
       update_mode: "portable",
+      portable_download_url: url,
     });
-    vi.mocked(downloadAndReplacePortableUpdate).mockResolvedValue(undefined);
+    vi.mocked(openExternalUrl).mockResolvedValue(undefined);
     const wrapper = mountPage();
 
     await wrapper.get("button.check-update-button").trigger("click");
     await flushPromises();
-
-    expect(wrapper.text()).toContain("下载并验签后");
-    expect(wrapper.text()).toContain("自动退出、替换当前 EXE 并重新启动");
-    expect(wrapper.get("button.install-update-button").text()).toBe("下载并自动更新");
-
-    await wrapper.get("button.install-update-button").trigger("click");
-    expect(wrapper.text()).toContain("替换失败时会自动恢复并启动旧版本");
-    expect(downloadAndReplacePortableUpdate).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("浏览器中下载 ZIP");
+    expect(wrapper.text()).toContain("MergeBeacon.exe 覆盖旧文件");
+    expect(wrapper.get("button.install-update-button").text()).toBe("下载便携版 ZIP");
 
     await wrapper.get("button.install-update-button").trigger("click");
     await flushPromises();
-
-    expect(downloadAndReplacePortableUpdate).toHaveBeenCalledWith("portable-page", "0.4.0");
+    expect(openExternalUrl).toHaveBeenCalledWith(url);
     expect(downloadAndInstallUpdate).not.toHaveBeenCalled();
     expect(restartAfterUpdate).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("新版 EXE 已通过签名验证");
-    expect(wrapper.text()).toContain("正在退出并启动新版");
-    expect(wrapper.find("button.install-update-button").exists()).toBe(false);
   });
 
   it("下载失败后清理进度监听并允许重试", async () => {

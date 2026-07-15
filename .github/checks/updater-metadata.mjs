@@ -82,16 +82,10 @@ function assetLabelFor(platform, assetPath, productName, version) {
 }
 
 function windowsPortableAssetName(version) {
-  return `MergeBeacon_${version}_x64-portable.exe`;
+  return `MergeBeacon_${version}_x64-portable.zip`;
 }
 
-export async function createUpdaterFragment({
-  artifactPaths,
-  platform,
-  productName,
-  version,
-  portableExecutablePath = null,
-}) {
+export async function createUpdaterFragment({ artifactPaths, platform, productName, version }) {
   const rules = PLATFORM_RULES[platform];
   if (!rules) {
     throw new Error(`不支持的 updater 平台：${platform}`);
@@ -132,20 +126,7 @@ export async function createUpdaterFragment({
   }
 
   platformEntries[platform] = primaryEntry;
-  const fragment = { platform, platforms: platformEntries };
-  if (platform === WINDOWS_PORTABLE_PLATFORM) {
-    assertNonEmptyString(portableExecutablePath, "Windows 便携版可执行文件路径");
-    const expectedAssetName = windowsPortableAssetName(version);
-    if (basename(portableExecutablePath) !== expectedAssetName) {
-      throw new Error(`Windows 便携版可执行文件名必须为 ${expectedAssetName}`);
-    }
-    const signature = await readFile(`${portableExecutablePath}.sig`, "utf8");
-    if (signature.trim().length === 0 || signature.length > 16 * 1024) {
-      throw new Error("Windows 便携版可执行文件签名长度无效");
-    }
-    fragment.portable = { asset_name: expectedAssetName, signature };
-  }
-  return fragment;
+  return { platform, platforms: platformEntries };
 }
 
 export function assembleUpdaterMetadata({
@@ -214,27 +195,15 @@ export function assembleUpdaterMetadata({
     platforms[key] = { signature: reference.signature, url };
   }
 
-  const portableReference = fragments.find(
-    (fragment) => fragment.platform === WINDOWS_PORTABLE_PLATFORM,
-  )?.portable;
   const portableAssetName = windowsPortableAssetName(version);
-  if (
-    !portableReference ||
-    portableReference.asset_name !== portableAssetName ||
-    typeof portableReference.signature !== "string" ||
-    portableReference.signature.trim().length === 0 ||
-    portableReference.signature.length > 16 * 1024
-  ) {
-    throw new Error("Windows 便携版可执行文件签名无效");
-  }
   const portableAssets = assets.filter((asset) => asset?.name === portableAssetName);
   if (portableAssets.length !== 1) {
-    throw new Error("Windows 便携版可执行文件无法唯一匹配 Release 资源");
+    throw new Error("Windows 便携版 ZIP 无法唯一匹配 Release 资源");
   }
   const portableUrl = stableReleaseAssetUrl(
     portableAssets[0],
     assetDownloadUrlPrefix,
-    "Windows 便携版可执行文件",
+    "Windows 便携版 ZIP",
   );
 
   return {
@@ -245,7 +214,6 @@ export function assembleUpdaterMetadata({
     portable: {
       [WINDOWS_PORTABLE_PLATFORM]: {
         url: portableUrl,
-        signature: portableReference.signature,
       },
     },
   };
@@ -283,7 +251,6 @@ async function main() {
       platform: options.platform,
       productName: config.productName,
       version: config.version,
-      portableExecutablePath: process.env.PORTABLE_EXE ?? null,
     });
     await writeFile(options.output, `${JSON.stringify(fragment, null, 2)}\n`);
     return;

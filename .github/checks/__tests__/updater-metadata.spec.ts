@@ -13,28 +13,17 @@ async function signatureFile(directory: string, name: string, signature: string)
   return path;
 }
 
-function fragment(platform: string, assetName: string, version = FIXTURE_VERSION) {
+function fragment(platform: string, assetName: string) {
   const entry = {
     signature: `signature-${platform}`,
     asset_label: assetName,
     asset_name: assetName,
   };
-  return {
-    platform,
-    platforms: { [platform]: entry },
-    ...(platform === "windows-x86_64"
-      ? {
-          portable: {
-            asset_name: `MergeBeacon_${version}_x64-portable.exe`,
-            signature: "signature-windows-portable",
-          },
-        }
-      : {}),
-  };
+  return { platform, platforms: { [platform]: entry } };
 }
 
 function portableAsset(version = FIXTURE_VERSION, releaseName = `v${version}`) {
-  const name = `MergeBeacon_${version}_x64-portable.exe`;
+  const name = `MergeBeacon_${version}_x64-portable.zip`;
   return {
     name,
     label: "",
@@ -77,32 +66,17 @@ describe("updater 元数据汇总", () => {
       `MergeBeacon_${FIXTURE_VERSION}_x64-setup.exe.sig`,
       "nsis-signature",
     );
-    const portableExecutable = await signatureFile(
-      directory,
-      `MergeBeacon_${FIXTURE_VERSION}_x64-portable.exe`,
-      "portable executable",
-    );
-    await signatureFile(
-      directory,
-      `MergeBeacon_${FIXTURE_VERSION}_x64-portable.exe.sig`,
-      "portable-signature",
-    );
 
     const result = await createUpdaterFragment({
       artifactPaths: [nsisSignature, msiSignature],
       platform: "windows-x86_64",
       productName: "MergeBeacon",
       version: FIXTURE_VERSION,
-      portableExecutablePath: portableExecutable,
     });
 
     expect(result.platforms["windows-x86_64"].signature).toBe("msi-signature");
     expect(result.platforms["windows-x86_64-msi"].signature).toBe("msi-signature");
     expect(result.platforms["windows-x86_64-nsis"].signature).toBe("nsis-signature");
-    expect(result.portable).toEqual({
-      asset_name: `MergeBeacon_${FIXTURE_VERSION}_x64-portable.exe`,
-      signature: "portable-signature",
-    });
   });
 
   it("将 Draft Release 临时资源地址转换为发布后的稳定地址", () => {
@@ -132,11 +106,9 @@ describe("updater 元数据汇总", () => {
       `${FIXTURE_RELEASE_DOWNLOAD_URL}/linux-x86_64.updater`,
     );
     expect(metadata.portable["windows-x86_64"].url).toBe(
-      `${FIXTURE_RELEASE_DOWNLOAD_URL}/MergeBeacon_${FIXTURE_VERSION}_x64-portable.exe`,
+      `${FIXTURE_RELEASE_DOWNLOAD_URL}/MergeBeacon_${FIXTURE_VERSION}_x64-portable.zip`,
     );
     expect(metadata.portable["windows-x86_64"].url).not.toContain(".msi");
-    expect(metadata.portable["windows-x86_64"].url).not.toContain(".zip");
-    expect(metadata.portable["windows-x86_64"].signature).toBe("signature-windows-portable");
   });
 
   it("对稳定下载地址中的资源文件名进行 URL 编码", () => {
@@ -197,26 +169,8 @@ describe("updater 元数据汇总", () => {
       assembleUpdaterMetadata({ ...input, fragments: [...validFragments, validFragments[0]] }),
     ).toThrow("updater 平台条目重复：darwin-aarch64");
     expect(() => assembleUpdaterMetadata({ ...input, assets: assets.slice(0, -1) })).toThrow(
-      "Windows 便携版可执行文件无法唯一匹配 Release 资源",
+      "Windows 便携版 ZIP 无法唯一匹配 Release 资源",
     );
-    expect(() =>
-      assembleUpdaterMetadata({
-        ...input,
-        fragments: validFragments.map((item) =>
-          item.platform === "windows-x86_64" ? { ...item, portable: undefined } : item,
-        ),
-      }),
-    ).toThrow("Windows 便携版可执行文件签名无效");
-    expect(() =>
-      assembleUpdaterMetadata({
-        ...input,
-        fragments: validFragments.map((item) =>
-          item.platform === "windows-x86_64"
-            ? { ...item, portable: { ...item.portable, signature: "   " } }
-            : item,
-        ),
-      }),
-    ).toThrow("Windows 便携版可执行文件签名无效");
     expect(() =>
       assembleUpdaterMetadata({
         ...input,
@@ -254,13 +208,12 @@ describe("updater 元数据汇总", () => {
     expect(workflow).toContain(
       "RELEASE_UPLOAD_URL: ${{ needs.prepare-release.outputs.release-upload-url }}",
     );
-    expect(workflow).toContain('$portableName = "MergeBeacon_${version}_x64-portable.exe"');
-    expect(workflow).toContain('Copy-Item $exe "$tmpDir/$portableName"');
-    expect(workflow).toContain('npm run tauri -- signer sign "$tmpDir/$portableName"');
-    expect(workflow).toContain('Test-Path "$tmpDir/$portableName.sig"');
-    expect(workflow).toContain("PORTABLE_EXE=$tmpDir/$portableName");
-    expect(workflow).not.toContain("Compress-Archive");
-    expect(workflow).not.toContain("PORTABLE_ZIP");
+    expect(workflow).toContain('$portableName = "MergeBeacon_${version}_x64-portable.zip"');
+    expect(workflow).toContain("Compress-Archive");
+    expect(workflow).toContain('"PORTABLE_ZIP=$portableZip"');
+    expect(workflow).toContain('-ContentType "application/zip"');
+    expect(workflow).not.toContain("PORTABLE_EXE");
+    expect(workflow).not.toContain("portableName.sig");
     expect(workflow).toContain("uploadUpdaterJson: false");
     expect(workflow).toContain("name: updater-fragment-${{ matrix.updater-platform }}");
     expect(workflow).toContain("assemble-updater-metadata:");

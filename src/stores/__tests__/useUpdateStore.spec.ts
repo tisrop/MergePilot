@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   checkForUpdates,
   downloadAndInstallUpdate,
-  downloadAndReplacePortableUpdate,
+  openExternalUrl,
   listenToUpdateProgress,
   restartAfterUpdate,
 } from "@/api";
@@ -22,7 +22,7 @@ vi.stubGlobal("localStorage", {
 vi.mock("@/api", () => ({
   checkForUpdates: vi.fn(),
   downloadAndInstallUpdate: vi.fn(),
-  downloadAndReplacePortableUpdate: vi.fn(),
+  openExternalUrl: vi.fn(),
   listenToUpdateProgress: vi.fn(),
   restartAfterUpdate: vi.fn(),
 }));
@@ -43,7 +43,7 @@ describe("useUpdateStore", () => {
     setActivePinia(createPinia());
     vi.mocked(checkForUpdates).mockReset();
     vi.mocked(downloadAndInstallUpdate).mockReset();
-    vi.mocked(downloadAndReplacePortableUpdate).mockReset();
+    vi.mocked(openExternalUrl).mockReset();
     vi.mocked(listenToUpdateProgress).mockReset();
     vi.mocked(listenToUpdateProgress).mockResolvedValue(() => undefined);
     vi.mocked(restartAfterUpdate).mockReset();
@@ -145,8 +145,9 @@ describe("useUpdateStore", () => {
     expect(unlisten).toHaveBeenCalledOnce();
   });
 
-  it("Windows 便携版验签下载后进入自动替换重启状态", async () => {
-    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "portable-update") });
+  it("Windows 便携版在浏览器打开 ZIP，且不注册下载进度监听", async () => {
+    const url =
+      "https://github.com/tisrop/MergeBeacon/releases/download/v0.4.0/MergeBeacon_0.4.0_x64-portable.zip";
     vi.mocked(checkForUpdates).mockResolvedValue({
       current_version: "0.3.5",
       available: true,
@@ -154,50 +155,23 @@ describe("useUpdateStore", () => {
       notes: null,
       published_at: null,
       update_mode: "portable",
+      portable_download_url: url,
     });
-    let progressCallback:
-      | ((event: {
-          request_id: string;
-          downloaded: number;
-          total: number | null;
-          phase: "downloading" | "installing";
-        }) => void)
-      | null = null;
-    const unlisten = vi.fn();
-    vi.mocked(listenToUpdateProgress).mockImplementation(async (callback) => {
-      progressCallback = callback;
-      return unlisten;
-    });
-    vi.mocked(downloadAndReplacePortableUpdate).mockImplementation(async () => {
-      progressCallback?.({
-        request_id: "old-update",
-        downloaded: 90,
-        total: 100,
-        phase: "downloading",
-      });
-      progressCallback?.({
-        request_id: "portable-update",
-        downloaded: 25,
-        total: 100,
-        phase: "downloading",
-      });
-    });
+    vi.mocked(openExternalUrl).mockResolvedValue(undefined);
     const store = useUpdateStore();
     await store.checkUpdate();
-
     await store.installUpdate();
 
-    expect(downloadAndReplacePortableUpdate).toHaveBeenCalledWith("portable-update", "0.4.0");
+    expect(openExternalUrl).toHaveBeenCalledWith(url);
     expect(downloadAndInstallUpdate).not.toHaveBeenCalled();
-    expect(store.updateDownloaded).toBe(25);
-    expect(store.isRestartingUpdate).toBe(true);
+    expect(listenToUpdateProgress).not.toHaveBeenCalled();
+    expect(store.isRestartingUpdate).toBe(false);
     expect(store.isUpdateInstalled).toBe(false);
-    expect(store.isInstallingUpdate).toBe(false);
-    expect(unlisten).toHaveBeenCalledOnce();
   });
 
-  it("Windows 便携版自动替换失败后清理监听并允许重试", async () => {
-    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "portable-retry") });
+  it("打开便携版 ZIP 失败后允许重试", async () => {
+    const url =
+      "https://github.com/tisrop/MergeBeacon/releases/download/v0.4.0/MergeBeacon_0.4.0_x64-portable.zip";
     vi.mocked(checkForUpdates).mockResolvedValue({
       current_version: "0.3.5",
       available: true,
@@ -205,23 +179,18 @@ describe("useUpdateStore", () => {
       notes: null,
       published_at: null,
       update_mode: "portable",
+      portable_download_url: url,
     });
-    const unlisten = vi.fn();
-    vi.mocked(listenToUpdateProgress).mockResolvedValue(unlisten);
-    vi.mocked(downloadAndReplacePortableUpdate)
-      .mockRejectedValueOnce(new Error("directory denied"))
+    vi.mocked(openExternalUrl)
+      .mockRejectedValueOnce(new Error("browser denied"))
       .mockResolvedValueOnce(undefined);
     const store = useUpdateStore();
     await store.checkUpdate();
 
     await store.installUpdate();
-    expect(store.updateError).toContain("directory denied");
-    expect(store.isRestartingUpdate).toBe(false);
-    expect(store.isInstallingUpdate).toBe(false);
-    expect(unlisten).toHaveBeenCalledOnce();
-
+    expect(store.updateError).toContain("browser denied");
     await store.installUpdate();
-    expect(downloadAndReplacePortableUpdate).toHaveBeenCalledTimes(2);
-    expect(store.isRestartingUpdate).toBe(true);
+    expect(openExternalUrl).toHaveBeenCalledTimes(2);
+    expect(store.updateError).toBe("");
   });
 });

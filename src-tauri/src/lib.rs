@@ -114,7 +114,6 @@ pub fn run() {
             support::copy_support_info,
             support::app_version,
             update::update_check,
-            update::update_download_and_replace_portable,
             update::update_download_and_install,
             update::update_restart,
             capabilities::platform_capabilities,

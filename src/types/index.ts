@@ -43,6 +43,7 @@ export interface UpdateCheckResult {
   notes: string | null;
   published_at: string | null;
   update_mode: "installer" | "portable";
+  portable_download_url?: string | null;
 }
 
 export interface SupportInfo {

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
+use sha1::{Digest, Sha1};
 
 use super::GitPlatform;
 use crate::error::AppError;
@@ -73,6 +74,91 @@ impl GitLabAdapter {
             name: json["name"].as_str().unwrap_or("").to_string(),
             avatar_url: json["avatar_url"].as_str().unwrap_or("").to_string(),
         }
+    }
+
+    fn required_string(json: &Value, field: &str, label: &str) -> Result<String, AppError> {
+        json[field]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| AppError::Api(format!("GitLab {label} 缺少 {field}")))
+    }
+
+    fn unified_diff(change: &Value) -> String {
+        let patch = change["diff"].as_str().unwrap_or("");
+        if patch.is_empty() {
+            return String::new();
+        }
+
+        let mut diff = if patch.starts_with("diff --git ") {
+            patch.to_string()
+        } else {
+            let old_path = change["old_path"].as_str().unwrap_or("");
+            let new_path = change["new_path"].as_str().unwrap_or("");
+            let old_marker = if change["new_file"].as_bool() == Some(true) {
+                "/dev/null".to_string()
+            } else {
+                format!("a/{old_path}")
+            };
+            let new_marker = if change["deleted_file"].as_bool() == Some(true) {
+                "/dev/null".to_string()
+            } else {
+                format!("b/{new_path}")
+            };
+
+            format!("diff --git a/{old_path} b/{new_path}\n--- {old_marker}\n+++ {new_marker}\n{patch}")
+        };
+        if !diff.ends_with('\n') {
+            diff.push('\n');
+        }
+        diff
+    }
+
+    fn line_code(path: &str, old_line: Option<u32>, new_line: Option<u32>) -> String {
+        let path_hash = format!("{:x}", Sha1::digest(path.as_bytes()));
+        format!("{path_hash}_{}_{}", old_line.unwrap_or(0), new_line.unwrap_or(0))
+    }
+
+    fn line_position(side: &str, line: u32) -> Result<(Option<u32>, Option<u32>, &'static str), AppError> {
+        match side {
+            "left" => Ok((Some(line), None, "old")),
+            "right" => Ok((None, Some(line), "new")),
+            _ => Err(AppError::Api("GitLab 行级评论 side 必须为 left 或 right".into())),
+        }
+    }
+
+    fn map_pr_comment(note: &Value) -> Option<PrComment> {
+        let position = note.get("position")?.as_object()?;
+        let position = Value::Object(position.clone());
+        let path = position["new_path"].as_str().or_else(|| position["old_path"].as_str())?.to_string();
+        let line = position["new_line"].as_u64().or_else(|| position["old_line"].as_u64()).map(|line| line as u32);
+        let start_line = position["line_range"]["start"]["new_line"]
+            .as_u64()
+            .or_else(|| position["line_range"]["start"]["old_line"].as_u64())
+            .map(|line| line as u32)
+            .filter(|start| Some(*start) != line);
+        let original = note.get("original_position").filter(|original| original.is_object()).unwrap_or(&position);
+
+        Some(PrComment {
+            id: note["id"].clone(),
+            body: note["body"].as_str().unwrap_or("").to_string(),
+            path,
+            line,
+            start_line,
+            author: Self::map_user(&note["author"]),
+            created_at: note["created_at"].as_str().unwrap_or("").to_string(),
+            commit_id: position["head_sha"].as_str().map(str::to_string),
+            original_commit_id: original["head_sha"].as_str().map(str::to_string),
+            original_line: original["new_line"]
+                .as_u64()
+                .or_else(|| original["old_line"].as_u64())
+                .map(|line| line as u32),
+            original_start_line: original["line_range"]["start"]["new_line"]
+                .as_u64()
+                .or_else(|| original["line_range"]["start"]["old_line"].as_u64())
+                .map(|line| line as u32),
+            diff_hunk: None,
+        })
     }
 }
 #[async_trait]
@@ -257,7 +343,7 @@ impl GitPlatform for GitLabAdapter {
             source_branch: json["source_branch"].as_str().unwrap_or("").to_string(),
             target_branch: json["target_branch"].as_str().unwrap_or("").to_string(),
             mergeable: None,
-            head_sha: String::new(),
+            head_sha: json["sha"].as_str().or_else(|| json["diff_refs"]["head_sha"].as_str()).unwrap_or("").to_string(),
         })
     }
 
@@ -290,8 +376,11 @@ impl GitPlatform for GitLabAdapter {
             })
             .unwrap_or_default();
 
-        // Build unified diff from individual file diffs
-        let diff = changes.iter().map(|f| f.patch.clone()).collect::<Vec<_>>().join("");
+        // GitLab returns bare hunks in `changes[].diff`; diff2html requires file headers.
+        let diff = json["changes"]
+            .as_array()
+            .map(|items| items.iter().map(Self::unified_diff).collect::<String>())
+            .unwrap_or_default();
 
         Ok((diff, changes))
     }
@@ -329,22 +418,87 @@ impl GitPlatform for GitLabAdapter {
 
     async fn create_pr_comment(
         &self,
-        _owner: &str,
-        _repo: &str,
-        _pr_number: u64,
-        _commit_id: &str,
-        _path: &str,
-        _start_line: Option<u32>,
-        _line: u32,
-        _side: &str,
-        _body: &str,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        commit_id: &str,
+        path: &str,
+        start_line: Option<u32>,
+        line: u32,
+        side: &str,
+        body: &str,
     ) -> Result<PrComment, AppError> {
-        // TODO: implement GitLab MR comment
-        Err(AppError::NotImplemented("GitLab inline comments".into()))
+        if path.is_empty() || body.trim().is_empty() || line == 0 {
+            return Err(AppError::Api("GitLab 行级评论的文件、行号和内容不能为空".into()));
+        }
+        if start_line.is_some_and(|start| start == 0 || start > line) {
+            return Err(AppError::Api("GitLab 多行评论起始行无效".into()));
+        }
+        let (old_line, new_line, line_type) = Self::line_position(side, line)?;
+
+        let project_id = urlencoding(owner, repo);
+        let merge_request_url = format!("{}/projects/{project_id}/merge_requests/{pr_number}", self.base_url);
+        let merge_request: Value = self.get_json(&merge_request_url).await?;
+        let diff_refs = &merge_request["diff_refs"];
+        let base_sha = Self::required_string(diff_refs, "base_sha", "MR diff refs")?;
+        let start_sha = Self::required_string(diff_refs, "start_sha", "MR diff refs")?;
+        let head_sha = Self::required_string(diff_refs, "head_sha", "MR diff refs")?;
+        if commit_id != head_sha {
+            return Err(AppError::Api("GitLab MR 已更新，请刷新 Diff 后重新评论".into()));
+        }
+
+        let mut position = serde_json::json!({
+            "position_type": "text",
+            "base_sha": base_sha,
+            "start_sha": start_sha,
+            "head_sha": head_sha,
+            "old_path": path,
+            "new_path": path,
+        });
+        if let Some(old_line) = old_line {
+            position["old_line"] = old_line.into();
+        }
+        if let Some(new_line) = new_line {
+            position["new_line"] = new_line.into();
+        }
+        if let Some(start_line) = start_line.filter(|start| *start != line) {
+            let (start_old_line, start_new_line, _) = Self::line_position(side, start_line)?;
+            position["line_range"] = serde_json::json!({
+                "start": {
+                    "line_code": Self::line_code(path, start_old_line, start_new_line),
+                    "type": line_type,
+                    "old_line": start_old_line,
+                    "new_line": start_new_line,
+                },
+                "end": {
+                    "line_code": Self::line_code(path, old_line, new_line),
+                    "type": line_type,
+                    "old_line": old_line,
+                    "new_line": new_line,
+                },
+            });
+        }
+
+        let url = format!("{merge_request_url}/discussions");
+        let discussion = self.post_json(&url, &serde_json::json!({ "body": body, "position": position })).await?;
+        let note = discussion["notes"]
+            .as_array()
+            .and_then(|notes| notes.iter().find(|note| note["position"].is_object()))
+            .ok_or_else(|| AppError::Api("GitLab 创建行级评论后未返回有效 Note".into()))?;
+        Self::map_pr_comment(note).ok_or_else(|| AppError::Api("GitLab 行级评论响应缺少位置信息".into()))
     }
 
-    async fn list_pr_comments(&self, _owner: &str, _repo: &str, _pr_number: u64) -> Result<Vec<PrComment>, AppError> {
-        Ok(Vec::new())
+    async fn list_pr_comments(&self, owner: &str, repo: &str, pr_number: u64) -> Result<Vec<PrComment>, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let url =
+            format!("{}/projects/{project_id}/merge_requests/{pr_number}/discussions?per_page=100", self.base_url);
+        let discussions: Vec<Value> = self.get_json(&url).await?;
+        Ok(discussions
+            .iter()
+            .flat_map(|discussion| discussion["notes"].as_array().into_iter().flatten())
+            .filter(|note| !note["system"].as_bool().unwrap_or(false))
+            .filter_map(Self::map_pr_comment)
+            .collect())
     }
 
     async fn list_reviews(&self, owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Review>, AppError> {
@@ -355,6 +509,7 @@ impl GitPlatform for GitLabAdapter {
         let reviews = items
             .iter()
             .filter(|n| !n["system"].as_bool().unwrap_or(false))
+            .filter(|n| !n["position"].is_object())
             .map(|n| Review {
                 id: n["id"].clone(),
                 body: n["body"].as_str().unwrap_or("").to_string(),

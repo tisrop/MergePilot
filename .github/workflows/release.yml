@@ -275,7 +275,7 @@ jobs:
           uploadUpdaterJson: false
           args: ${{ matrix.args }}
 
-      - name: Create portable executable (Windows)
+      - name: Create portable ZIP (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
@@ -285,15 +285,13 @@ jobs:
             exit 1
           }
           $version = $env:GITHUB_REF_NAME.Substring(1)
-          $portableName = "MergeBeacon_${version}_x64-portable.exe"
-          $tmpDir = $env:RUNNER_TEMP
-          Copy-Item $exe "$tmpDir/$portableName"
-          npm run tauri -- signer sign "$tmpDir/$portableName"
-          if (-not (Test-Path "$tmpDir/$portableName.sig")) {
-            Write-Error "Portable executable signature not found"
-            exit 1
-          }
-          "PORTABLE_EXE=$tmpDir/$portableName" >> $env:GITHUB_ENV
+          $portableName = "MergeBeacon_${version}_x64-portable.zip"
+          $portableDir = Join-Path $env:RUNNER_TEMP "mergebeacon-portable"
+          $portableZip = Join-Path $env:RUNNER_TEMP $portableName
+          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+          Copy-Item $exe (Join-Path $portableDir "MergeBeacon.exe")
+          Compress-Archive -Path (Join-Path $portableDir "MergeBeacon.exe") -DestinationPath $portableZip
+          "PORTABLE_ZIP=$portableZip" >> $env:GITHUB_ENV
           Write-Host "Created $portableName"
 
       - name: Create updater metadata fragment
@@ -315,7 +313,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Upload portable executable (Windows)
+      - name: Upload portable ZIP (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         env:
@@ -323,7 +321,7 @@ jobs:
           RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
           RELEASE_UPLOAD_URL: ${{ needs.prepare-release.outputs.release-upload-url }}
         run: |
-          $assetName = [System.IO.Path]::GetFileName($env:PORTABLE_EXE)
+          $assetName = [System.IO.Path]::GetFileName($env:PORTABLE_ZIP)
           $assets = @(
             gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?per_page=100" |
               ConvertFrom-Json |
@@ -348,8 +346,8 @@ jobs:
             -Method Post `
             -Uri "${uploadBase}?name=$encodedName" `
             -Headers $headers `
-            -ContentType "application/octet-stream" `
-            -InFile $env:PORTABLE_EXE
+            -ContentType "application/zip" `
+            -InFile $env:PORTABLE_ZIP
 
   assemble-updater-metadata:
     needs: [prepare-release, build]
@@ -401,8 +399,158 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${GITHUB_REF_NAME}" "${RUNNER_TEMP}/latest.json" --repo "${GITHUB_REPOSITORY}" --clobber
 
+  release-smoke:
+    needs: [prepare-release, assemble-updater-metadata]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Fetch draft release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+        shell: bash
+        run: |
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?per_page=100" \
+            | jq -s 'add' > "$RUNNER_TEMP/release-assets.json"
+
+          LATEST_ID="$(jq -r '[.[] | select(.name == "latest.json")] | if length == 1 then .[0].id else empty end' \
+            "$RUNNER_TEMP/release-assets.json")"
+          if [ -z "$LATEST_ID" ]; then
+            echo "latest.json 无法唯一匹配 Draft Release 资源" >&2
+            exit 1
+          fi
+          gh api -H "Accept: application/octet-stream" \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${LATEST_ID}" \
+            > "$RUNNER_TEMP/latest.json"
+
+      - name: Validate updater metadata and assets
+        shell: bash
+        run: |
+          node .github/checks/release-smoke.mjs \
+            --metadata "$RUNNER_TEMP/latest.json" \
+            --assets "$RUNNER_TEMP/release-assets.json" \
+            --version "${GITHUB_REF_NAME#v}" \
+            --tag "$GITHUB_REF_NAME" \
+            --repository "$GITHUB_REPOSITORY" \
+            --output "$RUNNER_TEMP/smoke-manifest.json"
+
+      - name: Build updater signature verifier
+        run: cargo build --manifest-path src-tauri/Cargo.toml --bin verify_update_signature
+
+      - name: Verify original updater assets and reject tampering
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/updater-assets"
+          while IFS=$'\t' read -r ASSET_NAME SIGNATURE; do
+            ASSET_ID="$(jq -r --arg name "$ASSET_NAME" \
+              '[.[] | select(.name == $name)] | if length == 1 then .[0].id else empty end' \
+              "$RUNNER_TEMP/release-assets.json")"
+            if [ -z "$ASSET_ID" ]; then
+              echo "Updater 资源无法唯一匹配：$ASSET_NAME" >&2
+              exit 1
+            fi
+            ASSET_PATH="$RUNNER_TEMP/updater-assets/$ASSET_NAME"
+            gh api -H "Accept: application/octet-stream" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" > "$ASSET_PATH"
+            if [ ! -s "$ASSET_PATH" ]; then
+              echo "Updater 资源为空：$ASSET_NAME" >&2
+              exit 1
+            fi
+
+            src-tauri/target/debug/verify_update_signature \
+              --config src-tauri/tauri.conf.json \
+              --signature "$SIGNATURE" \
+              --file "$ASSET_PATH"
+
+            TAMPERED_PATH="$ASSET_PATH.tampered"
+            node -e 'const fs=require("node:fs");const [src,dst]=process.argv.slice(1);const b=fs.readFileSync(src);if(!b.length)process.exit(2);b[b.length-1]^=1;fs.writeFileSync(dst,b)' \
+              "$ASSET_PATH" "$TAMPERED_PATH"
+            if src-tauri/target/debug/verify_update_signature \
+              --config src-tauri/tauri.conf.json \
+              --signature "$SIGNATURE" \
+              --file "$TAMPERED_PATH"; then
+              echo "篡改后的 updater 资源错误地通过验签：$ASSET_NAME" >&2
+              exit 1
+            fi
+          done < <(jq -r '.updater_assets[] | [.asset_name, .signature] | @tsv' \
+            "$RUNNER_TEMP/smoke-manifest.json")
+
+  release-smoke-windows-portable:
+    needs: [prepare-release, assemble-updater-metadata]
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    steps:
+      - name: Download and inspect portable ZIP
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare-release.outputs.release-id }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $assetName = "MergeBeacon_${version}_x64-portable.zip"
+          $assets = @(
+            gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?per_page=100" |
+              ConvertFrom-Json |
+              Where-Object { $_.name -eq $assetName }
+          )
+          if ($assets.Count -ne 1) {
+            throw "Windows 便携版 ZIP 无法唯一匹配 Draft Release 资源"
+          }
+
+          $zipPath = Join-Path $env:RUNNER_TEMP $assetName
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/octet-stream"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          Invoke-WebRequest `
+            -Headers $headers `
+            -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($assets[0].id)" `
+            -OutFile $zipPath
+          if ((Get-Item $zipPath).Length -eq 0) {
+            throw "Windows 便携版 ZIP 为空"
+          }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $entries = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
+            if ($entries.Count -ne 1 -or $entries[0].FullName -ne "MergeBeacon.exe") {
+              throw "Windows 便携版 ZIP 必须只包含根目录下的 MergeBeacon.exe"
+            }
+            if ($entries[0].Length -eq 0) {
+              throw "Windows 便携版 EXE 为空"
+            }
+          } finally {
+            $archive.Dispose()
+          }
+
+          $extractPath = Join-Path $env:RUNNER_TEMP "portable-smoke"
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath
+          $exePath = Join-Path $extractPath "MergeBeacon.exe"
+          $stream = [System.IO.File]::OpenRead($exePath)
+          try {
+            if ($stream.ReadByte() -ne 0x4D -or $stream.ReadByte() -ne 0x5A) {
+              throw "MergeBeacon.exe 不是有效的 Windows PE 文件"
+            }
+          } finally {
+            $stream.Dispose()
+          }
+
   cleanup-release-signatures:
-    needs: assemble-updater-metadata
+    needs: [release-smoke, release-smoke-windows-portable]
     permissions:
       contents: write
     runs-on: ubuntu-latest
