@@ -222,6 +222,11 @@ describe("updater 元数据汇总", () => {
     expect(workflow).toContain(
       "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/",
     );
-    expect(workflow.match(/gh release upload[^\n]*latest\.json/g)).toHaveLength(1);
+    expect(workflow).not.toContain('gh release upload "${GITHUB_REF_NAME}"');
+    expect(workflow).toContain(
+      "RELEASE_UPLOAD_URL: ${{ needs.prepare-release.outputs.release-upload-url }}",
+    );
+    expect(workflow).toContain('select(.name == "latest.json") | .id');
+    expect(workflow).toContain('--data-binary @"$RUNNER_TEMP/latest.json"');
   });
 });
