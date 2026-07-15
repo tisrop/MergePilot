@@ -3,6 +3,7 @@ import { computed, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useRepoStore } from "@/stores/useRepoStore";
+import { usePrStore } from "@/stores/usePrStore";
 import type { Platform, RepoSummary } from "@/types";
 import BrandMark from "@/components/shared/BrandMark.vue";
 
@@ -41,6 +42,7 @@ const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 const repo = useRepoStore();
+const pr = usePrStore();
 
 const platforms: { value: Platform; label: string }[] = [
   { value: "github", label: "GitHub" },
@@ -67,7 +69,12 @@ onMounted(async () => {
 });
 
 function selectPlatform(p: Platform) {
+  if (p === auth.activePlatform) return;
   auth.setActivePlatform(p);
+  pr.clearContext();
+  if (route.name === "pr-detail") {
+    void router.push({ name: "pr-list" });
+  }
   if (auth.platforms[p].isLoggedIn && repo.reposCache[p].length === 0) {
     void repo.fetchRepos(p);
   }

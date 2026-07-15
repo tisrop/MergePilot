@@ -190,7 +190,11 @@ async function handleAddComment(
   side: string,
   body?: string,
 ) {
-  if (!pr.currentPr?.head_sha || !body) return;
+  if (!body?.trim()) return;
+  if (!pr.currentPr?.head_sha) {
+    commentError.value = "当前 GitLab MR 缺少提交版本，请刷新页面后重试";
+    return;
+  }
   commentError.value = "";
   commentSuccess.value = false;
   try {
