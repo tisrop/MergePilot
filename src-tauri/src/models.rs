@@ -77,6 +77,53 @@ pub struct PrDetail {
     pub head_sha: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadinessState {
+    Ready,
+    Blocked,
+    Pending,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeBlockingReasonCode {
+    NotOpen,
+    Draft,
+    Conflicts,
+    ChecksFailed,
+    ChecksPending,
+    ChangesRequested,
+    ApprovalsRequired,
+    BranchBehind,
+    DiscussionsUnresolved,
+    NoMergePermission,
+    PlatformBlocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeBlockingReason {
+    pub code: MergeBlockingReasonCode,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrMergeReadiness {
+    pub status: ReadinessState,
+    pub head_sha: String,
+    pub mergeable: Option<bool>,
+    pub draft: Option<bool>,
+    pub has_conflicts: Option<bool>,
+    pub checks_status: ReadinessState,
+    pub approvals_status: ReadinessState,
+    pub approvals_required: Option<u32>,
+    pub approvals_received: Option<u32>,
+    pub has_merge_permission: Option<bool>,
+    pub branch_behind: Option<bool>,
+    pub blocking_reasons: Vec<MergeBlockingReason>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrFile {
     pub filename: String,

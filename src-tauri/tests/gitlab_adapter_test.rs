@@ -439,3 +439,167 @@ async fn test_gitlab_list_reviews_excludes_inline_discussion_notes() {
     assert_eq!(reviews.len(), 1);
     assert_eq!(reviews[0].id, serde_json::json!(60));
 }
+
+#[tokio::test]
+async fn test_gitlab_merge_readiness_keeps_failed_pipeline_lookup_from_being_ready() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/9"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "iid": 9,
+            "state": "opened",
+            "draft": false,
+            "detailed_merge_status": "mergeable",
+            "has_conflicts": false,
+            "sha": "head-sha",
+            "diff_refs": {"head_sha": "head-sha"},
+            "user": {"can_merge": true}
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/9/pipelines"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/9/approvals"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "approvals_required": 0,
+            "approvals_left": 0,
+            "approved_by": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let readiness = adapter.get_merge_readiness("group", "repo", 9).await.expect("readiness");
+
+    assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Unknown);
+    assert_eq!(readiness.checks_status, mergebeacon_lib::models::ReadinessState::Unknown);
+    assert_eq!(readiness.head_sha, "head-sha");
+}
+
+#[tokio::test]
+async fn test_gitlab_merge_readiness_allows_merge_without_configured_pipeline() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/12"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "iid": 12,
+            "state": "opened",
+            "draft": false,
+            "detailed_merge_status": "mergeable",
+            "has_conflicts": false,
+            "sha": "head-sha",
+            "user": {"can_merge": true}
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/12/pipelines"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/12/approvals"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "approvals_required": 0,
+            "approvals_left": 0,
+            "approved_by": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let readiness = adapter.get_merge_readiness("group", "repo", 12).await.expect("readiness");
+
+    assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Ready);
+    assert_eq!(readiness.checks_status, mergebeacon_lib::models::ReadinessState::Ready);
+    assert_eq!(readiness.has_merge_permission, Some(true));
+}
+
+#[tokio::test]
+async fn test_gitlab_merge_readiness_blocks_user_without_merge_permission() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "iid": 10,
+            "state": "opened",
+            "draft": false,
+            "detailed_merge_status": "mergeable",
+            "has_conflicts": false,
+            "sha": "head-sha",
+            "user": {"can_merge": false}
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/10/pipelines"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"status": "success"}
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/10/approvals"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "approvals_required": 0,
+            "approvals_left": 0,
+            "approved_by": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let readiness = adapter.get_merge_readiness("group", "repo", 10).await.expect("readiness");
+
+    assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Blocked);
+    assert_eq!(readiness.has_merge_permission, Some(false));
+    assert!(readiness
+        .blocking_reasons
+        .iter()
+        .any(|reason| reason.code == mergebeacon_lib::models::MergeBlockingReasonCode::NoMergePermission));
+}
+
+#[tokio::test]
+async fn test_gitlab_merge_readiness_is_ready_with_merge_permission() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/11"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "iid": 11,
+            "state": "opened",
+            "draft": false,
+            "detailed_merge_status": "mergeable",
+            "has_conflicts": false,
+            "sha": "head-sha",
+            "user": {"can_merge": true}
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/11/pipelines"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"status": "success"}
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/11/approvals"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "approvals_required": 0,
+            "approvals_left": 0,
+            "approved_by": []
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let readiness = adapter.get_merge_readiness("group", "repo", 11).await.expect("readiness");
+
+    assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Ready);
+    assert_eq!(readiness.has_merge_permission, Some(true));
+    assert!(readiness.blocking_reasons.is_empty());
+}

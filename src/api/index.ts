@@ -8,6 +8,7 @@ import type {
   PrState,
   PrSummary,
   PrDetail,
+  PrMergeReadiness,
   DiffResult,
   MergeStrategy,
   PrMergeOutcome,
@@ -126,6 +127,15 @@ export async function prDetail(
   number: number,
 ): Promise<PrDetail> {
   return invoke("pr_detail", { platform, owner, repo, number });
+}
+
+export async function prMergeReadiness(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  number: number,
+): Promise<PrMergeReadiness> {
+  return invoke("pr_merge_readiness", { platform, owner, repo, number });
 }
 
 export async function prDiff(

@@ -1,7 +1,15 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { Platform, PrSummary, PrDetail, DiffResult, PrState, MergeStrategy } from "@/types";
-import { prList, prDetail, prDiff, prMerge, prClose, prReopen } from "@/api";
+import type {
+  Platform,
+  PrSummary,
+  PrDetail,
+  DiffResult,
+  PrState,
+  MergeStrategy,
+  PrMergeReadiness,
+} from "@/types";
+import { prList, prDetail, prDiff, prMerge, prMergeReadiness, prClose, prReopen } from "@/api";
 
 const PAGE_SIZES = [10, 20, 50, 100] as const;
 
@@ -9,6 +17,9 @@ export const usePrStore = defineStore("pr", () => {
   const list = ref<PrSummary[]>([]);
   const currentPr = ref<PrDetail | null>(null);
   const diff = ref<DiffResult | null>(null);
+  const mergeReadiness = ref<PrMergeReadiness | null>(null);
+  const readinessLoading = ref(false);
+  const readinessError = ref<string | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
   const totalPages = ref(1);
@@ -27,15 +38,19 @@ export const usePrStore = defineStore("pr", () => {
   let detailRequestSequence = 0;
   let diffRequestSequence = 0;
   let countsRequestSequence = 0;
+  let readinessRequestSequence = 0;
 
   function clearContext() {
     listRequestSequence++;
     detailRequestSequence++;
     diffRequestSequence++;
     countsRequestSequence++;
+    readinessRequestSequence++;
     list.value = [];
     currentPr.value = null;
     diff.value = null;
+    mergeReadiness.value = null;
+    readinessError.value = null;
     error.value = null;
     totalPages.value = 1;
     stateCounts.value = { open: 0, closed: 0, merged: 0, all: 0 };
@@ -106,6 +121,27 @@ export const usePrStore = defineStore("pr", () => {
     }
   }
 
+  async function fetchMergeReadiness(
+    platform: Platform,
+    owner: string,
+    repo: string,
+    number: number,
+  ) {
+    const sequence = ++readinessRequestSequence;
+    readinessLoading.value = true;
+    readinessError.value = null;
+    try {
+      const result = await prMergeReadiness(platform, owner, repo, number);
+      if (sequence === readinessRequestSequence) mergeReadiness.value = result;
+    } catch (e) {
+      if (sequence !== readinessRequestSequence) return;
+      readinessError.value = typeof e === "string" ? e : String(e);
+      mergeReadiness.value = null;
+    } finally {
+      if (sequence === readinessRequestSequence) readinessLoading.value = false;
+    }
+  }
+
   function setFilter(state: PrState) {
     filters.value.state = state;
     filters.value.page = 1;
@@ -148,6 +184,7 @@ export const usePrStore = defineStore("pr", () => {
         closeIssues,
       );
       currentPr.value = await prDetail(platform, owner, repo, number);
+      await fetchMergeReadiness(platform, owner, repo, number);
       return result;
     } catch (e) {
       error.value = typeof e === "string" ? e : String(e);
@@ -160,6 +197,7 @@ export const usePrStore = defineStore("pr", () => {
     try {
       await prClose(platform, owner, repo, number);
       currentPr.value = await prDetail(platform, owner, repo, number);
+      await fetchMergeReadiness(platform, owner, repo, number);
     } catch (e) {
       error.value = typeof e === "string" ? e : String(e);
       throw e;
@@ -171,6 +209,7 @@ export const usePrStore = defineStore("pr", () => {
     try {
       await prReopen(platform, owner, repo, number);
       currentPr.value = await prDetail(platform, owner, repo, number);
+      await fetchMergeReadiness(platform, owner, repo, number);
     } catch (e) {
       error.value = typeof e === "string" ? e : String(e);
       throw e;
@@ -181,6 +220,9 @@ export const usePrStore = defineStore("pr", () => {
     list,
     currentPr,
     diff,
+    mergeReadiness,
+    readinessLoading,
+    readinessError,
     loading,
     error,
     totalPages,
@@ -195,6 +237,7 @@ export const usePrStore = defineStore("pr", () => {
     fetchPrList,
     fetchPrDetail,
     fetchPrDiff,
+    fetchMergeReadiness,
     fetchStateCounts,
     setFilter,
     mergePr,

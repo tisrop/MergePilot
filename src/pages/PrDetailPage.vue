@@ -11,6 +11,7 @@ import DiffViewer from "@/components/diff/DiffViewer.vue";
 import ReviewForm from "@/components/review/ReviewForm.vue";
 import ReviewList from "@/components/review/ReviewList.vue";
 import AiReviewPanel from "@/components/ai/AiReviewPanel.vue";
+import MergeReadinessPanel from "@/components/pr/MergeReadinessPanel.vue";
 import type { Platform, MergeStrategy, PrFile } from "@/types";
 
 function extractDiffHunk(files: PrFile[], path: string, line: number): string | undefined {
@@ -53,6 +54,7 @@ function extractDiffHunk(files: PrFile[], path: string, line: number): string | 
 }
 
 const route = useRoute();
+const auth = useAuthStore();
 const pr = usePrStore();
 const capabilityStore = useCapabilityStore();
 
@@ -111,19 +113,45 @@ const isMerged = computed(() => pr.currentPr?.summary.state === "merged");
 const canMerge = computed(
   () =>
     isOpen.value &&
-    pr.currentPr?.mergeable !== false &&
+    pr.mergeReadiness?.status === "ready" &&
     (platformCapabilities.value?.merge_strategies.includes(selectedStrategy.value) ?? false),
 );
 const mergeBeacon = computed(() => {
   if (operating.value) return { tone: "scanning", label: "正在执行合并" };
   if (isMerged.value) return { tone: "ready", label: "已完成合并" };
-  if (pr.currentPr?.mergeable === false) return { tone: "blocked", label: "存在合并阻断" };
-  if (isOpen.value && pr.currentPr?.mergeable === true && availableStrategies.value.length > 0) {
+  if (pr.mergeReadiness?.status === "blocked") return { tone: "blocked", label: "存在合并阻断" };
+  if (pr.mergeReadiness?.status === "ready" && availableStrategies.value.length > 0) {
     return { tone: "ready", label: "已具备合并条件" };
   }
-  return { tone: "attention", label: "等待合并信号" };
+  if (pr.mergeReadiness?.status === "pending") return { tone: "scanning", label: "检查仍在进行" };
+  return { tone: "attention", label: "合并状态未知" };
 });
-const canClose = computed(() => isOpen.value);
+const isPrAuthor = computed(() => {
+  const currentUser = auth.platforms[platform].user;
+  const author = pr.currentPr?.summary.author;
+  if (!currentUser || !author) return false;
+
+  const currentUserId = String(currentUser.id ?? "");
+  const authorId = String(author.id ?? "");
+  if (currentUserId && authorId && currentUserId === authorId) return true;
+
+  const currentLogin = currentUser.login.trim().toLocaleLowerCase();
+  const authorLogin = author.login.trim().toLocaleLowerCase();
+  return currentLogin.length > 0 && currentLogin === authorLogin;
+});
+const hasClosePermission = computed(
+  () => isPrAuthor.value || pr.mergeReadiness?.has_merge_permission === true,
+);
+const canClose = computed(() => isOpen.value && hasClosePermission.value);
+const closeDisabledReason = computed(() => {
+  if (operating.value) return "正在执行其他 PR 操作";
+  if (!isOpen.value) return "只有打开状态的 PR 可以关闭";
+  if (hasClosePermission.value) return "";
+  if (pr.readinessLoading) return "正在确认关闭权限";
+  if (pr.readinessError) return "关闭权限检查失败，请重新检查合并就绪状态";
+  if (pr.mergeReadiness?.has_merge_permission == null) return "平台未返回当前账号的关闭权限";
+  return "只有 PR 作者或具备仓库写入权限的成员才能关闭 PR";
+});
 const canReopen = computed(() => isClosed.value && !isMerged.value);
 
 async function handleMerge() {
@@ -156,7 +184,7 @@ async function handleMerge() {
 }
 
 async function handleClose() {
-  if (!pr.currentPr) return;
+  if (!pr.currentPr || !canClose.value) return;
   operating.value = true;
   statusMsg.value = "正在关闭 PR...";
   try {
@@ -230,6 +258,7 @@ onMounted(async () => {
   await Promise.all([
     pr.fetchPrDetail(platform, owner, repo, number),
     pr.fetchPrDiff(platform, owner, repo, number),
+    pr.fetchMergeReadiness(platform, owner, repo, number),
     capabilityStore.load(platform).catch(() => null),
   ]);
   if (!platformCapabilities.value?.merge_strategies.includes(selectedStrategy.value)) {
@@ -359,7 +388,9 @@ onMounted(async () => {
           <div v-if="isOpen" class="close-btn-wrapper">
             <button
               class="btn btn-outline btn-danger"
+              data-testid="close-pr-button"
               :disabled="!canClose || operating"
+              :title="closeDisabledReason || '关闭 PR'"
               @click="handleClose"
             >
               Close
@@ -407,6 +438,12 @@ onMounted(async () => {
     </div>
 
     <div v-else-if="pr.currentPr" class="pr-detail">
+      <MergeReadinessPanel
+        :readiness="pr.mergeReadiness"
+        :loading="pr.readinessLoading"
+        :error="pr.readinessError"
+        @retry="pr.fetchMergeReadiness(platform, owner, repo, number)"
+      />
       <div class="tabs">
         <button :class="{ active: activeTab === 'diff' }" @click="activeTab = 'diff'">
           <svg
@@ -480,6 +517,7 @@ onMounted(async () => {
             :repo="repo"
             :pr-number="number"
             :diff="pr.diff?.diff ?? ''"
+            :head-sha="pr.currentPr?.head_sha ?? ''"
             :context="
               pr.currentPr ? { title: pr.currentPr.summary.title, body: pr.currentPr.body } : null
             "

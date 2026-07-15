@@ -81,6 +81,41 @@ export interface PrDetail {
   head_sha: string;
 }
 
+export type ReadinessState = "ready" | "blocked" | "pending" | "unknown";
+
+export type MergeBlockingReasonCode =
+  | "not_open"
+  | "draft"
+  | "conflicts"
+  | "checks_failed"
+  | "checks_pending"
+  | "changes_requested"
+  | "approvals_required"
+  | "branch_behind"
+  | "discussions_unresolved"
+  | "no_merge_permission"
+  | "platform_blocked";
+
+export interface MergeBlockingReason {
+  code: MergeBlockingReasonCode;
+  message: string;
+}
+
+export interface PrMergeReadiness {
+  status: ReadinessState;
+  head_sha: string;
+  mergeable: boolean | null;
+  draft: boolean | null;
+  has_conflicts: boolean | null;
+  checks_status: ReadinessState;
+  approvals_status: ReadinessState;
+  approvals_required: number | null;
+  approvals_received: number | null;
+  has_merge_permission: boolean | null;
+  branch_behind: boolean | null;
+  blocking_reasons: MergeBlockingReason[];
+}
+
 export type MergeStrategy = "merge" | "squash" | "rebase";
 
 export interface MergeResult {
@@ -253,7 +288,7 @@ export interface AiSuggestion {
   action?: AiSuggestionAction;
 }
 
-export type AiSuggestionAction = "accept" | "reject" | { edit: string };
+export type AiSuggestionAction = "accept" | "reject" | "submitted" | { edit: string };
 
 // ── AI 预设 ──
 export interface AiPreset {

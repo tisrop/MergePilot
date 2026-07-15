@@ -27,6 +27,105 @@ impl GitHubAdapter {
         format!("Bearer {}", self.token)
     }
 
+    fn legacy_commit_status(value: &Value) -> Option<ReadinessState> {
+        let total_count = value["total_count"].as_u64();
+        let statuses = value["statuses"].as_array();
+        let has_statuses = if total_count == Some(0) {
+            false
+        } else if total_count.is_some() {
+            true
+        } else if let Some(statuses) = statuses {
+            !statuses.is_empty()
+        } else {
+            // Older GitHub Enterprise responses and test doubles may only expose `state`.
+            value["state"].as_str().is_some()
+        };
+        if !has_statuses {
+            return None;
+        }
+
+        Some(match value["state"].as_str() {
+            Some("success") => ReadinessState::Ready,
+            Some("failure") | Some("error") => ReadinessState::Blocked,
+            Some("pending") => ReadinessState::Pending,
+            _ => ReadinessState::Unknown,
+        })
+    }
+
+    fn check_runs_status(value: &Value) -> Option<ReadinessState> {
+        let total_count = value["total_count"].as_u64();
+        let Some(check_runs) = value["check_runs"].as_array() else {
+            return if total_count == Some(0) { None } else { Some(ReadinessState::Unknown) };
+        };
+        if check_runs.is_empty() {
+            return if total_count.unwrap_or(0) == 0 { None } else { Some(ReadinessState::Unknown) };
+        }
+        if total_count.is_some_and(|count| usize::try_from(count).map_or(true, |count| count > check_runs.len())) {
+            // Never report Ready from a truncated first page that may omit a failing run.
+            return Some(ReadinessState::Unknown);
+        }
+
+        let mut has_pending = false;
+        let mut has_unknown = false;
+        for check_run in check_runs {
+            match check_run["status"].as_str() {
+                Some("completed") => match check_run["conclusion"].as_str() {
+                    Some("success") | Some("neutral") | Some("skipped") => {}
+                    Some("failure")
+                    | Some("cancelled")
+                    | Some("timed_out")
+                    | Some("action_required")
+                    | Some("stale")
+                    | Some("startup_failure") => return Some(ReadinessState::Blocked),
+                    _ => has_unknown = true,
+                },
+                Some("queued") | Some("in_progress") | Some("pending") | Some("waiting") | Some("requested") => {
+                    has_pending = true;
+                }
+                _ => has_unknown = true,
+            }
+        }
+
+        if has_pending {
+            Some(ReadinessState::Pending)
+        } else if has_unknown {
+            Some(ReadinessState::Unknown)
+        } else {
+            Some(ReadinessState::Ready)
+        }
+    }
+
+    fn combined_checks_status(
+        legacy_status: Option<ReadinessState>,
+        check_runs_status: Option<ReadinessState>,
+    ) -> ReadinessState {
+        let states = [legacy_status, check_runs_status];
+        if states.contains(&Some(ReadinessState::Blocked)) {
+            ReadinessState::Blocked
+        } else if states.contains(&Some(ReadinessState::Pending)) {
+            ReadinessState::Pending
+        } else if states.contains(&Some(ReadinessState::Unknown)) {
+            ReadinessState::Unknown
+        } else if states.contains(&Some(ReadinessState::Ready)) {
+            ReadinessState::Ready
+        } else {
+            ReadinessState::Unknown
+        }
+    }
+
+    fn repository_merge_permission(value: &Value) -> Option<bool> {
+        let permissions = &value["permissions"];
+        let admin = permissions["admin"].as_bool();
+        let maintain = permissions["maintain"].as_bool();
+        let push = permissions["push"].as_bool();
+
+        if admin.is_none() && maintain.is_none() && push.is_none() {
+            None
+        } else {
+            Some(admin == Some(true) || maintain == Some(true) || push == Some(true))
+        }
+    }
+
     /// Fetch org/enterprise display names via `/orgs/{login}`.
     /// Updates `owner_display_name` in place for org repos.
     async fn resolve_org_display_names(&self, repos: &mut [RepoSummary]) {
@@ -400,6 +499,156 @@ impl GitPlatform for GitHubAdapter {
             target_branch: json["base"]["ref"].as_str().unwrap_or("").to_string(),
             mergeable: json["mergeable"].as_bool(),
             head_sha: json["head"]["sha"].as_str().unwrap_or("").to_string(),
+        })
+    }
+
+    async fn get_merge_readiness(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrMergeReadiness, AppError> {
+        let pull_url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
+        let pull = self.get_json::<Value>(&pull_url).await?;
+        let head_sha = pull["head"]["sha"].as_str().unwrap_or("").to_string();
+        let mergeable = pull["mergeable"].as_bool();
+        let draft = pull["draft"].as_bool();
+        let mergeable_state = pull["mergeable_state"].as_str().unwrap_or("");
+        let has_conflicts = match mergeable_state {
+            "dirty" => Some(true),
+            "clean" | "unstable" | "blocked" | "behind" => Some(false),
+            _ => None,
+        };
+        let branch_behind = (!mergeable_state.is_empty()).then_some(mergeable_state == "behind");
+        let mut reasons = Vec::new();
+        if pull["state"].as_str() != Some("open") {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::NotOpen,
+                message: "PR 不是打开状态".into(),
+            });
+        }
+        if draft == Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Draft,
+                message: "PR 仍处于 Draft 状态".into(),
+            });
+        }
+        if has_conflicts == Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Conflicts,
+                message: "源分支存在合并冲突".into(),
+            });
+        }
+        if branch_behind == Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::BranchBehind,
+                message: "源分支落后于目标分支".into(),
+            });
+        }
+        if mergeable_state == "blocked" {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::PlatformBlocked,
+                message: "GitHub 分支保护规则阻止合并".into(),
+            });
+        }
+
+        let repository_url = format!("{}/repos/{}/{}", self.base_url, owner, repo);
+        let has_merge_permission = match self.get_json::<Value>(&repository_url).await {
+            Ok(repository) => Self::repository_merge_permission(&repository),
+            Err(_) => None,
+        };
+        if has_merge_permission == Some(false) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::NoMergePermission,
+                message: "当前账号没有该仓库的合并权限".into(),
+            });
+        }
+
+        let legacy_status_url = format!("{}/repos/{}/{}/commits/{}/status", self.base_url, owner, repo, head_sha);
+        let legacy_status = match self.get_json::<Value>(&legacy_status_url).await {
+            Ok(status) => Self::legacy_commit_status(&status),
+            Err(_) => Some(ReadinessState::Unknown),
+        };
+        let check_runs_url = format!(
+            "{}/repos/{}/{}/commits/{}/check-runs?filter=latest&per_page=100",
+            self.base_url, owner, repo, head_sha
+        );
+        let check_runs_status = match self.get_json::<Value>(&check_runs_url).await {
+            Ok(check_runs) => Self::check_runs_status(&check_runs),
+            Err(_) => Some(ReadinessState::Unknown),
+        };
+        let checks_status = Self::combined_checks_status(legacy_status, check_runs_status);
+        match checks_status {
+            ReadinessState::Blocked => reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::ChecksFailed,
+                message: "CI 检查未通过".into(),
+            }),
+            ReadinessState::Pending => reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::ChecksPending,
+                message: "CI 检查仍在进行中".into(),
+            }),
+            ReadinessState::Ready | ReadinessState::Unknown => {}
+        }
+
+        let reviews_url = format!("{}/repos/{}/{}/pulls/{}/reviews", self.base_url, owner, repo, pr_number);
+        let approvals_status = match self.get_json::<Vec<Value>>(&reviews_url).await {
+            Ok(reviews) => {
+                let mut latest = std::collections::HashMap::<String, String>::new();
+                for review in reviews {
+                    let login = review["user"]["login"].as_str().unwrap_or("").to_string();
+                    let state = review["state"].as_str().unwrap_or("").to_uppercase();
+                    if !login.is_empty() && !state.is_empty() {
+                        latest.insert(login, state);
+                    }
+                }
+                let approved = latest.values().filter(|state| state.as_str() == "APPROVED").count() as u32;
+                if latest.values().any(|state| state.as_str() == "CHANGES_REQUESTED") {
+                    reasons.push(MergeBlockingReason {
+                        code: MergeBlockingReasonCode::ChangesRequested,
+                        message: "已有评审请求修改".into(),
+                    });
+                    ReadinessState::Blocked
+                } else {
+                    // GitHub API does not expose the branch-rule approval threshold here.
+                    // A successful review lookup with no change request is safe to display as ready.
+                    let _ = approved;
+                    ReadinessState::Ready
+                }
+            }
+            Err(_) => ReadinessState::Unknown,
+        };
+
+        let has_hard_blocker = reasons.iter().any(|reason| reason.code != MergeBlockingReasonCode::ChecksPending);
+        let status = if has_hard_blocker
+            || checks_status == ReadinessState::Blocked
+            || approvals_status == ReadinessState::Blocked
+        {
+            ReadinessState::Blocked
+        } else if checks_status == ReadinessState::Pending {
+            ReadinessState::Pending
+        } else if mergeable == Some(true)
+            && draft == Some(false)
+            && has_conflicts == Some(false)
+            && checks_status == ReadinessState::Ready
+            && approvals_status == ReadinessState::Ready
+            && has_merge_permission == Some(true)
+        {
+            ReadinessState::Ready
+        } else {
+            ReadinessState::Unknown
+        };
+
+        Ok(PrMergeReadiness {
+            status,
+            head_sha,
+            mergeable,
+            draft,
+            has_conflicts,
+            checks_status,
+            approvals_status,
+            approvals_required: None,
+            approvals_received: match approvals_status {
+                ReadinessState::Unknown => None,
+                _ => Some(0),
+            },
+            has_merge_permission,
+            branch_behind,
+            blocking_reasons: reasons,
         })
     }
 

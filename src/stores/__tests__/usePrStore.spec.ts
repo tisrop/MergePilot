@@ -1,14 +1,15 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { prDetail, prDiff, prList, prMerge } from "@/api";
+import { prDetail, prDiff, prList, prMerge, prMergeReadiness } from "@/api";
 import { usePrStore } from "@/stores/usePrStore";
-import type { DiffResult, Paginated, PrDetail, PrSummary } from "@/types";
+import type { DiffResult, Paginated, PrDetail, PrSummary, PrMergeReadiness } from "@/types";
 
 vi.mock("@/api", () => ({
   prList: vi.fn(),
   prDetail: vi.fn(),
   prDiff: vi.fn(),
   prMerge: vi.fn(),
+  prMergeReadiness: vi.fn().mockResolvedValue(null),
   prClose: vi.fn(),
   prReopen: vi.fn(),
 }));
@@ -88,6 +89,35 @@ describe("usePrStore", () => {
     expect(result).toEqual(outcome);
     expect(prDetail).toHaveBeenCalledWith("github", "o", "r", 42);
     expect(store.currentPr?.summary.title).toBe("已合并");
+  });
+
+  it("忽略迟到的旧 PR 合并就绪响应", async () => {
+    const oldReadiness = deferred<PrMergeReadiness>();
+    const currentReadiness: PrMergeReadiness = {
+      status: "ready",
+      head_sha: "current-sha",
+      mergeable: true,
+      draft: false,
+      has_conflicts: false,
+      checks_status: "ready",
+      approvals_status: "ready",
+      approvals_required: null,
+      approvals_received: null,
+      has_merge_permission: true,
+      branch_behind: false,
+      blocking_reasons: [],
+    };
+    vi.mocked(prMergeReadiness)
+      .mockReturnValueOnce(oldReadiness.promise)
+      .mockResolvedValueOnce(currentReadiness);
+    const store = usePrStore();
+
+    const oldRequest = store.fetchMergeReadiness("github", "old", "repo", 1);
+    await store.fetchMergeReadiness("gitlab", "new", "repo", 2);
+    oldReadiness.resolve({ ...currentReadiness, head_sha: "old-sha" });
+    await oldRequest;
+
+    expect(store.mergeReadiness).toEqual(currentReadiness);
   });
 
   it("忽略同类请求中较早返回的详情和 diff", async () => {

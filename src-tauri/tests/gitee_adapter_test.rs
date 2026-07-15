@@ -680,3 +680,165 @@ async fn test_gitee_rejects_unsupported_review_without_request() {
     assert!(matches!(result, Err(mergebeacon_lib::error::AppError::NotImplemented(_))));
     assert!(mock_server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn test_gitee_mergeable_does_not_override_unknown_checks_and_approvals() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/42"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "open",
+            "draft": false,
+            "mergeable": true,
+            "head": {"sha": "head-sha"}
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let readiness = adapter.get_merge_readiness("octocat", "hello-world", 42).await.expect("readiness");
+
+    assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Unknown);
+    assert_ne!(readiness.status, mergebeacon_lib::models::ReadinessState::Ready);
+    assert_eq!(readiness.checks_status, mergebeacon_lib::models::ReadinessState::Unknown);
+    assert_eq!(readiness.approvals_status, mergebeacon_lib::models::ReadinessState::Unknown);
+}
+
+#[tokio::test]
+async fn test_gitee_merge_readiness_reports_unfinished_review_and_test() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/43"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "open",
+            "draft": false,
+            "mergeable": true,
+            "assignees_number": 1,
+            "assignees": [
+                {"login": "reviewer", "accept": false}
+            ],
+            "api_reviewers_number": 1,
+            "api_reviewers": [
+                {"login": "api-reviewer-1", "accept": true},
+                {"login": "api-reviewer-2", "accept": true}
+            ],
+            "testers_number": 1,
+            "testers": [
+                {"login": "tester", "accept": false}
+            ],
+            "head": {"sha": "head-sha"}
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let readiness = adapter.get_merge_readiness("octocat", "hello-world", 43).await.expect("readiness");
+
+    assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Blocked);
+    assert_eq!(readiness.checks_status, mergebeacon_lib::models::ReadinessState::Pending);
+    assert_eq!(readiness.approvals_status, mergebeacon_lib::models::ReadinessState::Blocked);
+    assert_eq!(readiness.approvals_required, Some(2));
+    assert_eq!(readiness.approvals_received, Some(1));
+    assert!(readiness.blocking_reasons.iter().any(|reason| {
+        reason.code == mergebeacon_lib::models::MergeBlockingReasonCode::ApprovalsRequired
+            && reason.message == "还需要 1 个审批"
+    }));
+    assert!(readiness.blocking_reasons.iter().any(|reason| {
+        reason.code == mergebeacon_lib::models::MergeBlockingReasonCode::ChecksPending
+            && reason.message == "还需要 1 个测试通过"
+    }));
+}
+
+#[tokio::test]
+async fn test_gitee_merge_readiness_is_ready_after_required_review_and_test() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/44"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "open",
+            "draft": false,
+            "mergeable": true,
+            "assignees_number": 1,
+            "assignees": [
+                {"login": "reviewer-1", "accept": true},
+                {"login": "reviewer-2", "accept": false}
+            ],
+            "api_reviewers_number": 1,
+            "api_reviewers": [
+                {"login": "api-reviewer", "accept": true}
+            ],
+            "testers_number": 1,
+            "testers": [
+                {"login": "tester", "accept": true}
+            ],
+            "head": {"sha": "head-sha"}
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "permission": {"admin": false, "push": true, "pull": true}
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let readiness = adapter.get_merge_readiness("octocat", "hello-world", 44).await.expect("readiness");
+
+    assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Ready);
+    assert_eq!(readiness.checks_status, mergebeacon_lib::models::ReadinessState::Ready);
+    assert_eq!(readiness.approvals_status, mergebeacon_lib::models::ReadinessState::Ready);
+    assert_eq!(readiness.approvals_required, Some(2));
+    assert_eq!(readiness.approvals_received, Some(2));
+    assert_eq!(readiness.has_merge_permission, Some(true));
+    assert!(readiness.blocking_reasons.is_empty());
+}
+
+#[tokio::test]
+async fn test_gitee_merge_readiness_blocks_user_without_push_permission() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/45"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "state": "open",
+            "draft": false,
+            "mergeable": true,
+            "assignees_number": 0,
+            "assignees": [],
+            "api_reviewers_number": 0,
+            "api_reviewers": [],
+            "testers_number": 0,
+            "testers": [],
+            "head": {"sha": "head-sha"}
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "permissions": {"admin": false, "push": false, "pull": true}
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let readiness = adapter.get_merge_readiness("octocat", "hello-world", 45).await.expect("readiness");
+
+    assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Blocked);
+    assert_eq!(readiness.has_merge_permission, Some(false));
+    assert!(readiness
+        .blocking_reasons
+        .iter()
+        .any(|reason| reason.code == mergebeacon_lib::models::MergeBlockingReasonCode::NoMergePermission));
+}

@@ -3,6 +3,7 @@ import type { AiSuggestion, AiSuggestionAction, Severity } from "@/types";
 
 defineProps<{
   suggestion: AiSuggestion;
+  disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -63,7 +64,7 @@ const severityLabel: Record<Severity, string> = {
     </div>
 
     <div class="card-actions" v-if="!suggestion.action">
-      <button class="btn btn-sm btn-accept" @click="emit('action', 'accept')">
+      <button class="btn btn-sm btn-accept" :disabled="disabled" @click="emit('action', 'accept')">
         <svg
           width="12"
           height="12"
@@ -76,9 +77,13 @@ const severityLabel: Record<Severity, string> = {
         >
           <polyline points="20 6 9 17 4 12" />
         </svg>
-        采纳
+        加入草稿
       </button>
-      <button class="btn btn-sm btn-edit" @click="emit('action', { edit: '' })">
+      <button
+        class="btn btn-sm btn-edit"
+        :disabled="disabled"
+        @click="emit('action', { edit: '' })"
+      >
         <svg
           width="12"
           height="12"
@@ -94,7 +99,9 @@ const severityLabel: Record<Severity, string> = {
         </svg>
         编辑
       </button>
-      <button class="btn btn-sm btn-reject" @click="emit('action', 'reject')">忽略</button>
+      <button class="btn btn-sm btn-reject" :disabled="disabled" @click="emit('action', 'reject')">
+        忽略
+      </button>
     </div>
 
     <div v-else class="action-status">
@@ -112,7 +119,23 @@ const severityLabel: Record<Severity, string> = {
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
           <polyline points="22 4 12 14.01 9 11.01" />
         </svg>
-        已采纳
+        已加入草稿
+      </span>
+      <span v-else-if="suggestion.action === 'submitted'" class="accepted">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+        已提交
       </span>
       <span v-else-if="suggestion.action === 'reject'" class="rejected">
         <svg

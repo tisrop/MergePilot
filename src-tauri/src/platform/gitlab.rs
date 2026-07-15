@@ -347,6 +347,196 @@ impl GitPlatform for GitLabAdapter {
         })
     }
 
+    async fn get_merge_readiness(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrMergeReadiness, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let mr_url = format!("{}/projects/{}/merge_requests/{}", self.base_url, project_id, pr_number);
+        let mr = self.get_json::<Value>(&mr_url).await?;
+        let head_sha = mr["sha"].as_str().or_else(|| mr["diff_refs"]["head_sha"].as_str()).unwrap_or("").to_string();
+        let draft = mr["draft"].as_bool().or_else(|| mr["work_in_progress"].as_bool());
+        let merge_status = mr["detailed_merge_status"].as_str().or_else(|| mr["merge_status"].as_str()).unwrap_or("");
+        let has_conflicts = mr["has_conflicts"].as_bool().or(match merge_status {
+            "conflict" | "cannot_be_merged" => Some(true),
+            _ => None,
+        });
+        let branch_behind = matches!(merge_status, "need_rebase" | "behind").then_some(true);
+        let has_merge_permission = mr["user"]["can_merge"].as_bool();
+        let mut reasons = Vec::new();
+        if mr["state"].as_str() != Some("opened") {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::NotOpen,
+                message: "MR 不是打开状态".into(),
+            });
+        }
+        if draft == Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Draft,
+                message: "MR 仍处于 Draft 状态".into(),
+            });
+        }
+        if has_conflicts == Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Conflicts,
+                message: "源分支存在合并冲突".into(),
+            });
+        }
+        if branch_behind == Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::BranchBehind,
+                message: "源分支需要 Rebase".into(),
+            });
+        }
+        if merge_status == "discussions_not_resolved" || mr["blocking_discussions_resolved"].as_bool() == Some(false) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::DiscussionsUnresolved,
+                message: "仍有未解决的阻塞讨论".into(),
+            });
+        }
+
+        if merge_status == "requested_changes" {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::ChangesRequested,
+                message: "已有评审请求修改".into(),
+            });
+        }
+        if merge_status == "not_approved" {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::ApprovalsRequired,
+                message: "MR 尚未满足审批要求".into(),
+            });
+        }
+        if matches!(merge_status, "blocked_status" | "broken_status") {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::PlatformBlocked,
+                message: "GitLab 合并规则阻止当前 MR 合并".into(),
+            });
+        }
+        if has_merge_permission == Some(false) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::NoMergePermission,
+                message: "当前账号没有该 MR 的合并权限".into(),
+            });
+        }
+
+        let pipelines_url =
+            format!("{}/projects/{}/merge_requests/{}/pipelines?per_page=1", self.base_url, project_id, pr_number);
+        let checks_status = match self.get_json::<Vec<Value>>(&pipelines_url).await {
+            Ok(pipelines) if pipelines.is_empty() => {
+                if matches!(merge_status, "mergeable" | "can_be_merged") {
+                    // GitLab 已确认 MR 可合并，且没有关联 Pipeline，表示当前项目没有需要等待的 CI。
+                    ReadinessState::Ready
+                } else {
+                    ReadinessState::Unknown
+                }
+            }
+            Ok(pipelines) => match pipelines.first().and_then(|pipeline| pipeline["status"].as_str()) {
+                Some("success") => ReadinessState::Ready,
+                Some("failed") | Some("canceled") | Some("canceling") | Some("skipped") => {
+                    reasons.push(MergeBlockingReason {
+                        code: MergeBlockingReasonCode::ChecksFailed,
+                        message: "Pipeline 未通过".into(),
+                    });
+                    ReadinessState::Blocked
+                }
+                Some("pending")
+                | Some("running")
+                | Some("created")
+                | Some("waiting_for_resource")
+                | Some("preparing") => {
+                    reasons.push(MergeBlockingReason {
+                        code: MergeBlockingReasonCode::ChecksPending,
+                        message: "Pipeline 仍在进行中".into(),
+                    });
+                    ReadinessState::Pending
+                }
+                Some(_) => ReadinessState::Unknown,
+                None => ReadinessState::Unknown,
+            },
+            Err(_) => ReadinessState::Unknown,
+        };
+
+        let checks_status = if checks_status == ReadinessState::Unknown {
+            match merge_status {
+                "ci_still_running" | "pipelines_must_succeed" => ReadinessState::Pending,
+                "broken_status" => ReadinessState::Blocked,
+                _ => checks_status,
+            }
+        } else {
+            checks_status
+        };
+        if checks_status == ReadinessState::Pending
+            && !reasons.iter().any(|reason| reason.code == MergeBlockingReasonCode::ChecksPending)
+        {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::ChecksPending,
+                message: "Pipeline 仍在进行中".into(),
+            });
+        }
+
+        let approvals_url = format!("{}/projects/{}/merge_requests/{}/approvals", self.base_url, project_id, pr_number);
+        let (approvals_status, approvals_required, approvals_received) =
+            match self.get_json::<Value>(&approvals_url).await {
+                Ok(approvals) => {
+                    let required = approvals["approvals_required"].as_u64().map(|n| n as u32);
+                    let received = approvals["approved_by"].as_array().map(|items| items.len() as u32);
+                    let left = approvals["approvals_left"].as_u64();
+                    if left.unwrap_or(0) > 0 || (required.is_some() && received.unwrap_or(0) < required.unwrap_or(0)) {
+                        reasons.push(MergeBlockingReason {
+                            code: MergeBlockingReasonCode::ApprovalsRequired,
+                            message: format!(
+                                "还需要 {} 个审批",
+                                left.unwrap_or_else(|| u64::from(
+                                    required.unwrap_or(0).saturating_sub(received.unwrap_or(0))
+                                ))
+                            ),
+                        });
+                        (ReadinessState::Blocked, required, received)
+                    } else {
+                        (ReadinessState::Ready, required, received)
+                    }
+                }
+                Err(_) => (ReadinessState::Unknown, None, None),
+            };
+
+        let mergeable = match merge_status {
+            "mergeable" | "can_be_merged" => Some(true),
+            "conflict" | "cannot_be_merged" => Some(false),
+            _ => None,
+        };
+        let has_hard_blocker = reasons.iter().any(|reason| reason.code != MergeBlockingReasonCode::ChecksPending);
+        let status = if has_hard_blocker
+            || checks_status == ReadinessState::Blocked
+            || approvals_status == ReadinessState::Blocked
+        {
+            ReadinessState::Blocked
+        } else if checks_status == ReadinessState::Pending {
+            ReadinessState::Pending
+        } else if mergeable == Some(true)
+            && draft == Some(false)
+            && has_conflicts == Some(false)
+            && checks_status == ReadinessState::Ready
+            && approvals_status == ReadinessState::Ready
+            && has_merge_permission == Some(true)
+        {
+            ReadinessState::Ready
+        } else {
+            ReadinessState::Unknown
+        };
+        Ok(PrMergeReadiness {
+            status,
+            head_sha,
+            mergeable,
+            draft,
+            has_conflicts,
+            checks_status,
+            approvals_status,
+            approvals_required,
+            approvals_received,
+            has_merge_permission,
+            branch_behind,
+            blocking_reasons: reasons,
+        })
+    }
+
     async fn get_pr_diff(&self, owner: &str, repo: &str, pr_number: u64) -> Result<(String, Vec<PrFile>), AppError> {
         let project_id = urlencoding(owner, repo);
         let url = format!("{}/projects/{}/merge_requests/{}/changes", self.base_url, project_id, pr_number);

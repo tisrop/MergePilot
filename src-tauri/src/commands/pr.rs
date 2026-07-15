@@ -58,6 +58,18 @@ pub async fn pr_detail(
 }
 
 #[tauri::command]
+pub async fn pr_merge_readiness(
+    state: State<'_, AppState>,
+    platform: String,
+    owner: String,
+    repo: String,
+    number: u64,
+) -> Result<PrMergeReadiness, String> {
+    let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
+    p.get_merge_readiness(&owner, &repo, number).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn pr_diff(
     state: State<'_, AppState>,
     platform: String,

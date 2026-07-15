@@ -123,6 +123,55 @@ impl GiteeAdapter {
         Ok(resp.json().await?)
     }
 
+    fn acceptance_progress(json: &Value, gates: &[(&str, &str)]) -> (Option<u32>, Option<u32>) {
+        let mut required_total = 0_u32;
+        let mut received_total = 0_u32;
+        let mut has_requirement = false;
+        let mut has_complete_participants = true;
+
+        for (required_field, participants_field) in gates {
+            let Some(required) = json[*required_field].as_u64().and_then(|value| u32::try_from(value).ok()) else {
+                continue;
+            };
+            has_requirement = true;
+            required_total = required_total.saturating_add(required);
+
+            match json[*participants_field].as_array() {
+                Some(participants) => {
+                    let received = participants
+                        .iter()
+                        .filter(|participant| participant["accept"].as_bool() == Some(true))
+                        .fold(0_u32, |count, _| count.saturating_add(1));
+                    // Each gate has its own threshold. Extra acceptances in one gate must
+                    // not compensate for a missing acceptance in another gate.
+                    received_total = received_total.saturating_add(received.min(required));
+                }
+                None if required > 0 => has_complete_participants = false,
+                None => {}
+            }
+        }
+
+        if !has_requirement {
+            (None, None)
+        } else if has_complete_participants {
+            (Some(required_total), Some(received_total))
+        } else {
+            (Some(required_total), None)
+        }
+    }
+
+    fn repository_merge_permission(value: &Value) -> Option<bool> {
+        let permissions = value.get("permission").or_else(|| value.get("permissions"))?;
+        let admin = permissions["admin"].as_bool();
+        let push = permissions["push"].as_bool();
+
+        if admin.is_none() && push.is_none() {
+            None
+        } else {
+            Some(admin == Some(true) || push == Some(true))
+        }
+    }
+
     async fn post_json(&self, url: &str, body: &Value) -> Result<Value, AppError> {
         let separator = if url.contains('?') { "&" } else { "?" };
         let full_url = format!("{}{}{}", url, separator, self.auth_query());
@@ -377,6 +426,112 @@ impl GitPlatform for GiteeAdapter {
             target_branch: json["base"]["ref"].as_str().unwrap_or("").to_string(),
             mergeable: json["mergeable"].as_bool(),
             head_sha: json["head"]["sha"].as_str().unwrap_or("").to_string(),
+        })
+    }
+
+    async fn get_merge_readiness(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrMergeReadiness, AppError> {
+        let url = format!("{}/repos/{}/{}/pulls/{}", self.base_url, owner, repo, pr_number);
+        let json = self.get_json::<Value>(&url).await?;
+        let head_sha =
+            json["head"]["sha"].as_str().or_else(|| json["head"]["commit_id"].as_str()).unwrap_or("").to_string();
+        let mergeable = json["mergeable"].as_bool();
+        let draft = json["draft"].as_bool().or_else(|| json["work_in_progress"].as_bool());
+        let has_conflicts = json["has_conflicts"].as_bool().or_else(|| json["conflict"].as_bool());
+        let mut reasons = Vec::new();
+        if json["state"].as_str() != Some("open") {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::NotOpen,
+                message: "PR 不是打开状态".into(),
+            });
+        }
+        if draft == Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Draft,
+                message: "PR 仍处于 Draft 状态".into(),
+            });
+        }
+        if has_conflicts == Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Conflicts,
+                message: "源分支存在合并冲突".into(),
+            });
+        }
+        if mergeable == Some(false) && has_conflicts != Some(true) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::PlatformBlocked,
+                message: "平台报告当前 PR 不可合并".into(),
+            });
+        }
+        let repository_url = format!("{}/repos/{}/{}", self.base_url, owner, repo);
+        let has_merge_permission = match self.get_json::<Value>(&repository_url).await {
+            Ok(repository) => Self::repository_merge_permission(&repository),
+            Err(_) => None,
+        };
+        if has_merge_permission == Some(false) {
+            reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::NoMergePermission,
+                message: "当前账号没有该仓库的合并权限".into(),
+            });
+        }
+        let (approvals_required, approvals_received) = Self::acceptance_progress(
+            &json,
+            &[("assignees_number", "assignees"), ("api_reviewers_number", "api_reviewers")],
+        );
+        let approvals_status = match (approvals_required, approvals_received) {
+            (Some(required), Some(received)) if received >= required => ReadinessState::Ready,
+            (Some(required), Some(received)) => {
+                reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ApprovalsRequired,
+                    message: format!("还需要 {} 个审批", required.saturating_sub(received)),
+                });
+                ReadinessState::Blocked
+            }
+            _ => ReadinessState::Unknown,
+        };
+
+        let (tests_required, tests_received) = Self::acceptance_progress(&json, &[("testers_number", "testers")]);
+        let checks_status = match (tests_required, tests_received) {
+            (Some(required), Some(received)) if received >= required => ReadinessState::Ready,
+            (Some(required), Some(received)) => {
+                reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChecksPending,
+                    message: format!("还需要 {} 个测试通过", required.saturating_sub(received)),
+                });
+                ReadinessState::Pending
+            }
+            _ => ReadinessState::Unknown,
+        };
+
+        let has_hard_blocker = reasons.iter().any(|reason| reason.code != MergeBlockingReasonCode::ChecksPending);
+        let status = if has_hard_blocker
+            || checks_status == ReadinessState::Blocked
+            || approvals_status == ReadinessState::Blocked
+        {
+            ReadinessState::Blocked
+        } else if checks_status == ReadinessState::Pending {
+            ReadinessState::Pending
+        } else if mergeable == Some(true)
+            && checks_status == ReadinessState::Ready
+            && approvals_status == ReadinessState::Ready
+            && has_merge_permission == Some(true)
+        {
+            ReadinessState::Ready
+        } else {
+            ReadinessState::Unknown
+        };
+        Ok(PrMergeReadiness {
+            status,
+            head_sha,
+            mergeable,
+            draft,
+            has_conflicts,
+            checks_status,
+            approvals_status,
+            approvals_required,
+            approvals_received,
+            has_merge_permission,
+            branch_behind: None,
+            blocking_reasons: reasons,
         })
     }
 
