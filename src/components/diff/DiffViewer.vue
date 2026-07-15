@@ -358,6 +358,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.diff2html-container :deep(.d2h-file-side-diff) {
+  position: relative;
+}
+
 .diff2html-container :deep(.d2h-code-linenumber) {
   position: relative;
 }
