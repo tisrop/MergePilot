@@ -101,4 +101,19 @@ describe("Release smoke 检查", () => {
     expect(workflow).toContain("needs: [release-smoke, release-smoke-windows-portable]");
     expect(workflow).toContain("needs: [cleanup-release-signatures]");
   });
+
+  it("读取 Draft Release 资源的 smoke job 必须拥有 contents write 权限", async () => {
+    const workflow = await readFile(".github/workflows/release.yml", "utf8");
+    const releaseSmoke = workflow.slice(
+      workflow.indexOf("\n  release-smoke:"),
+      workflow.indexOf("\n  release-smoke-windows-portable:"),
+    );
+    const portableSmoke = workflow.slice(
+      workflow.indexOf("\n  release-smoke-windows-portable:"),
+      workflow.indexOf("\n  cleanup-release-signatures:"),
+    );
+
+    expect(releaseSmoke).toMatch(/permissions:\n\s+contents: write/);
+    expect(portableSmoke).toMatch(/permissions:\n\s+contents: write/);
+  });
 });

@@ -401,8 +401,9 @@ jobs:
 
   release-smoke:
     needs: [prepare-release, assemble-updater-metadata]
+    # Draft release assets require push-level contents access, even for read-only API calls.
     permissions:
-      contents: read
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -488,8 +489,9 @@ jobs:
 
   release-smoke-windows-portable:
     needs: [prepare-release, assemble-updater-metadata]
+    # Draft release assets require push-level contents access, even for read-only API calls.
     permissions:
-      contents: read
+      contents: write
     runs-on: windows-latest
     steps:
       - name: Download and inspect portable ZIP
