@@ -54,6 +54,7 @@ function extractDiffHunk(files: PrFile[], path: string, line: number): string | 
 }
 
 const route = useRoute();
+const auth = useAuthStore();
 const pr = usePrStore();
 const capabilityStore = useCapabilityStore();
 
@@ -125,7 +126,32 @@ const mergeBeacon = computed(() => {
   if (pr.mergeReadiness?.status === "pending") return { tone: "scanning", label: "检查仍在进行" };
   return { tone: "attention", label: "合并状态未知" };
 });
-const canClose = computed(() => isOpen.value);
+const isPrAuthor = computed(() => {
+  const currentUser = auth.platforms[platform].user;
+  const author = pr.currentPr?.summary.author;
+  if (!currentUser || !author) return false;
+
+  const currentUserId = String(currentUser.id ?? "");
+  const authorId = String(author.id ?? "");
+  if (currentUserId && authorId && currentUserId === authorId) return true;
+
+  const currentLogin = currentUser.login.trim().toLocaleLowerCase();
+  const authorLogin = author.login.trim().toLocaleLowerCase();
+  return currentLogin.length > 0 && currentLogin === authorLogin;
+});
+const hasClosePermission = computed(
+  () => isPrAuthor.value || pr.mergeReadiness?.has_merge_permission === true,
+);
+const canClose = computed(() => isOpen.value && hasClosePermission.value);
+const closeDisabledReason = computed(() => {
+  if (operating.value) return "正在执行其他 PR 操作";
+  if (!isOpen.value) return "只有打开状态的 PR 可以关闭";
+  if (hasClosePermission.value) return "";
+  if (pr.readinessLoading) return "正在确认关闭权限";
+  if (pr.readinessError) return "关闭权限检查失败，请重新检查合并就绪状态";
+  if (pr.mergeReadiness?.has_merge_permission == null) return "平台未返回当前账号的关闭权限";
+  return "只有 PR 作者或具备仓库写入权限的成员才能关闭 PR";
+});
 const canReopen = computed(() => isClosed.value && !isMerged.value);
 
 async function handleMerge() {
@@ -158,7 +184,7 @@ async function handleMerge() {
 }
 
 async function handleClose() {
-  if (!pr.currentPr) return;
+  if (!pr.currentPr || !canClose.value) return;
   operating.value = true;
   statusMsg.value = "正在关闭 PR...";
   try {
@@ -362,7 +388,9 @@ onMounted(async () => {
           <div v-if="isOpen" class="close-btn-wrapper">
             <button
               class="btn btn-outline btn-danger"
+              data-testid="close-pr-button"
               :disabled="!canClose || operating"
+              :title="closeDisabledReason || '关闭 PR'"
               @click="handleClose"
             >
               Close
