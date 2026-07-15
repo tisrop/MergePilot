@@ -115,5 +115,7 @@ describe("Release smoke 检查", () => {
 
     expect(releaseSmoke).toMatch(/permissions:\n\s+contents: write/);
     expect(portableSmoke).toMatch(/permissions:\n\s+contents: write/);
+    expect(releaseSmoke).toContain("libwebkit2gtk-4.1-dev");
+    expect(releaseSmoke).toContain("libgtk-3-dev");
   });
 });
