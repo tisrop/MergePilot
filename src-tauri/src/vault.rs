@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -88,6 +88,10 @@ impl TokenVault {
 
     fn write_config(config: &HashMap<String, String>) -> Result<(), AppError> {
         let path = Self::config_path()?;
+        Self::write_config_to(&path, config)
+    }
+
+    fn write_config_to(path: &Path, config: &HashMap<String, String>) -> Result<(), AppError> {
         let temp_path = path.with_extension(format!("json.tmp.{}", std::process::id()));
         let content = serde_json::to_vec_pretty(config)?;
         let result = (|| {
@@ -98,10 +102,10 @@ impl TokenVault {
             file.write_all(&content)?;
             file.flush()?;
             file.sync_all()?;
-            fs::rename(&temp_path, &path)?;
-            set_file_permissions(&path)?;
+            fs::rename(&temp_path, path)?;
+            set_file_permissions(path)?;
             if let Some(parent) = path.parent() {
-                File::open(parent)?.sync_all()?;
+                sync_directory(parent)?;
             }
             Ok(())
         })();
@@ -293,8 +297,24 @@ fn set_file_permissions(_path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> Result<(), AppError> {
+    std::fs::File::open(path)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> Result<(), AppError> {
+    // Windows 的 std::fs::File::open 不会为目录设置 FILE_FLAG_BACKUP_SEMANTICS，
+    // 因此打开目录会返回 ERROR_ACCESS_DENIED (os error 5)。文件本身已经 sync_all，
+    // 原子 rename 之后无需再把目录当作普通文件打开。
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::TokenVault;
 
     #[test]
@@ -320,5 +340,26 @@ mod tests {
 
         vault.remove_cached_token("test-platform");
         assert_eq!(vault.cached_token("test-platform"), None);
+    }
+
+    #[test]
+    fn config_write_succeeds_in_user_directory() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "mergebeacon-vault-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&test_dir).expect("test directory should be created");
+        let config_path = test_dir.join("config.json");
+        let config = HashMap::from([("token_encrypted_github".to_string(), "encrypted".to_string())]);
+
+        TokenVault::write_config_to(&config_path, &config).expect("config should be written");
+
+        let stored: HashMap<String, String> =
+            serde_json::from_slice(&std::fs::read(&config_path).expect("written config should be readable"))
+                .expect("written config should be valid JSON");
+        assert_eq!(stored, config);
+
+        std::fs::remove_dir_all(test_dir).expect("test directory should be removed");
     }
 }
