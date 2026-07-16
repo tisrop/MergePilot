@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import Sidebar from "./Sidebar.vue";
+
+withDefaults(defineProps<{ isDiffFocusMode?: boolean }>(), {
+  isDiffFocusMode: false,
+});
 </script>
 
 <template>
   <div class="app-layout">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
-    <Sidebar />
+    <Sidebar :is-diff-focus-mode="isDiffFocusMode" />
     <main id="main-content" class="main-content" tabindex="-1">
       <div class="content-header" v-if="$slots.header">
         <slot name="header" />

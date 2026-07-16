@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { usePrStore } from "@/stores/usePrStore";
 import { reviewCommentAdd } from "@/api";
@@ -54,6 +54,7 @@ function extractDiffHunk(files: PrFile[], path: string, line: number): string | 
 }
 
 const route = useRoute();
+const router = useRouter();
 const auth = useAuthStore();
 const pr = usePrStore();
 const capabilityStore = useCapabilityStore();
@@ -258,10 +259,33 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppLayout>
+  <AppLayout :is-diff-focus-mode="activeTab === 'diff'">
     <template #header>
       <div class="pr-header">
         <div class="pr-header-top">
+          <button
+            class="pr-back-button"
+            type="button"
+            title="返回 PR 列表"
+            aria-label="返回 PR 列表"
+            data-testid="back-to-pr-list"
+            @click="router.push({ name: 'pr-list' })"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+            <span>PR 列表</span>
+          </button>
           <h2 v-if="pr.currentPr">{{ pr.currentPr.summary.title }}</h2>
           <div class="pr-header-skeleton" v-else>
             <div class="skeleton skeleton-title" />
@@ -521,9 +545,46 @@ onMounted(async () => {
   gap: var(--space-1);
 }
 
+.pr-header-top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .pr-header-top h2 {
+  min-width: 0;
   font-size: 18px;
   font-weight: 700;
+}
+
+.pr-back-button {
+  display: inline-flex;
+  min-height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.pr-back-button:hover {
+  border-color: var(--color-primary-border);
+  background: var(--color-surface-hover);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-md);
 }
 
 .pr-meta {
