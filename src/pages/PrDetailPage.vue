@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { usePrStore } from "@/stores/usePrStore";
 import { reviewCommentAdd } from "@/api";
@@ -54,6 +54,7 @@ function extractDiffHunk(files: PrFile[], path: string, line: number): string | 
 }
 
 const route = useRoute();
+const router = useRouter();
 const auth = useAuthStore();
 const pr = usePrStore();
 const capabilityStore = useCapabilityStore();
@@ -116,16 +117,6 @@ const canMerge = computed(
     pr.mergeReadiness?.status === "ready" &&
     (platformCapabilities.value?.merge_strategies.includes(selectedStrategy.value) ?? false),
 );
-const mergeBeacon = computed(() => {
-  if (operating.value) return { tone: "scanning", label: "正在执行合并" };
-  if (isMerged.value) return { tone: "ready", label: "已完成合并" };
-  if (pr.mergeReadiness?.status === "blocked") return { tone: "blocked", label: "存在合并阻断" };
-  if (pr.mergeReadiness?.status === "ready" && availableStrategies.value.length > 0) {
-    return { tone: "ready", label: "已具备合并条件" };
-  }
-  if (pr.mergeReadiness?.status === "pending") return { tone: "scanning", label: "检查仍在进行" };
-  return { tone: "attention", label: "合并状态未知" };
-});
 const isPrAuthor = computed(() => {
   const currentUser = auth.platforms[platform].user;
   const author = pr.currentPr?.summary.author;
@@ -268,10 +259,33 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppLayout>
+  <AppLayout :is-diff-focus-mode="activeTab === 'diff'">
     <template #header>
       <div class="pr-header">
         <div class="pr-header-top">
+          <button
+            class="pr-back-button"
+            type="button"
+            title="返回 PR 列表"
+            aria-label="返回 PR 列表"
+            data-testid="back-to-pr-list"
+            @click="router.push({ name: 'pr-list' })"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+            <span>PR 列表</span>
+          </button>
           <h2 v-if="pr.currentPr">{{ pr.currentPr.summary.title }}</h2>
           <div class="pr-header-skeleton" v-else>
             <div class="skeleton skeleton-title" />
@@ -308,11 +322,13 @@ onMounted(async () => {
         </div>
 
         <div v-if="pr.currentPr" class="pr-actions">
-          <div class="merge-beacon" :class="`tone-${mergeBeacon.tone}`" role="status">
-            <span class="beacon-light" aria-hidden="true" />
-            <span>{{ mergeBeacon.label }}</span>
-          </div>
           <div v-if="isOpen" class="merge-group">
+            <MergeReadinessPanel
+              :readiness="pr.mergeReadiness"
+              :loading="pr.readinessLoading"
+              :error="pr.readinessError"
+              @retry="pr.fetchMergeReadiness(platform, owner, repo, number)"
+            />
             <div class="merge-btn-wrapper">
               <button
                 class="btn btn-primary merge-main"
@@ -438,12 +454,6 @@ onMounted(async () => {
     </div>
 
     <div v-else-if="pr.currentPr" class="pr-detail">
-      <MergeReadinessPanel
-        :readiness="pr.mergeReadiness"
-        :loading="pr.readinessLoading"
-        :error="pr.readinessError"
-        @retry="pr.fetchMergeReadiness(platform, owner, repo, number)"
-      />
       <div class="tabs">
         <button :class="{ active: activeTab === 'diff' }" @click="activeTab = 'diff'">
           <svg
@@ -535,9 +545,46 @@ onMounted(async () => {
   gap: var(--space-1);
 }
 
+.pr-header-top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+}
+
 .pr-header-top h2 {
+  min-width: 0;
   font-size: 18px;
   font-weight: 700;
+}
+
+.pr-back-button {
+  display: inline-flex;
+  min-height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.pr-back-button:hover {
+  border-color: var(--color-primary-border);
+  background: var(--color-surface-hover);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-md);
 }
 
 .pr-meta {
@@ -586,57 +633,6 @@ onMounted(async () => {
   gap: var(--space-2);
   margin-top: var(--space-2);
   flex-wrap: wrap;
-}
-
-.merge-beacon {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--color-warning-border);
-  border-radius: var(--radius-md);
-  color: var(--color-warning);
-  background: var(--color-warning-light);
-  font-size: 11px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.beacon-light {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
-}
-
-.merge-beacon.tone-ready {
-  color: var(--color-success);
-  border-color: var(--color-success-border);
-  background: var(--color-success-light);
-}
-
-.merge-beacon.tone-blocked {
-  color: var(--color-danger);
-  border-color: var(--color-danger-border);
-  background: var(--color-danger-light);
-}
-
-.merge-beacon.tone-scanning {
-  color: var(--color-focus);
-  border-color: var(--color-primary-border);
-  background: var(--color-primary-light);
-}
-
-.merge-beacon.tone-scanning .beacon-light {
-  animation: beacon-pulse 1s ease-in-out infinite;
-}
-
-@keyframes beacon-pulse {
-  50% {
-    box-shadow: 0 0 0 7px color-mix(in srgb, currentColor 6%, transparent);
-  }
 }
 
 .merge-group {

@@ -4,6 +4,9 @@ import PrDetailPage from "@/pages/PrDetailPage.vue";
 import type { PrDetail, PrMergeReadiness, User } from "@/types";
 
 const mocks = vi.hoisted(() => ({
+  router: {
+    push: vi.fn(),
+  },
   authStore: {
     platforms: {
       github: { user: null as User | null, isLoggedIn: true },
@@ -44,6 +47,7 @@ vi.mock("vue-router", () => ({
   useRoute: () => ({
     params: { platform: "github", owner: "owner", repo: "repo", number: "42" },
   }),
+  useRouter: () => mocks.router,
 }));
 vi.mock("@/stores/useAuthStore", () => ({ useAuthStore: () => mocks.authStore }));
 vi.mock("@/stores/usePrStore", () => ({ usePrStore: () => mocks.prStore }));
@@ -95,7 +99,12 @@ function mountPage() {
   return mount(PrDetailPage, {
     global: {
       stubs: {
-        AppLayout: { template: "<main><slot name='header' /><slot /></main>" },
+        AppLayout: {
+          props: { isDiffFocusMode: Boolean },
+          template: `<main data-testid="app-layout" :data-focus-mode="isDiffFocusMode ? 'true' : 'false'">
+            <slot name="header" /><slot />
+          </main>`,
+        },
         DiffViewer: true,
         ReviewForm: true,
         ReviewList: true,
@@ -120,6 +129,17 @@ describe("PrDetailPage 关闭权限", () => {
     mocks.prStore.readinessLoading = false;
     mocks.prStore.readinessError = null;
     mocks.prStore.error = null;
+  });
+
+  it("点击返回按钮稳定跳转到 PR 列表", async () => {
+    const wrapper = mountPage();
+    const button = wrapper.get('[data-testid="back-to-pr-list"]');
+
+    expect(button.attributes("title")).toBe("返回 PR 列表");
+    expect(button.attributes("aria-label")).toBe("返回 PR 列表");
+    await button.trigger("click");
+
+    expect(mocks.router.push).toHaveBeenCalledWith({ name: "pr-list" });
   });
 
   it("非作者且没有仓库写入权限时禁用关闭按钮", async () => {
@@ -155,5 +175,18 @@ describe("PrDetailPage 关闭权限", () => {
 
     expect(button.attributes("disabled")).toBeDefined();
     expect(button.attributes("title")).toBe("平台未返回当前账号的关闭权限");
+  });
+
+  it("仅在 Diff 标签启用侧栏专注模式", async () => {
+    const wrapper = mountPage();
+
+    expect(wrapper.get('[data-testid="app-layout"]').attributes("data-focus-mode")).toBe("true");
+    const reviewsTab = wrapper
+      .findAll(".tabs button")
+      .find((button) => button.text() === "评审意见");
+    expect(reviewsTab).toBeDefined();
+    await reviewsTab!.trigger("click");
+
+    expect(wrapper.get('[data-testid="app-layout"]').attributes("data-focus-mode")).toBe("false");
   });
 });

@@ -59,6 +59,22 @@ describe("SettingsPage 诊断信息", () => {
     vi.mocked(restartAfterUpdate).mockReset();
   });
 
+  it("持久化 Diff 同步滚动设置并在重新加载后恢复", async () => {
+    const firstPage = mountPage();
+    const firstToggle = firstPage.get<HTMLInputElement>('input[aria-label="同步 Diff 横向滚动"]');
+
+    expect(firstToggle.element.checked).toBe(true);
+    await firstToggle.setValue(false);
+    expect(storage.get("mergebeacon:diff-sync-scroll")).toBe("false");
+    firstPage.unmount();
+
+    setActivePinia(createPinia());
+    const secondPage = mountPage();
+    expect(
+      secondPage.get<HTMLInputElement>('input[aria-label="同步 Diff 横向滚动"]').element.checked,
+    ).toBe(false);
+  });
+
   it("使用当前平台获取后端脱敏文本并复制", async () => {
     vi.mocked(copySupportInfo).mockResolvedValue(undefined);
     const wrapper = mountPage();

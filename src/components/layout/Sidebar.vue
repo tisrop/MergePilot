@@ -4,8 +4,13 @@ import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useRepoStore } from "@/stores/useRepoStore";
 import { usePrStore } from "@/stores/usePrStore";
+import { useUiSettingsStore } from "@/stores/useUiSettingsStore";
 import type { Platform, RepoSummary } from "@/types";
 import BrandMark from "@/components/shared/BrandMark.vue";
+
+const props = withDefaults(defineProps<{ isDiffFocusMode?: boolean }>(), {
+  isDiffFocusMode: false,
+});
 
 interface OwnerGroup {
   owner: string;
@@ -43,6 +48,7 @@ const route = useRoute();
 const auth = useAuthStore();
 const repo = useRepoStore();
 const pr = usePrStore();
+const uiSettings = useUiSettingsStore();
 
 const platforms: { value: Platform; label: string }[] = [
   { value: "github", label: "GitHub" },
@@ -51,6 +57,30 @@ const platforms: { value: Platform; label: string }[] = [
 ];
 
 const visiblePlatforms = computed(() => platforms.filter((p) => auth.platformVisibility[p.value]));
+const activePlatformLabel = computed(
+  () => platforms.find((item) => item.value === auth.activePlatform)?.label ?? auth.activePlatform,
+);
+const activePlatformShortLabel = computed(() => {
+  const labels: Record<Platform, string> = { github: "GH", gitlab: "GL", gitee: "GE" };
+  return labels[auth.activePlatform];
+});
+const isSidebarCollapsed = computed(
+  () => props.isDiffFocusMode && !uiSettings.isDiffSidebarExpanded,
+);
+const compactRepoFullName = computed(() => {
+  if (repo.activeFullName) return repo.activeFullName;
+  const routeOwner = route.params.owner;
+  const routeRepo = route.params.repo;
+  if (
+    route.name !== "pr-detail" ||
+    typeof routeOwner !== "string" ||
+    typeof routeRepo !== "string"
+  ) {
+    return null;
+  }
+  return `${routeOwner}/${routeRepo}`;
+});
+const compactRepoName = computed(() => compactRepoFullName.value?.split("/").at(-1) ?? null);
 
 onMounted(async () => {
   const activePlatform = auth.activePlatform;
@@ -67,6 +97,10 @@ onMounted(async () => {
     }
   }
 });
+
+function toggleDiffSidebar() {
+  uiSettings.setDiffSidebarExpanded(!uiSettings.isDiffSidebarExpanded);
+}
 
 function selectPlatform(p: Platform) {
   if (p === auth.activePlatform) return;
@@ -119,18 +153,62 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside
+    id="app-sidebar"
+    class="sidebar"
+    :class="{ 'is-collapsed': isSidebarCollapsed, 'is-focus-mode': isDiffFocusMode }"
+  >
     <div class="sidebar-header">
-      <router-link to="/" class="logo" aria-label="MergeBeacon 首页">
-        <span class="logo-mark" aria-hidden="true">
-          <BrandMark />
-        </span>
-        <span>MergeBeacon</span>
-      </router-link>
+      <div class="sidebar-header-row">
+        <router-link
+          to="/"
+          class="logo"
+          aria-label="MergeBeacon 首页"
+          :title="isSidebarCollapsed ? 'MergeBeacon 首页' : undefined"
+        >
+          <span class="logo-mark" aria-hidden="true">
+            <BrandMark />
+          </span>
+          <span class="sidebar-copy">MergeBeacon</span>
+        </router-link>
+        <button
+          v-if="isDiffFocusMode && !isSidebarCollapsed"
+          class="sidebar-toggle"
+          type="button"
+          title="折叠侧栏"
+          aria-label="折叠侧栏"
+          aria-controls="app-sidebar"
+          :aria-expanded="true"
+          @click="toggleDiffSidebar"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+      </div>
       <span class="app-caption">PR Review Workspace</span>
     </div>
 
-    <div class="platform-selector">
+    <div
+      v-if="isSidebarCollapsed"
+      class="compact-platform"
+      :title="`当前平台：${activePlatformLabel}`"
+      :aria-label="`当前平台：${activePlatformLabel}`"
+    >
+      <span aria-hidden="true">{{ activePlatformShortLabel }}</span>
+    </div>
+
+    <div v-else class="platform-selector">
       <button
         v-for="p in visiblePlatforms"
         :key="p.value"
@@ -162,7 +240,12 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 
     <!-- Navigation -->
     <nav class="nav" aria-label="主导航">
-      <router-link to="/pr" :class="{ active: isActive('pr') }">
+      <router-link
+        to="/pr"
+        :class="{ active: isActive('pr') }"
+        aria-label="拉取请求（PR）"
+        :title="isSidebarCollapsed ? '拉取请求（PR）' : undefined"
+      >
         <svg
           width="16"
           height="16"
@@ -179,9 +262,14 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
           <path d="M6 9v9" />
           <path d="M13 6h3a2 2 0 0 1 2 2v3" />
         </svg>
-        Pull Requests
+        <span class="nav-label">Pull Requests</span>
       </router-link>
-      <router-link to="/issue" :class="{ active: isActive('issue') }">
+      <router-link
+        to="/issue"
+        :class="{ active: isActive('issue') }"
+        aria-label="Issues"
+        :title="isSidebarCollapsed ? 'Issues' : undefined"
+      >
         <svg
           width="16"
           height="16"
@@ -196,9 +284,33 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
           <line x1="12" y1="8" x2="12" y2="12" />
           <line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
-        Issues
+        <span class="nav-label">Issues</span>
       </router-link>
     </nav>
+
+    <div
+      v-if="isSidebarCollapsed && compactRepoName"
+      class="compact-repo"
+      role="note"
+      :title="`当前仓库：${compactRepoFullName}`"
+      :aria-label="`当前仓库：${compactRepoFullName}`"
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+      </svg>
+      <span class="compact-repo-name" aria-hidden="true">{{ compactRepoName }}</span>
+    </div>
 
     <!-- Repo list -->
     <div class="repo-section" v-if="auth.isLoggedIn">
@@ -299,7 +411,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
               <circle cx="6" cy="6" r="3" />
               <circle cx="18" cy="18" r="3" />
             </svg>
-            {{ r.name }}
+            <span class="repo-item-name">{{ r.name }}</span>
           </button>
         </template>
       </div>
@@ -314,6 +426,57 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
         @click="repo.loadMore(auth.activePlatform)"
       >
         {{ repo.loadingMore ? "加载中..." : "加载更多" }}
+      </button>
+    </div>
+
+    <div class="sidebar-footer">
+      <router-link
+        to="/settings"
+        class="settings-link"
+        aria-label="设置"
+        :title="isSidebarCollapsed ? '设置' : undefined"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.14.37.36.7.64.96.3.27.68.42 1.08.44H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z"
+          />
+        </svg>
+        <span class="nav-label">设置</span>
+      </router-link>
+      <button
+        v-if="isSidebarCollapsed"
+        class="sidebar-toggle"
+        type="button"
+        title="展开侧栏"
+        aria-label="展开侧栏"
+        aria-controls="app-sidebar"
+        :aria-expanded="false"
+        @click="toggleDiffSidebar"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="m9 18 6-6-6-6" />
+        </svg>
       </button>
     </div>
   </aside>
@@ -568,24 +731,35 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 }
 
 .repo-list {
-  flex: 1;
-  overflow-y: auto;
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 1px;
+  overflow-y: auto;
+  font-family:
+    "Mona Sans VF",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Noto Sans",
+    Helvetica,
+    Arial,
+    sans-serif,
+    "Apple Color Emoji",
+    "Segoe UI Emoji";
 }
 
 .repo-group-header {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 6px var(--space-2) 2px;
   margin-top: var(--space-1);
-  font-size: 10px;
+  padding: 6px var(--space-2) 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-tertiary);
+  line-height: 1.5;
+  letter-spacing: normal;
 }
 
 .repo-group-header:first-child {
@@ -598,21 +772,29 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 
 .repo-list button {
   display: flex;
+  min-height: 32px;
   align-items: center;
   gap: var(--space-1);
-  text-align: left;
-  min-height: 32px;
   padding: 5px var(--space-2) 5px var(--space-4);
+  overflow: hidden;
   border: none;
-  background: none;
-  font-size: 12px;
   border-radius: var(--radius-md);
-  color: var(--color-text);
+  background: none;
+  color: #1f2328;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-align: left;
   white-space: nowrap;
+  transition: background var(--transition-fast);
+}
+
+.repo-item-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background var(--transition-fast);
-  cursor: pointer;
+  white-space: nowrap;
 }
 
 .repo-list button:hover {
@@ -627,7 +809,6 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 }
 
 .repo-list button.is-fork {
-  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
@@ -658,9 +839,191 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   margin-top: var(--space-2);
 }
 
+.sidebar-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sidebar-toggle,
+.settings-link {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.sidebar-toggle:hover,
+.settings-link:hover {
+  border-color: var(--color-border);
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: auto;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.settings-link {
+  width: auto;
+  flex: 1;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-link.router-link-active {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.compact-platform {
+  display: flex;
+  width: 32px;
+  height: 24px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto var(--space-2);
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.compact-repo {
+  display: flex;
+  min-height: 44px;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  overflow: hidden;
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-secondary);
+}
+
+.compact-repo svg {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+.compact-repo-name {
+  min-height: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-family:
+    "Mona Sans VF",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Noto Sans",
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-orientation: mixed;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+}
+
+.sidebar.is-collapsed {
+  width: 56px;
+}
+
+.sidebar.is-collapsed .sidebar-header {
+  padding: var(--space-3);
+}
+
+.sidebar.is-collapsed .sidebar-header-row {
+  justify-content: center;
+}
+
+.sidebar.is-collapsed .sidebar-copy,
+.sidebar.is-collapsed .app-caption,
+.sidebar.is-collapsed .user-copy,
+.sidebar.is-collapsed .nav-label {
+  display: none;
+}
+
+.sidebar.is-collapsed .auth-status {
+  min-height: 44px;
+  justify-content: center;
+  padding: var(--space-2);
+}
+
+.sidebar.is-collapsed .avatar {
+  width: 28px;
+  height: 28px;
+}
+
+.sidebar.is-collapsed .login-link {
+  font-size: 11px;
+}
+
+.sidebar.is-collapsed .nav {
+  padding: var(--space-2);
+}
+
+.sidebar.is-collapsed .nav a {
+  justify-content: center;
+  gap: 0;
+  min-height: 40px;
+  padding: var(--space-2);
+}
+
+.sidebar.is-collapsed .repo-section {
+  display: none;
+}
+
+.sidebar.is-collapsed .sidebar-footer {
+  flex: 0 0 auto;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: var(--space-2) var(--space-2) var(--space-3);
+}
+
+.sidebar.is-collapsed .settings-link {
+  width: 38px;
+  min-height: 38px;
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: var(--space-2);
+}
+
 @media (max-width: 900px) {
   .sidebar {
     width: 224px;
+  }
+
+  .sidebar.is-collapsed {
+    width: 56px;
   }
 }
 </style>

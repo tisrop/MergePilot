@@ -21,24 +21,24 @@ const baseReadiness: PrMergeReadiness = {
 function mountPanel(
   readiness: PrMergeReadiness | null = baseReadiness,
   error: string | null = null,
+  loading = false,
 ) {
   return mount(MergeReadinessPanel, {
-    props: { readiness, loading: false, error },
+    props: { readiness, loading, error },
   });
 }
 
 describe("MergeReadinessPanel", () => {
-  it("显示已具备合并条件和检查版本", () => {
+  it("只显示紧凑状态并在悬浮详情中显示结果", () => {
     const wrapper = mountPanel();
 
-    expect(wrapper.text()).toContain("可合并");
-    expect(wrapper.text()).toContain("01234567");
-    expect(wrapper.text()).toContain("测试 / CI");
-    expect(wrapper.text()).toContain("合并权限");
-    expect(wrapper.text()).not.toContain("状态未知");
+    expect(wrapper.get(".readiness-status").text()).toContain("可合并");
+    expect(wrapper.text()).not.toContain("合并就绪检查");
+    expect(wrapper.get(".readiness-tooltip").text()).toContain("所有合并条件均已满足");
+    expect(wrapper.find(".condition-list").exists()).toBe(false);
   });
 
-  it("没有合并权限时显示阻塞原因", () => {
+  it("阻断时在悬浮详情中显示平台返回的具体原因", () => {
     const wrapper = mountPanel({
       ...baseReadiness,
       status: "blocked",
@@ -46,33 +46,39 @@ describe("MergeReadinessPanel", () => {
       blocking_reasons: [{ code: "no_merge_permission", message: "当前账号没有该仓库的合并权限" }],
     });
 
-    expect(wrapper.text()).toContain("合并权限无");
-    expect(wrapper.text()).toContain("当前账号没有该仓库的合并权限");
-  });
-
-  it("阻塞时显示结构化原因", () => {
-    const wrapper = mountPanel({
-      ...baseReadiness,
-      status: "blocked",
-      blocking_reasons: [{ code: "conflicts", message: "源分支存在合并冲突" }],
-    });
-
-    expect(wrapper.text()).toContain("已阻断");
-    expect(wrapper.text()).toContain("源分支存在合并冲突");
+    expect(wrapper.get(".readiness-status").text()).toContain("已阻断");
+    expect(wrapper.get(".readiness-tooltip").text()).toContain("当前账号没有该仓库的合并权限");
+    expect(wrapper.find(".condition-list").exists()).toBe(false);
   });
 
   it("未知状态不会显示可合并", () => {
     const wrapper = mountPanel({ ...baseReadiness, status: "unknown", checks_status: "unknown" });
 
-    expect(wrapper.text()).toContain("状态未知");
-    expect(wrapper.text()).not.toContain("服务端已确认当前版本满足可合并条件");
+    expect(wrapper.get(".readiness-status").text()).toContain("状态未知");
+    expect(wrapper.get(".readiness-status").text()).not.toContain("可合并");
   });
 
-  it("错误状态支持重试", async () => {
-    const wrapper = mountPanel(null, "读取失败");
-    await wrapper.get("button").trigger("click");
+  it("点击刷新图标重新检查合并状态", async () => {
+    const wrapper = mountPanel();
+    await wrapper.get(".refresh-button").trigger("click");
 
-    expect(wrapper.text()).toContain("读取失败");
+    expect(wrapper.emitted("retry")).toHaveLength(1);
+    expect(wrapper.get(".refresh-button").attributes("aria-label")).toBe("刷新合并状态");
+  });
+
+  it("刷新期间禁用刷新图标并保留已有状态", () => {
+    const wrapper = mountPanel(baseReadiness, null, true);
+
+    expect(wrapper.get(".refresh-button").attributes()).toHaveProperty("disabled");
+    expect(wrapper.get(".refresh-button").attributes("aria-label")).toBe("正在刷新合并状态");
+    expect(wrapper.get(".readiness-status").text()).toContain("可合并");
+  });
+
+  it("首次读取失败时通过悬浮详情显示错误并允许重试", async () => {
+    const wrapper = mountPanel(null, "读取失败");
+    await wrapper.get(".refresh-button").trigger("click");
+
+    expect(wrapper.get(".readiness-tooltip").text()).toContain("读取失败");
     expect(wrapper.emitted("retry")).toHaveLength(1);
   });
 });

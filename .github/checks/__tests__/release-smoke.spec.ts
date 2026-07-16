@@ -99,7 +99,7 @@ describe("Release smoke 检查", () => {
     expect(workflow).toContain("release-smoke:");
     expect(workflow).toContain("release-smoke-windows-portable:");
     expect(workflow).toContain("needs: [release-smoke, release-smoke-windows-portable]");
-    expect(workflow).toContain("needs: [cleanup-release-signatures]");
+    expect(workflow).toContain("needs: [cleanup-release-signatures, prepare-release]");
   });
 
   it("读取 Draft Release 资源的 smoke job 必须拥有 contents write 权限", async () => {

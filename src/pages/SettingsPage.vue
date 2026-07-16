@@ -5,12 +5,14 @@ import { copySupportInfo as copySupportInfoToClipboard, getAppVersion } from "@/
 import { getErrorMessage } from "@/utils/error";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useUpdateStore } from "@/stores/useUpdateStore";
+import { useUiSettingsStore } from "@/stores/useUiSettingsStore";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import AiSettings from "@/components/ai/AiSettings.vue";
 import type { Platform } from "@/types";
 
 const auth = useAuthStore();
 const updates = useUpdateStore();
+const uiSettings = useUiSettingsStore();
 const {
   isAutoUpdateCheckEnabled,
   isCheckingUpdate,
@@ -23,6 +25,7 @@ const {
   updateTotal,
   updatePhase,
 } = storeToRefs(updates);
+const { isDiffSyncScrollEnabled } = storeToRefs(uiSettings);
 
 const platformList: { value: Platform; label: string }[] = [
   { value: "github", label: "GitHub" },
@@ -64,6 +67,10 @@ async function checkUpdate(isBackground = false) {
 async function setAutoUpdateCheckEnabled(event: Event) {
   const enabled = (event.target as HTMLInputElement).checked;
   await updates.setAutoUpdateCheckEnabled(enabled);
+}
+
+function setDiffSyncScrollEnabled(event: Event) {
+  uiSettings.setDiffSyncScrollEnabled((event.target as HTMLInputElement).checked);
 }
 
 async function installUpdate() {
@@ -132,6 +139,23 @@ async function copySupportInfo() {
             <h3>界面设置</h3>
             <p>选择需要在侧边栏中显示的代码托管平台。</p>
           </div>
+        </div>
+        <div class="setting-row">
+          <span>
+            <span class="setting-label">同步 Diff 横向滚动</span>
+            <span class="setting-hint">
+              横向滚动条始终固定在顶部；开启后左右代码同步移动，关闭后分别滚动。
+            </span>
+          </span>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              aria-label="同步 Diff 横向滚动"
+              :checked="isDiffSyncScrollEnabled"
+              @change="setDiffSyncScrollEnabled"
+            />
+            <span class="toggle-slider" />
+          </label>
         </div>
         <div v-for="p in platformList" :key="p.value" class="setting-row">
           <span>
