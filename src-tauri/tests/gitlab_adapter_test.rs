@@ -79,7 +79,7 @@ async fn test_gitlab_nested_subgroup_project_path_is_fully_encoded() {
 }
 
 #[tokio::test]
-async fn test_gitlab_pr_detail_exposes_head_sha_for_inline_comments() {
+async fn test_gitlab_pr_detail_exposes_base_and_head_revisions() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/group%2Frepo/merge_requests/3"))
@@ -95,7 +95,8 @@ async fn test_gitlab_pr_detail_exposes_head_sha_for_inline_comments() {
             "description": "",
             "source_branch": "feature",
             "target_branch": "main",
-            "sha": "head-sha"
+            "sha": "head-sha",
+            "diff_refs": {"base_sha": "base-sha", "head_sha": "head-sha"}
         })))
         .expect(1)
         .mount(&mock_server)
@@ -105,6 +106,7 @@ async fn test_gitlab_pr_detail_exposes_head_sha_for_inline_comments() {
     let detail = adapter.get_pull_request("group", "repo", 3).await.expect("should load merge request");
 
     assert_eq!(detail.head_sha, "head-sha");
+    assert_eq!(detail.base_sha, "base-sha");
 }
 
 #[tokio::test]
@@ -602,4 +604,27 @@ async fn test_gitlab_merge_readiness_is_ready_with_merge_permission() {
     assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Ready);
     assert_eq!(readiness.has_merge_permission, Some(true));
     assert!(readiness.blocking_reasons.is_empty());
+}
+
+#[tokio::test]
+async fn test_gitlab_file_content_encodes_nested_project_and_file_path() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Fsubgroup%2Frepo/repository/files/src%2Fa%20b.rs"))
+        .and(query_param("ref", "base-sha"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "encoding": "base64",
+            "content": "Zm4gbWFpbigpIHt9Cg==",
+            "size": 13
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let content =
+        adapter.get_pr_file_content("group/subgroup", "repo", "src/a b.rs", "base-sha").await.expect("file content");
+
+    assert_eq!(content.content, "fn main() {}\n");
+    assert_eq!(content.revision, "base-sha");
 }

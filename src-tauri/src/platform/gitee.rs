@@ -426,6 +426,7 @@ impl GitPlatform for GiteeAdapter {
             target_branch: json["base"]["ref"].as_str().unwrap_or("").to_string(),
             mergeable: json["mergeable"].as_bool(),
             head_sha: json["head"]["sha"].as_str().unwrap_or("").to_string(),
+            base_sha: json["base"]["sha"].as_str().unwrap_or("").to_string(),
         })
     }
 
@@ -585,6 +586,34 @@ impl GitPlatform for GiteeAdapter {
             .join("");
 
         Ok((diff, files))
+    }
+
+    async fn get_pr_file_content(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        revision: &str,
+    ) -> Result<PrFileContent, AppError> {
+        crate::file_content::validate_request(path, revision)?;
+        let encoded_path = crate::file_content::encode_path_segments(path);
+        let encoded_revision = urlencoding::encode(revision);
+        let url =
+            format!("{}/repos/{}/{}/contents/{}?ref={}", self.base_url, owner, repo, encoded_path, encoded_revision);
+        let separator = if url.contains('?') { "&" } else { "?" };
+        let full_url = format!("{}{}{}", url, separator, self.auth_query());
+        let response = self
+            .client
+            .get(&full_url)
+            .header("User-Agent", "mergebeacon")
+            .send()
+            .await
+            .map_err(|error| AppError::Http(error.without_url()))?;
+        if !response.status().is_success() {
+            return Err(AppError::Api(format!("Gitee 文件内容请求失败（HTTP {}）", response.status())));
+        }
+        let json = response.json::<Value>().await.map_err(|error| AppError::Http(error.without_url()))?;
+        crate::file_content::decode_response("Gitee", path, revision, &json)
     }
 
     async fn create_review(

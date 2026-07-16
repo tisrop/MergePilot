@@ -3,12 +3,18 @@ import { computed, ref, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { storeToRefs } from "pinia";
 import { html } from "diff2html";
 import "diff2html/bundles/css/diff2html.min.css";
-import type { DiffResult, FileStatus, PrFile } from "@/types";
+import type { DiffResult, FileStatus, PatchHunk, PatchLine, Platform, PrFile } from "@/types";
+import { prFileContent } from "@/api";
 import AppSelect from "@/components/shared/AppSelect.vue";
 import { useUiSettingsStore } from "@/stores/useUiSettingsStore";
 
 const props = defineProps<{
   diff: DiffResult | null;
+  platform?: Platform;
+  owner?: string;
+  repo?: string;
+  baseSha?: string;
+  headSha?: string;
 }>();
 
 const uiSettings = useUiSettingsStore();
@@ -36,6 +42,46 @@ interface FileTreeRow extends FileTreeNode {
   depth: number;
 }
 
+interface ControlledDiffRow {
+  key: string;
+  left: PatchLine | null;
+  right: PatchLine | null;
+}
+
+interface ControlledContextGap {
+  key: string;
+  oldStart: number;
+  oldEnd: number;
+  newStart: number;
+  newEnd: number;
+  direction: "up" | "both" | "down";
+}
+
+interface ControlledDiffHunk {
+  key: string;
+  hunk: PatchHunk;
+  rows: ControlledDiffRow[];
+  gapBefore: ControlledContextGap | null;
+}
+
+interface LoadedFileContext {
+  identity: string;
+  baseLines: string[];
+  headLines: string[];
+}
+
+interface ContextExpansion {
+  fromStart: number;
+  fromEnd: number;
+}
+
+interface ContextGapAction {
+  edge: "start" | "end";
+  arrow: "↑" | "↓";
+}
+
+const CONTEXT_EXPANSION_STEP = 20;
+
 const containerRef = ref<HTMLElement | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 const topScrollbarRef = ref<HTMLElement | null>(null);
@@ -49,6 +95,8 @@ const navigatorWidth = ref(270);
 const resizingNavigator = ref(false);
 const selectedFilePath = ref("");
 const expandedDirectories = ref<Set<string>>(new Set());
+
+const controlledSides = ["left", "right"] as const;
 
 const statusDescriptions: Record<FileStatus, string> = {
   added: "新增",
@@ -140,6 +188,295 @@ const visibleTreeRows = computed(() => {
 const selectedFile = computed(
   () => props.diff?.files.find((file) => file.filename === selectedFilePath.value) ?? null,
 );
+const hasStandardPatchPayload = computed(
+  () => props.diff?.patch_schema_version === 1 && Array.isArray(props.diff?.patches),
+);
+const selectedStandardPatch = computed(
+  () =>
+    (hasStandardPatchPayload.value ? props.diff?.patches : [])?.find(
+      (patch) => patch.filename === selectedFilePath.value,
+    ) ?? null,
+);
+
+function pairHunkLines(lines: PatchLine[], hunkKey: string): ControlledDiffRow[] {
+  const rows: ControlledDiffRow[] = [];
+  let deletions: PatchLine[] = [];
+  let additions: PatchLine[] = [];
+  let rowIndex = 0;
+  let previousKind: PatchLine["kind"] | null = null;
+
+  const appendRow = (left: PatchLine | null, right: PatchLine | null) => {
+    rows.push({ key: `${hunkKey}:row:${rowIndex}`, left, right });
+    rowIndex += 1;
+  };
+  const flushChanges = () => {
+    const rowCount = Math.max(deletions.length, additions.length);
+    for (let index = 0; index < rowCount; index += 1) {
+      appendRow(deletions[index] ?? null, additions[index] ?? null);
+    }
+    deletions = [];
+    additions = [];
+  };
+
+  for (const line of lines) {
+    if (line.kind === "context") {
+      flushChanges();
+      appendRow(line, line);
+    } else if (line.kind === "deletion") {
+      if (additions.length > 0) flushChanges();
+      deletions.push(line);
+    } else if (line.kind === "addition") {
+      additions.push(line);
+    } else {
+      flushChanges();
+      if (previousKind === "deletion") appendRow(line, null);
+      else if (previousKind === "addition") appendRow(null, line);
+      else appendRow(line, line);
+    }
+    previousKind = line.kind;
+  }
+  flushChanges();
+  return rows;
+}
+
+const loadedFileContext = ref<LoadedFileContext | null>(null);
+const expandedContextGaps = ref<Map<string, ContextExpansion>>(new Map());
+const contextLoading = ref(false);
+const contextError = ref("");
+let contextRequestSequence = 0;
+
+const contextIdentity = computed(() =>
+  [
+    props.platform ?? "",
+    props.owner ?? "",
+    props.repo ?? "",
+    selectedStandardPatch.value?.old_path ?? "",
+    selectedStandardPatch.value?.new_path ?? "",
+    props.baseSha ?? "",
+    props.headSha ?? "",
+  ].join("\0"),
+);
+
+function splitFileLines(content: string): string[] {
+  const lines = content.split("\n");
+  if (content.endsWith("\n")) lines.pop();
+  return lines;
+}
+
+function gapBeforeHunk(index: number): ControlledContextGap | null {
+  const hunks = selectedStandardPatch.value?.hunks ?? [];
+  const hunk = hunks[index];
+  if (!hunk) return null;
+  const previous = hunks[index - 1];
+  const oldStart = Math.max(1, previous ? previous.old_start + previous.old_count : 1);
+  const newStart = Math.max(1, previous ? previous.new_start + previous.new_count : 1);
+  const oldEnd = Math.max(0, hunk.old_start - 1);
+  const newEnd = Math.max(0, hunk.new_start - 1);
+  if (oldEnd < oldStart && newEnd < newStart) return null;
+  return {
+    key: `${selectedStandardPatch.value?.filename ?? "file"}:gap:${index}`,
+    oldStart,
+    oldEnd,
+    newStart,
+    newEnd,
+    direction: index === 0 ? "up" : "both",
+  };
+}
+
+const trailingContextGap = computed<ControlledContextGap | null>(() => {
+  const payload = loadedFileContext.value;
+  const hunks = selectedStandardPatch.value?.hunks ?? [];
+  const last = hunks.at(-1);
+  if (!payload || payload.identity !== contextIdentity.value || !last) return null;
+  const oldStart = Math.max(1, last.old_start + last.old_count);
+  const newStart = Math.max(1, last.new_start + last.new_count);
+  const oldEnd = payload.baseLines.length;
+  const newEnd = payload.headLines.length;
+  if (oldEnd < oldStart && newEnd < newStart) return null;
+  return {
+    key: `${selectedStandardPatch.value?.filename ?? "file"}:gap:trailing`,
+    oldStart,
+    oldEnd,
+    newStart,
+    newEnd,
+    direction: "down",
+  };
+});
+
+const controlledHunks = computed<ControlledDiffHunk[]>(() =>
+  (selectedStandardPatch.value?.hunks ?? []).map((hunk, index) => {
+    const key = `${selectedStandardPatch.value?.filename ?? "file"}:hunk:${index}`;
+    return { key, hunk, rows: pairHunkLines(hunk.lines, key), gapBefore: gapBeforeHunk(index) };
+  }),
+);
+
+const availableContextGaps = computed(() => [
+  ...controlledHunks.value.flatMap((hunk) => (hunk.gapBefore ? [hunk.gapBefore] : [])),
+  ...(trailingContextGap.value ? [trailingContextGap.value] : []),
+]);
+const hasExpandedContext = computed(() => expandedContextGaps.value.size > 0);
+const canLoadContext = computed(
+  () =>
+    Boolean(props.platform && props.owner && props.repo) &&
+    Boolean(
+      (selectedStandardPatch.value?.old_path && props.baseSha) ||
+      (selectedStandardPatch.value?.new_path && props.headSha),
+    ),
+);
+
+function contextGapActions(gap: ControlledContextGap): ContextGapAction[] {
+  if (gap.direction === "up") return [{ edge: "end", arrow: "↑" }];
+  if (gap.direction === "down") return [{ edge: "start", arrow: "↓" }];
+  return [
+    { edge: "end", arrow: "↑" },
+    { edge: "start", arrow: "↓" },
+  ];
+}
+
+function contextGapLabel(gap: ControlledContextGap, edge: ContextGapAction["edge"]): string {
+  if (gap.direction === "both") {
+    return `向${edge === "start" ? "下" : "上"}展开未变更上下文（20 行）`;
+  }
+  return `展开${edge === "start" ? "下方" : "上方"}未变更上下文（20 行）`;
+}
+
+function contextGapRowCount(gap: ControlledContextGap): number {
+  const oldCount = Math.max(0, gap.oldEnd - gap.oldStart + 1);
+  const newCount = Math.max(0, gap.newEnd - gap.newStart + 1);
+  return Math.max(oldCount, newCount);
+}
+
+function isContextGapExpanded(gap: ControlledContextGap): boolean {
+  const expansion = expandedContextGaps.value.get(gap.key);
+  return Boolean(expansion && expansion.fromStart + expansion.fromEnd >= contextGapRowCount(gap));
+}
+
+function contextRows(gap: ControlledContextGap): ControlledDiffRow[] {
+  const payload = loadedFileContext.value;
+  if (!payload || payload.identity !== contextIdentity.value) return [];
+  const oldCount = Math.max(0, gap.oldEnd - gap.oldStart + 1);
+  const newCount = Math.max(0, gap.newEnd - gap.newStart + 1);
+  const rowCount = Math.max(oldCount, newCount);
+  return Array.from({ length: rowCount }, (_, index) => {
+    const oldLine = index < oldCount ? gap.oldStart + index : null;
+    const newLine = index < newCount ? gap.newStart + index : null;
+    return {
+      key: `${gap.key}:context:${index}`,
+      left:
+        oldLine === null
+          ? null
+          : {
+              kind: "context",
+              content: payload.baseLines[oldLine - 1] ?? "",
+              old_line: oldLine,
+              new_line: newLine,
+            },
+      right:
+        newLine === null
+          ? null
+          : {
+              kind: "context",
+              content: payload.headLines[newLine - 1] ?? "",
+              old_line: oldLine,
+              new_line: newLine,
+            },
+    };
+  });
+}
+
+function contextRowsFromStart(gap: ControlledContextGap): ControlledDiffRow[] {
+  const rows = contextRows(gap);
+  const expansion = expandedContextGaps.value.get(gap.key);
+  if (!expansion) return [];
+  return rows.slice(0, Math.min(expansion.fromStart, rows.length - expansion.fromEnd));
+}
+
+function contextRowsFromEnd(gap: ControlledContextGap): ControlledDiffRow[] {
+  const rows = contextRows(gap);
+  const expansion = expandedContextGaps.value.get(gap.key);
+  if (!expansion) return [];
+  const start = Math.max(expansion.fromStart, rows.length - expansion.fromEnd);
+  return rows.slice(start);
+}
+
+async function loadSelectedFileContext(): Promise<boolean> {
+  const patch = selectedStandardPatch.value;
+  const identity = contextIdentity.value;
+  if (loadedFileContext.value?.identity === identity) return true;
+  if (!patch || !props.platform || !props.owner || !props.repo || !canLoadContext.value) {
+    contextError.value = "缺少该 PR 的 base/head revision，无法展开上下文";
+    return false;
+  }
+
+  const requestSequence = ++contextRequestSequence;
+  contextLoading.value = true;
+  contextError.value = "";
+  try {
+    const [base, head] = await Promise.all([
+      patch.old_path && props.baseSha
+        ? prFileContent(props.platform, props.owner, props.repo, patch.old_path, props.baseSha)
+        : Promise.resolve(null),
+      patch.new_path && props.headSha
+        ? prFileContent(props.platform, props.owner, props.repo, patch.new_path, props.headSha)
+        : Promise.resolve(null),
+    ]);
+    if (requestSequence !== contextRequestSequence || identity !== contextIdentity.value)
+      return false;
+    if (base?.truncated || head?.truncated) {
+      contextError.value = "文件过大，无法展开完整上下文";
+      return false;
+    }
+    if (base?.binary || head?.binary) {
+      contextError.value = "二进制文件不支持展开文本上下文";
+      return false;
+    }
+    loadedFileContext.value = {
+      identity,
+      baseLines: base ? splitFileLines(base.content) : [],
+      headLines: head ? splitFileLines(head.content) : [],
+    };
+    return true;
+  } catch (error) {
+    if (requestSequence === contextRequestSequence && identity === contextIdentity.value) {
+      contextError.value = error instanceof Error ? error.message : String(error);
+    }
+    return false;
+  } finally {
+    if (requestSequence === contextRequestSequence) contextLoading.value = false;
+  }
+}
+
+async function expandContextGap(
+  gap: ControlledContextGap,
+  edge: ContextGapAction["edge"],
+): Promise<void> {
+  if (isContextGapExpanded(gap)) return;
+  if (!(await loadSelectedFileContext())) return;
+  const rowCount = contextGapRowCount(gap);
+  const current = expandedContextGaps.value.get(gap.key) ?? { fromStart: 0, fromEnd: 0 };
+  const remaining = Math.max(0, rowCount - current.fromStart - current.fromEnd);
+  const amount = Math.min(CONTEXT_EXPANSION_STEP, remaining);
+  const next = { ...current };
+  if (edge === "start") next.fromStart += amount;
+  else next.fromEnd += amount;
+  expandedContextGaps.value = new Map(expandedContextGaps.value).set(gap.key, next);
+}
+
+async function expandAllContext(): Promise<void> {
+  if (!(await loadSelectedFileContext())) return;
+  expandedContextGaps.value = new Map(
+    availableContextGaps.value.map((gap) => [
+      gap.key,
+      { fromStart: contextGapRowCount(gap), fromEnd: 0 },
+    ]),
+  );
+}
+
+function collapseAllContext(): void {
+  expandedContextGaps.value = new Map();
+}
+
+const hasControlledPatch = computed(() => selectedStandardPatch.value !== null);
 const totalAdditions = computed(() =>
   (props.diff?.files ?? []).reduce((total, file) => total + file.additions, 0),
 );
@@ -203,6 +540,8 @@ const diffHtml = computed(() => {
     return "";
   }
 });
+
+const hasDiffContent = computed(() => hasControlledPatch.value || Boolean(diffHtml.value));
 
 function toggleDirectory(key: string) {
   const next = new Set(expandedDirectories.value);
@@ -292,9 +631,11 @@ function syncRenderedFile() {
 
 let diffResizeObserver: ResizeObserver | null = null;
 
+const SIDE_DIFF_SELECTOR = ".d2h-file-side-diff, .controlled-file-side-diff";
+
 function visibleSideDiffScrollers(): HTMLElement[] {
   return Array.from(
-    containerRef.value?.querySelectorAll<HTMLElement>(".d2h-file-side-diff") ?? [],
+    containerRef.value?.querySelectorAll<HTMLElement>(SIDE_DIFF_SELECTOR) ?? [],
   ).filter((scroller) => !scroller.closest<HTMLElement>(".d2h-file-wrapper")?.hidden);
 }
 
@@ -364,7 +705,7 @@ function handleIndependentTopScrollbarScroll(sideIndex: number): void {
 
 function handleSideDiffScroll(event: Event): void {
   const source = event.target;
-  if (!(source instanceof HTMLElement) || !source.classList.contains("d2h-file-side-diff")) return;
+  if (!(source instanceof HTMLElement) || !source.matches(SIDE_DIFF_SELECTOR)) return;
   updateLineNumberGutterOffset(source);
   if (isDiffSyncScrollEnabled.value) {
     setSideDiffScrollLeft(source.scrollLeft, source);
@@ -393,7 +734,7 @@ function handleDiffWheel(event: WheelEvent): void {
 
   const sideScrollers = visibleSideDiffScrollers();
   const eventTarget = event.target instanceof Element ? event.target : null;
-  const source = eventTarget?.closest<HTMLElement>(".d2h-file-side-diff") ?? null;
+  const source = eventTarget?.closest<HTMLElement>(SIDE_DIFF_SELECTOR) ?? null;
   const sideIndex = source ? sideScrollers.indexOf(source) : -1;
   const topScroller = isDiffSyncScrollEnabled.value
     ? topScrollbarRef.value
@@ -441,14 +782,26 @@ watch(
 
 // 同一批文件再次加载（例如切换 PR 但文件名未变）时，也回到第一个文件。
 watch(
-  () => props.diff?.diff,
+  () => props.diff,
   (next, previous) => {
     if (next !== previous) selectedFilePath.value = firstFilePath(fileTree.value);
   },
 );
 
 watch(
-  [diffHtml, selectedFilePath],
+  contextIdentity,
+  () => {
+    contextRequestSequence += 1;
+    loadedFileContext.value = null;
+    expandedContextGaps.value = new Map();
+    contextLoading.value = false;
+    contextError.value = "";
+  },
+  { immediate: true },
+);
+
+watch(
+  [diffHtml, selectedFilePath, selectedStandardPatch],
   async () => {
     await nextTick();
     syncRenderedFile();
@@ -524,23 +877,78 @@ const opinionTemplates: Record<string, string> = {
 };
 
 function getFileFromNode(node: Node): HTMLElement | null {
-  let el: HTMLElement | null =
-    node.nodeType === Node.ELEMENT_NODE
-      ? (node as HTMLElement)
-      : (node.parentElement as HTMLElement);
-  while (el) {
-    const cls = el.classList;
-    if (cls.contains("d2h-file-wrapper") || cls.contains("d2h-wrapper")) return el;
-    if (cls.contains("d2h-files-diff") || cls.contains("d2h-file-side-diff")) {
-      let p = el.parentElement;
-      while (p) {
-        if (p.classList.contains("d2h-file-wrapper")) return p;
-        p = p.parentElement;
-      }
+  let element: HTMLElement | null =
+    node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
+  while (element) {
+    if (
+      element.classList.contains("controlled-file-wrapper") ||
+      element.classList.contains("d2h-file-wrapper") ||
+      element.classList.contains("d2h-wrapper")
+    ) {
+      return element;
     }
-    el = el.parentElement;
+    element = element.parentElement;
   }
   return null;
+}
+
+function getControlledSelectionRange(
+  range: Range,
+  file: HTMLElement,
+): { path: string; startLine: number; endLine: number; side: "left" | "right" } | null {
+  const path = file.dataset.filePath ?? "";
+  if (!path) return null;
+
+  const selectedLines = Array.from(
+    file.querySelectorAll<HTMLElement>(".controlled-line[data-line][data-side]"),
+  ).filter((line) => range.intersectsNode(line));
+  const selectedSides = new Set(selectedLines.map((line) => line.dataset.side));
+  if (selectedLines.length === 0 || selectedSides.size !== 1) return null;
+
+  const side = selectedLines[0].dataset.side;
+  if (side !== "left" && side !== "right") return null;
+  const lines = selectedLines
+    .map((line) => Number.parseInt(line.dataset.line ?? "", 10))
+    .filter((line) => Number.isFinite(line) && line > 0);
+  if (lines.length === 0) return null;
+
+  return {
+    path,
+    startLine: Math.min(...lines),
+    endLine: Math.max(...lines),
+    side,
+  };
+}
+
+function getLegacySelectionRange(
+  range: Range,
+  file: HTMLElement,
+): { path: string; startLine: number; endLine: number; side: "left" | "right" } | null {
+  const fileNameElement =
+    file.querySelector(".d2h-file-name") ||
+    file.querySelector(".d2h-file-name-wrapper .d2h-file-name");
+  const path = fileNameElement?.textContent?.trim() || "";
+  if (!path) return null;
+
+  const lines: number[] = [];
+  let side: "left" | "right" | null = null;
+  file.querySelectorAll("tr").forEach((row) => {
+    if (!range.intersectsNode(row)) return;
+    row.querySelectorAll(".d2h-code-side-linenumber, .d2h-code-linenumber").forEach((element) => {
+      const line = Number.parseInt((element as HTMLElement).textContent || "0", 10);
+      if (!line) return;
+      lines.push(line);
+      if (side) return;
+
+      const scroller = (element as HTMLElement).closest<HTMLElement>(".d2h-file-side-diff");
+      if (!scroller) return;
+      const sideDiffs = scroller.parentElement?.querySelectorAll(".d2h-file-side-diff");
+      side = sideDiffs && sideDiffs.length > 1 && sideDiffs[0] === scroller ? "left" : "right";
+    });
+  });
+
+  if (lines.length === 0 || !side) return null;
+  return { path, startLine: Math.min(...lines), endLine: Math.max(...lines), side };
 }
 
 function getSelectionRange(): {
@@ -549,53 +957,17 @@ function getSelectionRange(): {
   endLine: number;
   side: "left" | "right";
 } | null {
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed) return null;
-  if (!sel.toString().trim()) return null;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) return null;
 
-  const range = sel.getRangeAt(0);
-  if (!range) return null;
-
+  const range = selection.getRangeAt(0);
   const startFile = getFileFromNode(range.startContainer);
   const endFile = getFileFromNode(range.endContainer);
   if (!startFile || startFile !== endFile) return null;
 
-  const fileNameEl =
-    startFile.querySelector(".d2h-file-name") ||
-    startFile.querySelector(".d2h-file-name-wrapper .d2h-file-name");
-  const filePath = fileNameEl?.textContent?.trim() || "";
-  if (!filePath) return null;
-
-  const lines: number[] = [];
-  let side: "left" | "right" | null = null;
-
-  startFile.querySelectorAll("tr").forEach((row) => {
-    if (!range.intersectsNode(row)) return;
-    const lnEls = row.querySelectorAll(".d2h-code-side-linenumber, .d2h-code-linenumber");
-    lnEls.forEach((el) => {
-      const num = parseInt((el as HTMLElement).textContent || "0", 10);
-      if (!num) return;
-      lines.push(num);
-      if (!side) {
-        let p: HTMLElement | null = el as HTMLElement;
-        while (p && !p.classList.contains("d2h-file-side-diff")) p = p.parentElement;
-        if (p) {
-          const container = p.parentElement;
-          const sideDiffs = container?.querySelectorAll(".d2h-file-side-diff");
-          const isLeft = sideDiffs && sideDiffs.length > 1 && sideDiffs[0] === p;
-          side = isLeft ? "left" : "right";
-        }
-      }
-    });
-  });
-
-  if (lines.length === 0 || !side) return null;
-  return {
-    path: filePath,
-    startLine: Math.min(...lines),
-    endLine: Math.max(...lines),
-    side,
-  };
+  return startFile.classList.contains("controlled-file-wrapper")
+    ? getControlledSelectionRange(range, startFile)
+    : getLegacySelectionRange(range, startFile);
 }
 
 function handleContextMenu(event: MouseEvent) {
@@ -713,7 +1085,7 @@ onUnmounted(() => {
 <template>
   <div class="diff-viewer-wrapper">
     <section
-      v-if="diffHtml"
+      v-if="hasDiffContent"
       ref="workspaceRef"
       class="diff-workspace"
       :class="{
@@ -853,6 +1225,26 @@ onUnmounted(() => {
             <span class="additions">+{{ selectedFile.additions }}</span>
             <span class="deletions">-{{ selectedFile.deletions }}</span>
           </div>
+          <div v-if="hasControlledPatch && canLoadContext" class="context-toolbar-actions">
+            <button
+              v-if="hasExpandedContext"
+              class="context-toolbar-button"
+              type="button"
+              :disabled="contextLoading"
+              @click="collapseAllContext"
+            >
+              收起全部上下文
+            </button>
+            <button
+              v-else
+              class="context-toolbar-button"
+              type="button"
+              :disabled="contextLoading"
+              @click="expandAllContext"
+            >
+              {{ contextLoading ? "加载上下文中..." : "展开全部上下文" }}
+            </button>
+          </div>
         </header>
 
         <div class="diff-top-scrollbars" :class="{ independent: !isDiffSyncScrollEnabled }">
@@ -903,7 +1295,215 @@ onUnmounted(() => {
           </template>
         </div>
         <div ref="diffScrollRef" class="diff-scroll-region" @wheel="handleDiffWheel">
-          <div ref="containerRef" class="diff2html-container" v-html="diffHtml" />
+          <div ref="containerRef" class="diff2html-container">
+            <article
+              v-if="selectedStandardPatch"
+              class="controlled-file-wrapper"
+              :data-file-path="selectedStandardPatch.filename"
+            >
+              <header class="controlled-file-header">
+                <span class="controlled-file-paths">
+                  {{ selectedStandardPatch.old_path ?? "/dev/null" }}
+                  <span aria-hidden="true">→</span>
+                  {{ selectedStandardPatch.new_path ?? "/dev/null" }}
+                </span>
+                <span class="controlled-file-summary">
+                  <span class="additions">+{{ selectedStandardPatch.additions }}</span>
+                  <span class="deletions">-{{ selectedStandardPatch.deletions }}</span>
+                </span>
+              </header>
+              <p v-if="contextError" class="context-load-error" role="alert">
+                {{ contextError }}
+              </p>
+
+              <div
+                v-if="selectedStandardPatch.content_kind === 'text' && controlledHunks.length > 0"
+                class="controlled-side-by-side"
+              >
+                <div
+                  v-for="side in controlledSides"
+                  :key="side"
+                  class="controlled-file-side-diff"
+                  :class="`controlled-side-${side}`"
+                  :aria-label="side === 'left' ? '变更前代码' : '变更后代码'"
+                >
+                  <div class="controlled-side-content">
+                    <template
+                      v-for="controlledHunk in controlledHunks"
+                      :key="`${controlledHunk.key}:${side}`"
+                    >
+                      <template v-if="controlledHunk.gapBefore">
+                        <div
+                          v-for="row in contextRowsFromStart(controlledHunk.gapBefore)"
+                          :key="`${row.key}:${side}`"
+                          class="controlled-line controlled-context-line"
+                          :data-side="side"
+                          :data-line="side === 'left' ? row.left?.old_line : row.right?.new_line"
+                        >
+                          <span class="controlled-line-number" aria-hidden="true">
+                            {{ side === "left" ? row.left?.old_line : row.right?.new_line }}
+                          </span>
+                          <span class="controlled-line-marker" aria-hidden="true"> </span>
+                          <code class="controlled-code">{{
+                            (side === "left" ? row.left : row.right)?.content ?? ""
+                          }}</code>
+                        </div>
+                      </template>
+                      <section class="controlled-hunk">
+                        <div
+                          class="controlled-hunk-header"
+                          :aria-label="side === 'left' ? controlledHunk.hunk.header : undefined"
+                          :aria-hidden="side === 'right' ? 'true' : undefined"
+                        >
+                          <template
+                            v-if="
+                              controlledHunk.gapBefore &&
+                              !isContextGapExpanded(controlledHunk.gapBefore)
+                            "
+                          >
+                            <div
+                              v-if="side === 'left'"
+                              class="context-gap-controls"
+                              :class="{
+                                'context-gap-controls-both':
+                                  contextGapActions(controlledHunk.gapBefore).length > 1,
+                              }"
+                            >
+                              <button
+                                v-for="action in contextGapActions(controlledHunk.gapBefore)"
+                                :key="action.edge"
+                                class="context-gap-button"
+                                type="button"
+                                :disabled="contextLoading"
+                                :aria-label="contextGapLabel(controlledHunk.gapBefore, action.edge)"
+                                @click="expandContextGap(controlledHunk.gapBefore, action.edge)"
+                              >
+                                <span aria-hidden="true">{{ action.arrow }}</span>
+                              </button>
+                            </div>
+                            <span
+                              v-else
+                              class="context-gap-placeholder"
+                              :class="{
+                                'context-gap-placeholder-both':
+                                  contextGapActions(controlledHunk.gapBefore).length > 1,
+                              }"
+                              aria-hidden="true"
+                            />
+                          </template>
+                          <span v-else class="controlled-hunk-gutter" aria-hidden="true" />
+                          <span v-if="side === 'left'" class="controlled-hunk-header-text">
+                            {{ controlledHunk.hunk.header }}
+                          </span>
+                        </div>
+                        <template v-if="controlledHunk.gapBefore">
+                          <div
+                            v-for="row in contextRowsFromEnd(controlledHunk.gapBefore)"
+                            :key="`${row.key}:${side}`"
+                            class="controlled-line controlled-context-line"
+                            :data-side="side"
+                            :data-line="side === 'left' ? row.left?.old_line : row.right?.new_line"
+                          >
+                            <span class="controlled-line-number" aria-hidden="true">
+                              {{ side === "left" ? row.left?.old_line : row.right?.new_line }}
+                            </span>
+                            <span class="controlled-line-marker" aria-hidden="true"> </span>
+                            <code class="controlled-code">{{
+                              (side === "left" ? row.left : row.right)?.content ?? ""
+                            }}</code>
+                          </div>
+                        </template>
+                        <div
+                          v-for="row in controlledHunk.rows"
+                          :key="`${row.key}:${side}`"
+                          class="controlled-line"
+                          :class="`controlled-line-${(side === 'left' ? row.left : row.right)?.kind ?? 'empty'}`"
+                          :data-side="
+                            (side === 'left' ? row.left?.old_line : row.right?.new_line)
+                              ? side
+                              : undefined
+                          "
+                          :data-line="side === 'left' ? row.left?.old_line : row.right?.new_line"
+                        >
+                          <span class="controlled-line-number" aria-hidden="true">
+                            {{ side === "left" ? row.left?.old_line : row.right?.new_line }}
+                          </span>
+                          <span class="controlled-line-marker" aria-hidden="true">
+                            {{
+                              (side === "left" ? row.left : row.right)?.kind === "addition"
+                                ? "+"
+                                : (side === "left" ? row.left : row.right)?.kind === "deletion"
+                                  ? "−"
+                                  : " "
+                            }}
+                          </span>
+                          <code class="controlled-code">{{
+                            (side === "left" ? row.left : row.right)?.content ?? ""
+                          }}</code>
+                        </div>
+                      </section>
+                    </template>
+                    <template v-if="trailingContextGap">
+                      <div
+                        v-for="row in contextRowsFromStart(trailingContextGap)"
+                        :key="`${row.key}:${side}`"
+                        class="controlled-line controlled-context-line"
+                        :data-side="side"
+                        :data-line="side === 'left' ? row.left?.old_line : row.right?.new_line"
+                      >
+                        <span class="controlled-line-number" aria-hidden="true">
+                          {{ side === "left" ? row.left?.old_line : row.right?.new_line }}
+                        </span>
+                        <span class="controlled-line-marker" aria-hidden="true"> </span>
+                        <code class="controlled-code">{{
+                          (side === "left" ? row.left : row.right)?.content ?? ""
+                        }}</code>
+                      </div>
+                      <div
+                        v-if="!isContextGapExpanded(trailingContextGap)"
+                        class="controlled-context-gap controlled-context-gap-down"
+                      >
+                        <div v-if="side === 'left'" class="context-gap-controls">
+                          <button
+                            v-for="action in contextGapActions(trailingContextGap)"
+                            :key="action.edge"
+                            class="context-gap-button"
+                            type="button"
+                            :disabled="contextLoading"
+                            :aria-label="contextGapLabel(trailingContextGap, action.edge)"
+                            @click="expandContextGap(trailingContextGap, action.edge)"
+                          >
+                            <span aria-hidden="true">{{ action.arrow }}</span>
+                          </button>
+                        </div>
+                        <span v-else class="context-gap-placeholder" aria-hidden="true" />
+                      </div>
+                      <div
+                        v-for="row in contextRowsFromEnd(trailingContextGap)"
+                        :key="`${row.key}:${side}`"
+                        class="controlled-line controlled-context-line"
+                        :data-side="side"
+                        :data-line="side === 'left' ? row.left?.old_line : row.right?.new_line"
+                      >
+                        <span class="controlled-line-number" aria-hidden="true">
+                          {{ side === "left" ? row.left?.old_line : row.right?.new_line }}
+                        </span>
+                        <span class="controlled-line-marker" aria-hidden="true"> </span>
+                        <code class="controlled-code">{{
+                          (side === "left" ? row.left : row.right)?.content ?? ""
+                        }}</code>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else class="controlled-file-message" role="status">
+                {{ selectedStandardPatch.message ?? "该文件没有可展示的文本 Diff" }}
+              </div>
+            </article>
+            <div v-else class="legacy-diff" v-html="diffHtml" />
+          </div>
         </div>
       </section>
     </section>
@@ -1353,6 +1953,310 @@ onUnmounted(() => {
 
 .diff2html-container :deep(.d2h-file-header) {
   display: none;
+}
+
+.controlled-file-wrapper {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.controlled-file-header {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-hover);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.controlled-file-paths {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controlled-file-paths > span {
+  padding: 0 var(--space-1);
+  color: var(--color-text-tertiary);
+}
+
+.controlled-file-summary {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: var(--space-2);
+}
+
+.controlled-side-by-side {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.controlled-file-side-diff {
+  position: relative;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.controlled-file-side-diff::-webkit-scrollbar {
+  display: none;
+}
+
+.controlled-file-side-diff + .controlled-file-side-diff {
+  border-left: 1px solid var(--color-border);
+}
+
+.controlled-side-content {
+  width: max-content;
+  min-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.context-toolbar-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.context-toolbar-button {
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.context-toolbar-button:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.context-toolbar-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.context-load-error {
+  margin: 0;
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-danger-light, #fff1f0) 70%, var(--color-surface));
+  color: var(--color-danger, #cf222e);
+  font-size: 11px;
+}
+
+.controlled-context-gap {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  min-height: 20px;
+  grid-template-columns: 52px 18px minmax(0, 1fr);
+  align-items: stretch;
+  background: var(--color-surface-hover);
+  color: var(--color-text-tertiary);
+}
+
+.context-gap-controls,
+.context-gap-placeholder {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  width: 52px;
+  min-height: 20px;
+  grid-column: 1;
+  align-items: stretch;
+  border-right: 1px solid var(--color-border-light);
+  background: var(--color-surface-hover);
+}
+
+.context-gap-controls {
+  flex-direction: column;
+  background: var(--color-primary-border);
+}
+
+.context-gap-button {
+  display: inline-flex;
+  width: 100%;
+  min-height: 20px;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.context-gap-button + .context-gap-button {
+  border-top: 1px solid var(--color-border-light);
+}
+
+.context-gap-button:hover,
+.context-gap-button:focus-visible {
+  background: var(--color-primary);
+  color: var(--color-surface);
+}
+
+.context-gap-button:active {
+  background: var(--color-primary-hover);
+  color: var(--color-surface);
+}
+
+.context-gap-button:focus-visible {
+  z-index: 4;
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.context-gap-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.controlled-hunk + .controlled-hunk {
+  border-top: 1px solid var(--color-border);
+}
+
+.controlled-hunk-header {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  min-height: 20px;
+  grid-template-columns: 52px 18px minmax(0, 1fr);
+  align-items: stretch;
+  overflow: hidden;
+  background: var(--diff-hunk-bg, var(--color-primary-light));
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.controlled-hunk-header .context-gap-controls,
+.controlled-hunk-header .context-gap-placeholder,
+.controlled-hunk-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 52px;
+  min-height: 20px;
+  grid-column: 1;
+  border-right: 1px solid var(--color-border-light);
+}
+
+.controlled-hunk-header .context-gap-controls {
+  background: var(--color-primary-border);
+}
+
+.controlled-hunk-header .context-gap-placeholder,
+.controlled-hunk-gutter {
+  background: inherit;
+}
+
+.controlled-hunk-header .context-gap-placeholder-both {
+  min-height: 40px;
+}
+
+.controlled-hunk-header-text {
+  min-width: max-content;
+  grid-column: 2 / 4;
+  align-self: center;
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.controlled-line {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  min-height: 20px;
+  grid-template-columns: 52px 18px minmax(0, 1fr);
+  background: var(--color-surface);
+}
+
+.controlled-line-number {
+  position: sticky;
+  z-index: 2;
+  left: 0;
+  padding: 0 4px;
+  border-right: 1px solid var(--color-border-light);
+  background: var(--color-surface-hover);
+  color: var(--color-text-tertiary);
+  text-align: center;
+  user-select: none;
+}
+
+.controlled-line-marker {
+  color: var(--color-text-tertiary);
+  text-align: center;
+  user-select: none;
+}
+
+.controlled-code {
+  min-width: max-content;
+  padding-right: var(--space-4);
+  color: var(--color-text);
+  font: inherit;
+  white-space: pre;
+}
+
+.controlled-line-addition {
+  background: var(--diff-add-bg);
+}
+
+.controlled-line-deletion {
+  background: var(--diff-remove-bg);
+}
+
+.controlled-line-addition .controlled-line-number {
+  background: var(--diff-add-line);
+  color: var(--color-text);
+}
+
+.controlled-line-deletion .controlled-line-number {
+  background: var(--diff-remove-line);
+  color: var(--color-text);
+}
+
+.controlled-line-no_newline {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+.controlled-line-empty {
+  background: color-mix(in srgb, var(--color-surface-hover) 65%, var(--color-surface));
+}
+
+.controlled-file-message {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  padding: var(--space-6);
+  color: var(--color-text-secondary);
+  text-align: center;
 }
 
 @media (max-width: 900px) {

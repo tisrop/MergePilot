@@ -577,3 +577,82 @@ async fn test_github_merge_readiness_blocks_user_without_push_permission() {
         .iter()
         .any(|reason| reason.code == mergebeacon_lib::models::MergeBlockingReasonCode::NoMergePermission));
 }
+
+#[tokio::test]
+async fn test_github_file_content_decodes_base64_at_revision() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/contents/src/lib.rs"))
+        .and(query_param("ref", "head-sha"))
+        .and(header("Authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "encoding": "base64",
+            "content": "Zm4gbWFpbigpIHt9Cg==",
+            "size": 13
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let content =
+        adapter.get_pr_file_content("octocat", "hello-world", "src/lib.rs", "head-sha").await.expect("file content");
+
+    assert_eq!(content.path, "src/lib.rs");
+    assert_eq!(content.revision, "head-sha");
+    assert_eq!(content.content, "fn main() {}\n");
+    assert!(!content.truncated);
+    assert!(!content.binary);
+}
+
+#[tokio::test]
+async fn test_github_file_content_rejects_invalid_base64() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/contents/src/lib.rs"))
+        .and(query_param("ref", "head-sha"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "encoding": "base64",
+            "content": "not-base64",
+            "size": 8
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let error = adapter
+        .get_pr_file_content("octocat", "hello-world", "src/lib.rs", "head-sha")
+        .await
+        .expect_err("invalid base64 must fail");
+
+    assert!(error.to_string().contains("不是有效的 base64"));
+}
+
+#[tokio::test]
+async fn test_github_pr_detail_exposes_base_and_head_revisions() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/pulls/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "number": 42,
+            "title": "PR",
+            "user": {"id": 1, "login": "dev", "name": "", "avatar_url": ""},
+            "state": "open",
+            "merged_at": null,
+            "created_at": "2026-07-16T00:00:00Z",
+            "updated_at": "2026-07-16T00:00:00Z",
+            "labels": [],
+            "body": "",
+            "head": {"ref": "feature", "sha": "head-sha"},
+            "base": {"ref": "main", "sha": "base-sha"},
+            "mergeable": true
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let detail = adapter.get_pull_request("octocat", "hello-world", 42).await.expect("PR detail");
+
+    assert_eq!(detail.base_sha, "base-sha");
+    assert_eq!(detail.head_sha, "head-sha");
+}

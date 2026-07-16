@@ -3,7 +3,15 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DiffViewer from "@/components/diff/DiffViewer.vue";
 import { useUiSettingsStore } from "@/stores/useUiSettingsStore";
-import type { DiffResult } from "@/types";
+import type { DiffResult, Platform, PrFileContent } from "@/types";
+
+const { prFileContentMock } = vi.hoisted(() => ({
+  prFileContentMock: vi.fn(),
+}));
+
+vi.mock("@/api", () => ({
+  prFileContent: prFileContentMock,
+}));
 
 const storage = new Map<string, string>();
 
@@ -45,13 +53,516 @@ index 3333333..4444444 100644
       deletions: 0,
     },
   ],
+  patch_schema_version: 1,
+  patches: [],
 };
 
-async function mountViewer(value = diff) {
-  const wrapper = mount(DiffViewer, { props: { diff: value } });
+interface ContextProps {
+  platform?: Platform;
+  owner?: string;
+  repo?: string;
+  baseSha?: string;
+  headSha?: string;
+}
+
+async function mountViewer(value = diff, extraProps: ContextProps = {}) {
+  const wrapper = mount(DiffViewer, { props: { diff: value, ...extraProps } });
   await flushPromises();
   return wrapper;
 }
+
+const standardizedDiff: DiffResult = {
+  diff: "",
+  files: [
+    {
+      filename: "src/components/App.ts",
+      status: "modified",
+      patch: "",
+      additions: 1,
+      deletions: 1,
+    },
+    {
+      filename: "tests/App.spec.ts",
+      status: "added",
+      patch: "",
+      additions: 1,
+      deletions: 0,
+    },
+  ],
+  patch_schema_version: 1,
+  patches: [
+    {
+      filename: "src/components/App.ts",
+      old_path: "src/components/App.ts",
+      new_path: "src/components/App.ts",
+      status: "modified",
+      additions: 1,
+      deletions: 1,
+      content_kind: "text",
+      patch: "",
+      message: null,
+      hunks: [
+        {
+          header: "@@ -1,2 +1,2 @@",
+          old_start: 1,
+          old_count: 2,
+          new_start: 1,
+          new_count: 2,
+          section_header: null,
+          lines: [
+            { kind: "context", content: "const state = true;", old_line: 1, new_line: 1 },
+            { kind: "deletion", content: 'const value = "<old>";', old_line: 2, new_line: null },
+            { kind: "addition", content: 'const value = "<new>";', old_line: null, new_line: 2 },
+          ],
+        },
+      ],
+    },
+    {
+      filename: "tests/App.spec.ts",
+      old_path: null,
+      new_path: "tests/App.spec.ts",
+      status: "added",
+      additions: 1,
+      deletions: 0,
+      content_kind: "text",
+      patch: "",
+      message: null,
+      hunks: [
+        {
+          header: "@@ -0,0 +1 @@",
+          old_start: 0,
+          old_count: 0,
+          new_start: 1,
+          new_count: 1,
+          section_header: null,
+          lines: [{ kind: "addition", content: 'it("works");', old_line: null, new_line: 1 }],
+        },
+      ],
+    },
+  ],
+};
+
+const contextDiff: DiffResult = {
+  diff: "",
+  files: [
+    {
+      filename: "src/context.ts",
+      status: "modified",
+      patch: "",
+      additions: 0,
+      deletions: 0,
+    },
+  ],
+  patch_schema_version: 1,
+  patches: [
+    {
+      filename: "src/context.ts",
+      old_path: "src/context.old.ts",
+      new_path: "src/context.ts",
+      status: "renamed",
+      additions: 0,
+      deletions: 0,
+      content_kind: "text",
+      patch: "",
+      message: null,
+      hunks: [
+        {
+          header: "@@ -3 +3 @@",
+          old_start: 3,
+          old_count: 1,
+          new_start: 3,
+          new_count: 1,
+          section_header: null,
+          lines: [{ kind: "context", content: "unchanged 3", old_line: 3, new_line: 3 }],
+        },
+        {
+          header: "@@ -7 +7 @@",
+          old_start: 7,
+          old_count: 1,
+          new_start: 7,
+          new_count: 1,
+          section_header: null,
+          lines: [{ kind: "context", content: "unchanged 7", old_line: 7, new_line: 7 }],
+        },
+      ],
+    },
+  ],
+};
+
+const contextProps: Required<ContextProps> = {
+  platform: "github",
+  owner: "octo",
+  repo: "demo",
+  baseSha: "base-sha",
+  headSha: "head-sha",
+};
+
+function fileContent(path: string, revision: string, content: string): PrFileContent {
+  return { path, revision, content, truncated: false, binary: false };
+}
+
+function mockContextFiles(options?: { truncated?: boolean; binary?: boolean }): void {
+  prFileContentMock.mockImplementation(
+    async (_platform: Platform, _owner: string, _repo: string, path: string, revision: string) => ({
+      ...fileContent(
+        path,
+        revision,
+        [
+          revision === "base-sha" ? "base 1" : "<script>alert(1)</script>",
+          `${revision} 2`,
+          "unchanged 3",
+          `${revision} 4`,
+          `${revision} 5`,
+          `${revision} 6`,
+          "unchanged 7",
+          `${revision} 8`,
+        ].join("\n"),
+      ),
+      truncated: options?.truncated ?? false,
+      binary: options?.binary ?? false,
+    }),
+  );
+}
+
+describe("DiffViewer 受控标准 patch", () => {
+  beforeEach(() => {
+    storage.clear();
+    prFileContentMock.mockReset();
+    setActivePinia(createPinia());
+  });
+
+  it("使用标准 patch 受控渲染 hunk、双侧行号和纯文本代码", async () => {
+    const wrapper = await mountViewer(standardizedDiff);
+
+    expect(wrapper.find(".legacy-diff").exists()).toBe(false);
+    expect(wrapper.get(".controlled-file-wrapper").attributes("data-file-path")).toBe(
+      "src/components/App.ts",
+    );
+    expect(wrapper.findAll(".controlled-hunk-header")).toHaveLength(2);
+    expect(wrapper.findAll(".controlled-hunk-header-text")).toHaveLength(1);
+    expect(wrapper.get(".controlled-side-left .controlled-hunk-header").text()).toBe(
+      "@@ -1,2 +1,2 @@",
+    );
+    expect(wrapper.get(".controlled-side-right .controlled-hunk-header").text()).toBe("");
+    expect(wrapper.findAll(".controlled-line-deletion")).toHaveLength(1);
+    expect(wrapper.findAll(".controlled-line-addition")).toHaveLength(1);
+    expect(wrapper.get(".controlled-side-left").text()).toContain("<old>");
+    expect(wrapper.get(".controlled-side-right").text()).toContain("<new>");
+    expect(
+      wrapper.get(".controlled-side-left .controlled-line-deletion").attributes("data-line"),
+    ).toBe("2");
+    expect(
+      wrapper.get(".controlled-side-right .controlled-line-addition").attributes("data-line"),
+    ).toBe("2");
+    expect(wrapper.find(".controlled-side-left script").exists()).toBe(false);
+  });
+
+  it("切换文件时只渲染对应的标准 patch", async () => {
+    const wrapper = await mountViewer(standardizedDiff);
+
+    await wrapper.get('[data-file-path="tests/App.spec.ts"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".controlled-file-wrapper").attributes("data-file-path")).toBe(
+      "tests/App.spec.ts",
+    );
+    expect(wrapper.get(".controlled-side-right").text()).toContain('it("works");');
+    expect(wrapper.findAll(".controlled-line-addition")).toHaveLength(1);
+  });
+
+  it("对二进制或不可用 patch 显示稳定提示而不是空白", async () => {
+    const binaryDiff: DiffResult = {
+      ...standardizedDiff,
+      files: [standardizedDiff.files[0]],
+      patches: [
+        {
+          ...standardizedDiff.patches[0],
+          content_kind: "binary",
+          hunks: [],
+          message: "二进制文件不提供文本 Diff",
+        },
+      ],
+    };
+
+    const wrapper = await mountViewer(binaryDiff);
+
+    expect(wrapper.get(".controlled-file-message").text()).toContain("二进制文件");
+    expect(wrapper.find(".diff-empty").exists()).toBe(false);
+  });
+
+  it("从行号槽按方向展开单个上下文，并按 base/head 路径请求文件内容", async () => {
+    mockContextFiles();
+    const wrapper = await mountViewer(contextDiff, contextProps);
+    const buttons = wrapper.findAll(".context-gap-button");
+    const leftHunkHeaders = wrapper.findAll(".controlled-side-left .controlled-hunk-header");
+
+    expect(leftHunkHeaders).toHaveLength(2);
+    expect(leftHunkHeaders[0].findAll(".context-gap-button")).toHaveLength(1);
+    expect(leftHunkHeaders[1].findAll(".context-gap-button")).toHaveLength(2);
+    expect(
+      wrapper.findAll(".controlled-side-right .controlled-hunk-header .context-gap-placeholder"),
+    ).toHaveLength(2);
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0].attributes("aria-label")).toBe("展开上方未变更上下文（20 行）");
+    expect(buttons[0].text()).toBe("↑");
+    expect(buttons[1].attributes("aria-label")).toBe("向上展开未变更上下文（20 行）");
+    expect(buttons[1].text()).toBe("↑");
+    expect(buttons[2].attributes("aria-label")).toBe("向下展开未变更上下文（20 行）");
+    expect(buttons[2].text()).toBe("↓");
+
+    await buttons[0].trigger("click");
+    await flushPromises();
+
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+    expect(prFileContentMock).toHaveBeenCalledWith(
+      "github",
+      "octo",
+      "demo",
+      "src/context.old.ts",
+      "base-sha",
+    );
+    expect(prFileContentMock).toHaveBeenCalledWith(
+      "github",
+      "octo",
+      "demo",
+      "src/context.ts",
+      "head-sha",
+    );
+    expect(wrapper.findAll(".controlled-context-line")).toHaveLength(4);
+    expect(wrapper.get(".controlled-side-left").text()).toContain("base 1");
+    expect(wrapper.get(".controlled-side-right").text()).toContain("<script>alert(1)</script>");
+    expect(wrapper.find(".controlled-side-right script").exists()).toBe(false);
+    expect(wrapper.get('[aria-label="展开下方未变更上下文（20 行）"]').text()).toBe("↓");
+  });
+
+  it("每次点击只展开 20 行，直到该方向的上下文全部可见", async () => {
+    const largeContextDiff: DiffResult = {
+      ...contextDiff,
+      patches: [
+        {
+          ...contextDiff.patches[0],
+          hunks: [
+            {
+              header: "@@ -51 +51 @@",
+              old_start: 51,
+              old_count: 1,
+              new_start: 51,
+              new_count: 1,
+              section_header: null,
+              lines: [{ kind: "context", content: "changed 51", old_line: 51, new_line: 51 }],
+            },
+          ],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (_platform: Platform, _owner: string, _repo: string, path: string, revision: string) =>
+        fileContent(
+          path,
+          revision,
+          Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n"),
+        ),
+    );
+    const wrapper = await mountViewer(largeContextDiff, contextProps);
+    const topLabel = '[aria-label="展开上方未变更上下文（20 行）"]';
+
+    await wrapper.get(topLabel).trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".controlled-context-line")).toHaveLength(40);
+    expect(wrapper.find(topLabel).exists()).toBe(true);
+
+    await wrapper.get(topLabel).trigger("click");
+    expect(wrapper.findAll(".controlled-context-line")).toHaveLength(80);
+    expect(wrapper.find(topLabel).exists()).toBe(true);
+
+    await wrapper.get(topLabel).trigger("click");
+    expect(wrapper.findAll(".controlled-context-line")).toHaveLength(100);
+    expect(wrapper.find(topLabel).exists()).toBe(false);
+    expect(wrapper.get(".controlled-side-left").text()).toContain("line 1");
+    expect(wrapper.get(".controlled-side-right").text()).toContain("line 50");
+  });
+
+  it("工具栏可以展开和收起全部上下文，且不会移除原始 hunk", async () => {
+    mockContextFiles();
+    const wrapper = await mountViewer(contextDiff, contextProps);
+
+    expect(wrapper.findAll(".context-toolbar-button")).toHaveLength(1);
+    expect(wrapper.get(".context-toolbar-button").text()).toBe("展开全部上下文");
+
+    await wrapper.get(".context-toolbar-button").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll(".controlled-context-line")).toHaveLength(12);
+    expect(wrapper.findAll(".context-gap-button")).toHaveLength(0);
+    expect(wrapper.findAll(".controlled-hunk")).toHaveLength(4);
+    expect(wrapper.findAll(".context-toolbar-button")).toHaveLength(1);
+    expect(wrapper.get(".context-toolbar-button").text()).toBe("收起全部上下文");
+
+    await wrapper.get(".context-toolbar-button").trigger("click");
+
+    expect(wrapper.findAll(".controlled-context-line")).toHaveLength(0);
+    expect(wrapper.findAll(".context-gap-button")).toHaveLength(4);
+    expect(wrapper.findAll(".controlled-hunk")).toHaveLength(4);
+    expect(wrapper.findAll(".context-toolbar-button")).toHaveLength(1);
+    expect(wrapper.get(".context-toolbar-button").text()).toBe("展开全部上下文");
+  });
+
+  it.each([
+    { response: { truncated: true, binary: false }, message: "文件过大" },
+    { response: { truncated: false, binary: true }, message: "二进制文件" },
+  ])("文件内容不可展开时保留原 Diff：$message", async ({ response, message }) => {
+    mockContextFiles(response);
+    const wrapper = await mountViewer(contextDiff, contextProps);
+
+    await wrapper.get(".context-gap-button").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".context-load-error").text()).toContain(message);
+    expect(wrapper.findAll(".context-load-error")).toHaveLength(1);
+    expect(wrapper.findAll(".controlled-context-line")).toHaveLength(0);
+    expect(wrapper.findAll(".controlled-hunk")).toHaveLength(4);
+  });
+
+  it("文件内容请求失败时显示一次错误且不白屏", async () => {
+    prFileContentMock.mockRejectedValue(new Error("网络失败"));
+    const wrapper = await mountViewer(contextDiff, contextProps);
+
+    await wrapper.get(".context-gap-button").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".context-load-error").text()).toContain("网络失败");
+    expect(wrapper.findAll(".context-load-error")).toHaveLength(1);
+    expect(wrapper.findAll(".controlled-hunk")).toHaveLength(4);
+    expect(wrapper.findAll(".context-gap-button")).toHaveLength(3);
+  });
+
+  it.each([
+    {
+      status: "added" as const,
+      oldPath: null,
+      newPath: "src/new.ts",
+      baseSha: "",
+      headSha: "head-sha",
+      expectedPath: "src/new.ts",
+      expectedRevision: "head-sha",
+      contentSide: "right",
+    },
+    {
+      status: "removed" as const,
+      oldPath: "src/old.ts",
+      newPath: null,
+      baseSha: "base-sha",
+      headSha: "",
+      expectedPath: "src/old.ts",
+      expectedRevision: "base-sha",
+      contentSide: "left",
+    },
+  ])(
+    "$status 文件只请求存在的一侧，且不会生成虚假的 0 行上下文",
+    async ({
+      status,
+      oldPath,
+      newPath,
+      baseSha,
+      headSha,
+      expectedPath,
+      expectedRevision,
+      contentSide,
+    }) => {
+      const oneSidedDiff: DiffResult = {
+        diff: "",
+        files: [
+          {
+            filename: expectedPath,
+            status,
+            patch: "",
+            additions: status === "added" ? 1 : 0,
+            deletions: status === "removed" ? 1 : 0,
+          },
+        ],
+        patch_schema_version: 1,
+        patches: [
+          {
+            filename: expectedPath,
+            old_path: oldPath,
+            new_path: newPath,
+            status,
+            additions: status === "added" ? 1 : 0,
+            deletions: status === "removed" ? 1 : 0,
+            content_kind: "text",
+            patch: "",
+            message: null,
+            hunks: [
+              {
+                header: status === "added" ? "@@ -0,0 +1 @@" : "@@ -1 +0,0 @@",
+                old_start: status === "added" ? 0 : 1,
+                old_count: status === "added" ? 0 : 1,
+                new_start: status === "added" ? 1 : 0,
+                new_count: status === "added" ? 1 : 0,
+                section_header: null,
+                lines: [
+                  {
+                    kind: status === "added" ? "addition" : "deletion",
+                    content: "changed",
+                    old_line: status === "removed" ? 1 : null,
+                    new_line: status === "added" ? 1 : null,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      prFileContentMock.mockResolvedValue(
+        fileContent(expectedPath, expectedRevision, "changed\ntrailing"),
+      );
+      const wrapper = await mountViewer(oneSidedDiff, {
+        ...contextProps,
+        baseSha,
+        headSha,
+      });
+
+      await wrapper.get(".context-toolbar-button").trigger("click");
+      await flushPromises();
+
+      expect(prFileContentMock).toHaveBeenCalledTimes(1);
+      expect(prFileContentMock).toHaveBeenCalledWith(
+        "github",
+        "octo",
+        "demo",
+        expectedPath,
+        expectedRevision,
+      );
+      expect(wrapper.get(`.controlled-side-${contentSide}`).text()).toContain("trailing");
+      expect(wrapper.findAll('[data-line="0"]')).toHaveLength(0);
+    },
+  );
+
+  it("切换 revision 后丢弃迟到的旧文件内容响应", async () => {
+    const resolvers: Array<(value: PrFileContent) => void> = [];
+    prFileContentMock.mockImplementation(
+      (_platform: Platform, _owner: string, _repo: string, path: string, revision: string) =>
+        new Promise<PrFileContent>((resolve) => {
+          resolvers.push((value) => resolve({ ...value, path, revision }));
+        }),
+    );
+    const wrapper = await mountViewer(contextDiff, contextProps);
+
+    void wrapper.get(".context-gap-button").trigger("click");
+    await flushPromises();
+    expect(resolvers).toHaveLength(2);
+
+    await wrapper.setProps({ baseSha: "new-base", headSha: "new-head" });
+    resolvers[0](fileContent("src/context.old.ts", "base-sha", "stale base"));
+    resolvers[1](fileContent("src/context.ts", "head-sha", "stale head"));
+    await flushPromises();
+
+    expect(wrapper.findAll(".controlled-context-line")).toHaveLength(0);
+    expect(wrapper.text()).not.toContain("stale base");
+    expect(wrapper.text()).not.toContain("stale head");
+    expect(wrapper.find(".context-load-error").exists()).toBe(false);
+  });
+});
 
 describe("DiffViewer 文件树", () => {
   beforeEach(() => {
@@ -178,6 +689,8 @@ index 1111111..2222222 100644
           deletions: 1,
         },
       ],
+      patch_schema_version: 1,
+      patches: [],
     };
 
     const wrapper = await mountViewer(unrelatedDiff);
@@ -213,6 +726,8 @@ index 1111111..2222222 100644
           deletions: 1,
         },
       ],
+      patch_schema_version: 1,
+      patches: [],
     };
 
     const wrapper = await mountViewer(localChangeDiff);
@@ -246,6 +761,8 @@ index 1111111..2222222 100644
           deletions: 1,
         },
       ],
+      patch_schema_version: 1,
+      patches: [],
     };
 
     const wrapper = await mountViewer(htmlDiff);

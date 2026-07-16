@@ -499,6 +499,7 @@ impl GitPlatform for GitHubAdapter {
             target_branch: json["base"]["ref"].as_str().unwrap_or("").to_string(),
             mergeable: json["mergeable"].as_bool(),
             head_sha: json["head"]["sha"].as_str().unwrap_or("").to_string(),
+            base_sha: json["base"]["sha"].as_str().unwrap_or("").to_string(),
         })
     }
 
@@ -678,6 +679,22 @@ impl GitPlatform for GitHubAdapter {
             .collect();
 
         Ok((diff, files))
+    }
+
+    async fn get_pr_file_content(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        revision: &str,
+    ) -> Result<PrFileContent, AppError> {
+        crate::file_content::validate_request(path, revision)?;
+        let encoded_path = crate::file_content::encode_path_segments(path);
+        let encoded_revision = urlencoding::encode(revision);
+        let url =
+            format!("{}/repos/{}/{}/contents/{}?ref={}", self.base_url, owner, repo, encoded_path, encoded_revision);
+        let json = self.get_json::<Value>(&url).await?;
+        crate::file_content::decode_response("GitHub", path, revision, &json)
     }
 
     async fn create_review(

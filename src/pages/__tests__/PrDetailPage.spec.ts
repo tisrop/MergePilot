@@ -78,6 +78,7 @@ const detail: PrDetail = {
   target_branch: "main",
   mergeable: true,
   head_sha: "abc123",
+  base_sha: "base-sha",
 };
 
 const readiness: PrMergeReadiness = {

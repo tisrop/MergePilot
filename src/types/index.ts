@@ -79,6 +79,15 @@ export interface PrDetail {
   target_branch: string;
   mergeable: boolean | null;
   head_sha: string;
+  base_sha: string;
+}
+
+export interface PrFileContent {
+  path: string;
+  revision: string;
+  content: string;
+  truncated: boolean;
+  binary: boolean;
 }
 
 export type ReadinessState = "ready" | "blocked" | "pending" | "unknown";
@@ -145,9 +154,45 @@ export interface PrFile {
 
 export type FileStatus = "added" | "modified" | "removed" | "renamed";
 
+export type PatchContentKind = "text" | "binary" | "metadata_only" | "unavailable";
+export type PatchLineKind = "context" | "addition" | "deletion" | "no_newline";
+
+export interface PatchLine {
+  kind: PatchLineKind;
+  content: string;
+  old_line: number | null;
+  new_line: number | null;
+}
+
+export interface PatchHunk {
+  header: string;
+  old_start: number;
+  old_count: number;
+  new_start: number;
+  new_count: number;
+  section_header: string | null;
+  lines: PatchLine[];
+}
+
+/** 后端统一解析的文件 patch；供 Vue 组件受控渲染，不包含任何 HTML。 */
+export interface StandardPatchFile {
+  filename: string;
+  old_path: string | null;
+  new_path: string | null;
+  status: FileStatus;
+  additions: number;
+  deletions: number;
+  content_kind: PatchContentKind;
+  patch: string;
+  hunks: PatchHunk[];
+  message: string | null;
+}
+
 export interface DiffResult {
   diff: string;
   files: PrFile[];
+  patch_schema_version: number;
+  patches: StandardPatchFile[];
 }
 
 // ── Review ──

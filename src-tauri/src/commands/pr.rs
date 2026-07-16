@@ -1,4 +1,5 @@
 use crate::models::*;
+use crate::patch::{standardize_patches, PATCH_SCHEMA_VERSION};
 use crate::state::AppState;
 use tauri::State;
 
@@ -79,7 +80,25 @@ pub async fn pr_diff(
 ) -> Result<DiffResult, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
     let (diff, files) = p.get_pr_diff(&owner, &repo, number).await.map_err(|e| e.to_string())?;
-    Ok(DiffResult { diff, files })
+    let patches = standardize_patches(&diff, &files);
+    Ok(DiffResult { diff, files, patch_schema_version: PATCH_SCHEMA_VERSION, patches })
+}
+
+#[tauri::command]
+pub async fn pr_file_content(
+    state: State<'_, AppState>,
+    platform: String,
+    owner: String,
+    repo: String,
+    path: String,
+    revision: String,
+) -> Result<PrFileContent, String> {
+    if owner.trim().is_empty() || repo.trim().is_empty() {
+        return Err("仓库 owner 和名称不能为空".into());
+    }
+    crate::file_content::validate_request(&path, &revision).map_err(|error| error.to_string())?;
+    let p = build_platform(&platform, &state).map_err(|error| error.to_string())?;
+    p.get_pr_file_content(&owner, &repo, &path, &revision).await.map_err(|error| error.to_string())
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -75,6 +75,16 @@ pub struct PrDetail {
     pub target_branch: String,
     pub mergeable: Option<bool>,
     pub head_sha: String,
+    pub base_sha: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrFileContent {
+    pub path: String,
+    pub revision: String,
+    pub content: String,
+    pub truncated: bool,
+    pub binary: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,9 +153,62 @@ pub enum FileStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchContentKind {
+    Text,
+    Binary,
+    MetadataOnly,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchLineKind {
+    Context,
+    Addition,
+    Deletion,
+    NoNewline,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatchLine {
+    pub kind: PatchLineKind,
+    pub content: String,
+    pub old_line: Option<u32>,
+    pub new_line: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PatchHunk {
+    pub header: String,
+    pub old_start: u32,
+    pub old_count: u32,
+    pub new_start: u32,
+    pub new_count: u32,
+    pub section_header: Option<String>,
+    pub lines: Vec<PatchLine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StandardPatchFile {
+    pub filename: String,
+    pub old_path: Option<String>,
+    pub new_path: Option<String>,
+    pub status: FileStatus,
+    pub additions: u32,
+    pub deletions: u32,
+    pub content_kind: PatchContentKind,
+    pub patch: String,
+    pub hunks: Vec<PatchHunk>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffResult {
     pub diff: String,
     pub files: Vec<PrFile>,
+    pub patch_schema_version: u32,
+    pub patches: Vec<StandardPatchFile>,
 }
 
 // ── Review ──

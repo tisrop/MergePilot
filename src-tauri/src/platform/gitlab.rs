@@ -344,6 +344,7 @@ impl GitPlatform for GitLabAdapter {
             target_branch: json["target_branch"].as_str().unwrap_or("").to_string(),
             mergeable: None,
             head_sha: json["sha"].as_str().or_else(|| json["diff_refs"]["head_sha"].as_str()).unwrap_or("").to_string(),
+            base_sha: json["diff_refs"]["base_sha"].as_str().unwrap_or("").to_string(),
         })
     }
 
@@ -573,6 +574,25 @@ impl GitPlatform for GitLabAdapter {
             .unwrap_or_default();
 
         Ok((diff, changes))
+    }
+
+    async fn get_pr_file_content(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        revision: &str,
+    ) -> Result<PrFileContent, AppError> {
+        crate::file_content::validate_request(path, revision)?;
+        let project_id = urlencoding(owner, repo);
+        let encoded_path = urlencoding::encode(path);
+        let encoded_revision = urlencoding::encode(revision);
+        let url = format!(
+            "{}/projects/{}/repository/files/{}?ref={}",
+            self.base_url, project_id, encoded_path, encoded_revision
+        );
+        let json = self.get_json::<Value>(&url).await?;
+        crate::file_content::decode_response("GitLab", path, revision, &json)
     }
 
     async fn create_review(

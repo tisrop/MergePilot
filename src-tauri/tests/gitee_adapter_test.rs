@@ -842,3 +842,59 @@ async fn test_gitee_merge_readiness_blocks_user_without_push_permission() {
         .iter()
         .any(|reason| reason.code == mergebeacon_lib::models::MergeBlockingReasonCode::NoMergePermission));
 }
+
+#[tokio::test]
+async fn test_gitee_file_content_uses_revision_and_auth_query() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/contents/src/lib.rs"))
+        .and(query_param("ref", "head-sha"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "encoding": "base64",
+            "content": "Zm4gbWFpbigpIHt9Cg==",
+            "size": 13
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let content =
+        adapter.get_pr_file_content("octocat", "hello-world", "src/lib.rs", "head-sha").await.expect("file content");
+
+    assert_eq!(content.content, "fn main() {}\n");
+    assert!(!content.truncated);
+}
+
+#[tokio::test]
+async fn test_gitee_pr_detail_exposes_base_and_head_revisions() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/42"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "number": 42,
+            "title": "PR",
+            "user": {"id": 1, "login": "dev", "name": "", "avatar_url": ""},
+            "state": "open",
+            "merged_at": null,
+            "created_at": "2026-07-16T00:00:00Z",
+            "updated_at": "2026-07-16T00:00:00Z",
+            "labels": [],
+            "body": "",
+            "head": {"ref": "feature", "sha": "head-sha"},
+            "base": {"ref": "main", "sha": "base-sha"},
+            "mergeable": true
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let detail = adapter.get_pull_request("octocat", "hello-world", 42).await.expect("PR detail");
+
+    assert_eq!(detail.base_sha, "base-sha");
+    assert_eq!(detail.head_sha, "head-sha");
+}

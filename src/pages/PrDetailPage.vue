@@ -505,7 +505,15 @@ onMounted(async () => {
 
       <div class="tab-content">
         <div v-if="activeTab === 'diff'">
-          <DiffViewer :diff="pr.diff" @add-comment="handleAddComment" />
+          <DiffViewer
+            :diff="pr.diff"
+            :platform="platform"
+            :owner="owner"
+            :repo="repo"
+            :base-sha="pr.currentPr?.base_sha ?? ''"
+            :head-sha="pr.currentPr?.head_sha ?? ''"
+            @add-comment="handleAddComment"
+          />
           <p v-if="commentError" class="error-msg">{{ commentError }}</p>
           <p v-if="commentSuccess" class="success-msg">✓ 行内评论已提交</p>
           <ReviewForm :platform="platform" :owner="owner" :repo="repo" :pr-number="number" />
