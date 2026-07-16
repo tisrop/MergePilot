@@ -299,7 +299,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
               <circle cx="6" cy="6" r="3" />
               <circle cx="18" cy="18" r="3" />
             </svg>
-            {{ r.name }}
+            <span class="repo-item-name">{{ r.name }}</span>
           </button>
         </template>
       </div>
@@ -568,24 +568,35 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 }
 
 .repo-list {
-  flex: 1;
-  overflow-y: auto;
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 1px;
+  overflow-y: auto;
+  font-family:
+    "Mona Sans VF",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Noto Sans",
+    Helvetica,
+    Arial,
+    sans-serif,
+    "Apple Color Emoji",
+    "Segoe UI Emoji";
 }
 
 .repo-group-header {
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 6px var(--space-2) 2px;
   margin-top: var(--space-1);
-  font-size: 10px;
+  padding: 6px var(--space-2) 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-tertiary);
+  line-height: 1.5;
+  letter-spacing: normal;
 }
 
 .repo-group-header:first-child {
@@ -598,21 +609,29 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 
 .repo-list button {
   display: flex;
+  min-height: 32px;
   align-items: center;
   gap: var(--space-1);
-  text-align: left;
-  min-height: 32px;
   padding: 5px var(--space-2) 5px var(--space-4);
+  overflow: hidden;
   border: none;
-  background: none;
-  font-size: 12px;
   border-radius: var(--radius-md);
-  color: var(--color-text);
+  background: none;
+  color: #1f2328;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: normal;
+  text-align: left;
   white-space: nowrap;
+  transition: background var(--transition-fast);
+}
+
+.repo-item-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background var(--transition-fast);
-  cursor: pointer;
+  white-space: nowrap;
 }
 
 .repo-list button:hover {
@@ -627,7 +646,6 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
 }
 
 .repo-list button.is-fork {
-  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
