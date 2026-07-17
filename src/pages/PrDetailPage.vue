@@ -111,10 +111,25 @@ watch(
 const isOpen = computed(() => pr.currentPr?.summary.state === "open");
 const isClosed = computed(() => pr.currentPr?.summary.state === "closed");
 const isMerged = computed(() => pr.currentPr?.summary.state === "merged");
+const canAttemptMergeWithUnknownState = computed(() => {
+  const readiness = pr.mergeReadiness;
+  if (!readiness || readiness.status !== "unknown") return false;
+
+  return (
+    readiness.mergeable !== false &&
+    readiness.draft !== true &&
+    readiness.has_conflicts !== true &&
+    readiness.has_merge_permission !== false &&
+    readiness.checks_status !== "blocked" &&
+    readiness.checks_status !== "pending" &&
+    readiness.approvals_status !== "blocked" &&
+    readiness.blocking_reasons.length === 0
+  );
+});
 const canMerge = computed(
   () =>
     isOpen.value &&
-    pr.mergeReadiness?.status === "ready" &&
+    (pr.mergeReadiness?.status === "ready" || canAttemptMergeWithUnknownState.value) &&
     (platformCapabilities.value?.merge_strategies.includes(selectedStrategy.value) ?? false),
 );
 const isPrAuthor = computed(() => {
@@ -505,7 +520,15 @@ onMounted(async () => {
 
       <div class="tab-content">
         <div v-if="activeTab === 'diff'">
-          <DiffViewer :diff="pr.diff" @add-comment="handleAddComment" />
+          <DiffViewer
+            :diff="pr.diff"
+            :platform="platform"
+            :owner="owner"
+            :repo="repo"
+            :base-sha="pr.currentPr?.base_sha ?? ''"
+            :head-sha="pr.currentPr?.head_sha ?? ''"
+            @add-comment="handleAddComment"
+          />
           <p v-if="commentError" class="error-msg">{{ commentError }}</p>
           <p v-if="commentSuccess" class="success-msg">✓ 行内评论已提交</p>
           <ReviewForm :platform="platform" :owner="owner" :repo="repo" :pr-number="number" />

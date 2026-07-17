@@ -2,9 +2,11 @@ pub mod ai;
 mod commands;
 pub mod crypto;
 pub mod error;
+pub mod file_content;
 pub mod http_client;
 pub mod local_store;
 pub mod models;
+pub mod patch;
 pub mod platform;
 mod single_instance;
 mod state;
@@ -124,6 +126,7 @@ pub fn run() {
             pr::pr_detail,
             pr::pr_merge_readiness,
             pr::pr_diff,
+            pr::pr_file_content,
             pr::pr_merge,
             pr::pr_close,
             pr::pr_reopen,

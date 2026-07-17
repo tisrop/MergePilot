@@ -37,7 +37,9 @@ const statusDetails = computed(() => {
 
   if (readiness.status === "ready") return ["所有合并条件均已满足"];
   if (readiness.status === "pending") return ["平台检查尚未全部完成"];
-  if (readiness.status === "unknown") return ["平台未返回足够信息，无法确认是否可以合并"];
+  if (readiness.status === "unknown") {
+    return ["平台未返回完整合并信息；仍可尝试合并，平台会在提交时执行最终校验"];
+  }
   return ["存在未满足的合并条件"];
 });
 </script>
@@ -81,7 +83,6 @@ const statusDetails = computed(() => {
     </button>
 
     <div id="merge-readiness-details" class="readiness-tooltip" role="tooltip">
-      <strong>{{ stateLabel }}</strong>
       <ul>
         <li v-for="detail in statusDetails" :key="detail">{{ detail }}</li>
       </ul>
@@ -203,12 +204,8 @@ const statusDetails = computed(() => {
   transform: translateY(0);
 }
 
-.readiness-tooltip strong {
-  font-size: 12px;
-}
-
 .readiness-tooltip ul {
-  margin: 6px 0 0;
+  margin: 0;
   padding-left: 18px;
   color: var(--color-text-secondary);
 }

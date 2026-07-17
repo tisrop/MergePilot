@@ -56,6 +56,9 @@ describe("MergeReadinessPanel", () => {
 
     expect(wrapper.get(".readiness-status").text()).toContain("状态未知");
     expect(wrapper.get(".readiness-status").text()).not.toContain("可合并");
+    expect(wrapper.get(".readiness-tooltip").text()).not.toContain("状态未知");
+    expect(wrapper.get(".readiness-tooltip").text()).toContain("仍可尝试合并");
+    expect(wrapper.get(".readiness-tooltip").text()).toContain("最终校验");
   });
 
   it("点击刷新图标重新检查合并状态", async () => {

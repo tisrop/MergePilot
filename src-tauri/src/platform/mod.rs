@@ -90,6 +90,14 @@ pub trait GitPlatform: Send + Sync {
 
     async fn get_pr_diff(&self, owner: &str, repo: &str, pr_number: u64) -> Result<(String, Vec<PrFile>), AppError>;
 
+    async fn get_pr_file_content(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        revision: &str,
+    ) -> Result<PrFileContent, AppError>;
+
     // ── Review ──
     async fn create_review(
         &self,

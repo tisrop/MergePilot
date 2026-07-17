@@ -170,6 +170,7 @@ describe("Sidebar", () => {
       target_branch: "main",
       mergeable: true,
       head_sha: "old-sha",
+      base_sha: "base-sha",
     };
 
     const wrapper = mount(Sidebar, { global: { plugins: [router] } });

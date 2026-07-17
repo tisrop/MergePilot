@@ -373,6 +373,80 @@ async fn test_gitee_get_pr_diff() {
 }
 
 #[tokio::test]
+async fn test_gitee_diff_preserves_old_path_for_renamed_text_file() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/44/files"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "filename": "src/new-name.rs",
+                "previous_filename": "src/old-name.rs",
+                "status": "renamed",
+                "patch": "@@ -2 +2 @@\n-old name\n+new name\n",
+                "additions": 1,
+                "deletions": 1
+            }
+        ])))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let (diff, files) = adapter.get_pr_diff("octocat", "hello-world", 44).await.expect("renamed file diff");
+    let patches = mergebeacon_lib::patch::standardize_patches(&diff, &files);
+
+    assert!(diff
+        .starts_with("diff --git a/src/old-name.rs b/src/new-name.rs\n--- a/src/old-name.rs\n+++ b/src/new-name.rs\n"));
+    assert_eq!(patches[0].old_path.as_deref(), Some("src/old-name.rs"));
+    assert_eq!(patches[0].new_path.as_deref(), Some("src/new-name.rs"));
+    assert!(matches!(patches[0].content_kind, mergebeacon_lib::models::PatchContentKind::Text));
+}
+
+#[tokio::test]
+async fn test_gitee_diff_preserves_metadata_only_rename() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/43/files"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "filename": "src/new-name.rs",
+                "previous_filename": "src/old-name.rs",
+                "status": "renamed",
+                "patch": null,
+                "additions": 0,
+                "deletions": 0
+            },
+            {
+                "filename": "src/large-new.rs",
+                "previous_filename": "src/large-old.rs",
+                "status": "renamed",
+                "patch": null,
+                "additions": 0,
+                "deletions": 0,
+                "truncated": true
+            }
+        ])))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let (diff, files) = adapter.get_pr_diff("octocat", "hello-world", 43).await.expect("should load renamed file diff");
+    let patches = mergebeacon_lib::patch::standardize_patches(&diff, &files);
+
+    assert!(diff.contains("rename from src/old-name.rs\nrename to src/new-name.rs"));
+    assert!(matches!(files[0].status, mergebeacon_lib::models::FileStatus::Renamed));
+    assert!(matches!(patches[0].content_kind, mergebeacon_lib::models::PatchContentKind::MetadataOnly));
+    assert_eq!(patches[0].old_path.as_deref(), Some("src/old-name.rs"));
+    assert_eq!(patches[0].new_path.as_deref(), Some("src/new-name.rs"));
+    assert!(matches!(patches[1].content_kind, mergebeacon_lib::models::PatchContentKind::Unavailable));
+}
+
+#[tokio::test]
 async fn test_gitee_list_repos_paginated() {
     let mock_server = MockServer::start().await;
 
@@ -682,7 +756,7 @@ async fn test_gitee_rejects_unsupported_review_without_request() {
 }
 
 #[tokio::test]
-async fn test_gitee_mergeable_does_not_override_unknown_checks_and_approvals() {
+async fn test_gitee_mergeable_keeps_unknown_gates_but_infers_no_conflicts() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v5/repos/octocat/hello-world/pulls/42"))
@@ -704,6 +778,7 @@ async fn test_gitee_mergeable_does_not_override_unknown_checks_and_approvals() {
     assert_ne!(readiness.status, mergebeacon_lib::models::ReadinessState::Ready);
     assert_eq!(readiness.checks_status, mergebeacon_lib::models::ReadinessState::Unknown);
     assert_eq!(readiness.approvals_status, mergebeacon_lib::models::ReadinessState::Unknown);
+    assert_eq!(readiness.has_conflicts, Some(false));
 }
 
 #[tokio::test]
@@ -841,4 +916,60 @@ async fn test_gitee_merge_readiness_blocks_user_without_push_permission() {
         .blocking_reasons
         .iter()
         .any(|reason| reason.code == mergebeacon_lib::models::MergeBlockingReasonCode::NoMergePermission));
+}
+
+#[tokio::test]
+async fn test_gitee_file_content_uses_revision_and_auth_query() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/contents/src/lib.rs"))
+        .and(query_param("ref", "head-sha"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "encoding": "base64",
+            "content": "Zm4gbWFpbigpIHt9Cg==",
+            "size": 13
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let content =
+        adapter.get_pr_file_content("octocat", "hello-world", "src/lib.rs", "head-sha").await.expect("file content");
+
+    assert_eq!(content.content, "fn main() {}\n");
+    assert!(!content.truncated);
+}
+
+#[tokio::test]
+async fn test_gitee_pr_detail_exposes_base_and_head_revisions() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/42"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "number": 42,
+            "title": "PR",
+            "user": {"id": 1, "login": "dev", "name": "", "avatar_url": ""},
+            "state": "open",
+            "merged_at": null,
+            "created_at": "2026-07-16T00:00:00Z",
+            "updated_at": "2026-07-16T00:00:00Z",
+            "labels": [],
+            "body": "",
+            "head": {"ref": "feature", "sha": "head-sha"},
+            "base": {"ref": "main", "sha": "base-sha"},
+            "mergeable": true
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let detail = adapter.get_pull_request("octocat", "hello-world", 42).await.expect("PR detail");
+
+    assert_eq!(detail.base_sha, "base-sha");
+    assert_eq!(detail.head_sha, "head-sha");
 }

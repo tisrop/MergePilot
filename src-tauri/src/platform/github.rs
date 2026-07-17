@@ -109,7 +109,10 @@ impl GitHubAdapter {
         } else if states.contains(&Some(ReadinessState::Ready)) {
             ReadinessState::Ready
         } else {
-            ReadinessState::Unknown
+            // Both GitHub status APIs successfully returned no entries. This means the
+            // repository has no CI status configured for the commit, not that the lookup
+            // failed. Request failures are represented explicitly as `Some(Unknown)`.
+            ReadinessState::Ready
         }
     }
 
@@ -499,6 +502,7 @@ impl GitPlatform for GitHubAdapter {
             target_branch: json["base"]["ref"].as_str().unwrap_or("").to_string(),
             mergeable: json["mergeable"].as_bool(),
             head_sha: json["head"]["sha"].as_str().unwrap_or("").to_string(),
+            base_sha: json["base"]["sha"].as_str().unwrap_or("").to_string(),
         })
     }
 
@@ -512,6 +516,7 @@ impl GitPlatform for GitHubAdapter {
         let has_conflicts = match mergeable_state {
             "dirty" => Some(true),
             "clean" | "unstable" | "blocked" | "behind" => Some(false),
+            _ if mergeable == Some(true) => Some(false),
             _ => None,
         };
         let branch_behind = (!mergeable_state.is_empty()).then_some(mergeable_state == "behind");
@@ -678,6 +683,22 @@ impl GitPlatform for GitHubAdapter {
             .collect();
 
         Ok((diff, files))
+    }
+
+    async fn get_pr_file_content(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        revision: &str,
+    ) -> Result<PrFileContent, AppError> {
+        crate::file_content::validate_request(path, revision)?;
+        let encoded_path = crate::file_content::encode_path_segments(path);
+        let encoded_revision = urlencoding::encode(revision);
+        let url =
+            format!("{}/repos/{}/{}/contents/{}?ref={}", self.base_url, owner, repo, encoded_path, encoded_revision);
+        let json = self.get_json::<Value>(&url).await?;
+        crate::file_content::decode_response("GitHub", path, revision, &json)
     }
 
     async fn create_review(

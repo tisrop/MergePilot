@@ -10,6 +10,7 @@ import type {
   PrDetail,
   PrMergeReadiness,
   DiffResult,
+  PrFileContent,
   MergeStrategy,
   PrMergeOutcome,
   Review,
@@ -145,6 +146,16 @@ export async function prDiff(
   number: number,
 ): Promise<DiffResult> {
   return invoke("pr_diff", { platform, owner, repo, number });
+}
+
+export async function prFileContent(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  path: string,
+  revision: string,
+): Promise<PrFileContent> {
+  return invoke("pr_file_content", { platform, owner, repo, path, revision });
 }
 
 export async function prMerge(

@@ -79,7 +79,7 @@ async fn test_gitlab_nested_subgroup_project_path_is_fully_encoded() {
 }
 
 #[tokio::test]
-async fn test_gitlab_pr_detail_exposes_head_sha_for_inline_comments() {
+async fn test_gitlab_pr_detail_exposes_base_and_head_revisions() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v4/projects/group%2Frepo/merge_requests/3"))
@@ -95,7 +95,8 @@ async fn test_gitlab_pr_detail_exposes_head_sha_for_inline_comments() {
             "description": "",
             "source_branch": "feature",
             "target_branch": "main",
-            "sha": "head-sha"
+            "sha": "head-sha",
+            "diff_refs": {"base_sha": "base-sha", "head_sha": "head-sha"}
         })))
         .expect(1)
         .mount(&mock_server)
@@ -105,6 +106,7 @@ async fn test_gitlab_pr_detail_exposes_head_sha_for_inline_comments() {
     let detail = adapter.get_pull_request("group", "repo", 3).await.expect("should load merge request");
 
     assert_eq!(detail.head_sha, "head-sha");
+    assert_eq!(detail.base_sha, "base-sha");
 }
 
 #[tokio::test]
@@ -155,6 +157,52 @@ async fn test_gitlab_diff_wraps_bare_hunks_with_unified_diff_headers() {
         .contains("diff --git a/src/deleted.rs b/src/deleted.rs\n--- a/src/deleted.rs\n+++ /dev/null\n@@ -1 +0,0 @@"));
     assert!(diff.contains("+new\ndiff --git a/src/added.rs"));
     assert!(diff.ends_with('\n'));
+}
+
+#[tokio::test]
+async fn test_gitlab_diff_preserves_metadata_only_rename() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/5/changes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "changes": [
+                {
+                    "old_path": "src/old-name.rs",
+                    "new_path": "src/new-name.rs",
+                    "diff": "",
+                    "new_file": false,
+                    "deleted_file": false,
+                    "renamed_file": true,
+                    "additions": 0,
+                    "deletions": 0
+                },
+                {
+                    "old_path": "src/large-old.rs",
+                    "new_path": "src/large-new.rs",
+                    "diff": "",
+                    "new_file": false,
+                    "deleted_file": false,
+                    "renamed_file": true,
+                    "additions": 0,
+                    "deletions": 0,
+                    "too_large": true
+                }
+            ]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let (diff, files) = adapter.get_pr_diff("group", "repo", 5).await.expect("should load renamed file diff");
+    let patches = mergebeacon_lib::patch::standardize_patches(&diff, &files);
+
+    assert!(diff.contains("rename from src/old-name.rs\nrename to src/new-name.rs"));
+    assert!(matches!(files[0].status, mergebeacon_lib::models::FileStatus::Renamed));
+    assert!(matches!(patches[0].content_kind, mergebeacon_lib::models::PatchContentKind::MetadataOnly));
+    assert_eq!(patches[0].old_path.as_deref(), Some("src/old-name.rs"));
+    assert_eq!(patches[0].new_path.as_deref(), Some("src/new-name.rs"));
+    assert!(matches!(patches[1].content_kind, mergebeacon_lib::models::PatchContentKind::Unavailable));
 }
 
 #[tokio::test]
@@ -490,7 +538,6 @@ async fn test_gitlab_merge_readiness_allows_merge_without_configured_pipeline() 
             "state": "opened",
             "draft": false,
             "detailed_merge_status": "mergeable",
-            "has_conflicts": false,
             "sha": "head-sha",
             "user": {"can_merge": true}
         })))
@@ -516,6 +563,7 @@ async fn test_gitlab_merge_readiness_allows_merge_without_configured_pipeline() 
 
     assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Ready);
     assert_eq!(readiness.checks_status, mergebeacon_lib::models::ReadinessState::Ready);
+    assert_eq!(readiness.has_conflicts, Some(false));
     assert_eq!(readiness.has_merge_permission, Some(true));
 }
 
@@ -602,4 +650,27 @@ async fn test_gitlab_merge_readiness_is_ready_with_merge_permission() {
     assert_eq!(readiness.status, mergebeacon_lib::models::ReadinessState::Ready);
     assert_eq!(readiness.has_merge_permission, Some(true));
     assert!(readiness.blocking_reasons.is_empty());
+}
+
+#[tokio::test]
+async fn test_gitlab_file_content_encodes_nested_project_and_file_path() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Fsubgroup%2Frepo/repository/files/src%2Fa%20b.rs"))
+        .and(query_param("ref", "base-sha"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "encoding": "base64",
+            "content": "Zm4gbWFpbigpIHt9Cg==",
+            "size": 13
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let content =
+        adapter.get_pr_file_content("group/subgroup", "repo", "src/a b.rs", "base-sha").await.expect("file content");
+
+    assert_eq!(content.content, "fn main() {}\n");
+    assert_eq!(content.revision, "base-sha");
 }

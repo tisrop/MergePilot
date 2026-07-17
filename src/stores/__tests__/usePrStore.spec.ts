@@ -79,6 +79,7 @@ describe("usePrStore", () => {
       target_branch: "main",
       mergeable: true,
       head_sha: "abc",
+      base_sha: "base-sha",
     };
     vi.mocked(prMerge).mockResolvedValue(outcome);
     vi.mocked(prDetail).mockResolvedValue(detail);
@@ -138,8 +139,14 @@ describe("usePrStore", () => {
       target_branch: "main",
       mergeable: true,
       head_sha: "new-sha",
+      base_sha: "base-sha",
     };
-    const currentDiff: DiffResult = { diff: "current diff", files: [] };
+    const currentDiff: DiffResult = {
+      diff: "current diff",
+      files: [],
+      patch_schema_version: 1,
+      patches: [],
+    };
     vi.mocked(prDetail).mockReturnValueOnce(oldDetail.promise).mockResolvedValueOnce(currentDetail);
     vi.mocked(prDiff).mockReturnValueOnce(oldDiff.promise).mockResolvedValueOnce(currentDiff);
     const store = usePrStore();
@@ -152,7 +159,7 @@ describe("usePrStore", () => {
       ...currentDetail,
       summary: { ...currentDetail.summary, title: "迟到 PR" },
     });
-    oldDiff.resolve({ diff: "late diff", files: [] });
+    oldDiff.resolve({ diff: "late diff", files: [], patch_schema_version: 1, patches: [] });
     await Promise.all([oldDetailRequest, oldDiffRequest]);
 
     expect(store.currentPr?.summary.title).toBe("当前仓库 PR");

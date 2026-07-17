@@ -78,6 +78,7 @@ const detail: PrDetail = {
   target_branch: "main",
   mergeable: true,
   head_sha: "abc123",
+  base_sha: "base-sha",
 };
 
 const readiness: PrMergeReadiness = {
@@ -175,6 +176,36 @@ describe("PrDetailPage 关闭权限", () => {
 
     expect(button.attributes("disabled")).toBeDefined();
     expect(button.attributes("title")).toBe("平台未返回当前账号的关闭权限");
+  });
+
+  it("合并状态未知但没有明确阻断条件时允许尝试合并", async () => {
+    mocks.prStore.mergeReadiness = {
+      ...readiness,
+      status: "unknown",
+      checks_status: "unknown",
+      has_merge_permission: null,
+      blocking_reasons: [],
+    };
+    mocks.prStore.mergePr.mockResolvedValue({ merged: true, issue_close_failures: [] });
+    const wrapper = mountPage();
+    const button = wrapper.get(".merge-main");
+
+    expect(button.attributes("disabled")).toBeUndefined();
+    await button.trigger("click");
+    expect(mocks.prStore.mergePr).toHaveBeenCalledOnce();
+  });
+
+  it("合并状态未知但存在已确认阻断条件时仍禁用合并", () => {
+    mocks.prStore.mergeReadiness = {
+      ...readiness,
+      status: "unknown",
+      checks_status: "unknown",
+      has_merge_permission: null,
+      blocking_reasons: [{ code: "platform_blocked", message: "平台规则阻止合并" }],
+    };
+    const wrapper = mountPage();
+
+    expect(wrapper.get(".merge-main").attributes("disabled")).toBeDefined();
   });
 
   it("仅在 Diff 标签启用侧栏专注模式", async () => {

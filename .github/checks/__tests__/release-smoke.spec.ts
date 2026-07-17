@@ -115,7 +115,25 @@ describe("Release smoke 检查", () => {
 
     expect(releaseSmoke).toMatch(/permissions:\n\s+contents: write/);
     expect(portableSmoke).toMatch(/permissions:\n\s+contents: write/);
-    expect(releaseSmoke).toContain("libwebkit2gtk-4.1-dev");
-    expect(releaseSmoke).toContain("libgtk-3-dev");
+  });
+
+  it("复用 Linux 构建产出的验签器，并行验证 updater 资源", async () => {
+    const workflow = await readFile(".github/workflows/release.yml", "utf8");
+    const build = workflow.slice(
+      workflow.indexOf("\n  build:"),
+      workflow.indexOf("\n  assemble-updater-metadata:"),
+    );
+    const releaseSmoke = workflow.slice(
+      workflow.indexOf("\n  release-smoke:"),
+      workflow.indexOf("\n  release-smoke-windows-portable:"),
+    );
+
+    expect(build).toContain("Build updater signature verifier (Linux)");
+    expect(build).toContain("cargo build --locked --release");
+    expect(build).toContain("name: updater-signature-verifier-linux");
+    expect(releaseSmoke).toContain("actions/download-artifact@v8");
+    expect(releaseSmoke).toContain('verify_asset "$asset_name" "$signature" &');
+    expect(releaseSmoke).not.toContain("apt-get install");
+    expect(releaseSmoke).not.toContain("cargo build");
   });
 });
