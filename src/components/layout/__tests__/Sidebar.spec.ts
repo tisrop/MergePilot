@@ -38,6 +38,7 @@ describe("Sidebar", () => {
       history: createMemoryHistory(),
       routes: [
         { path: "/", name: "home", component: { template: "<div />" } },
+        { path: "/inbox", name: "review-inbox", component: { template: "<div />" } },
         { path: "/pr", name: "pr-list", component: { template: "<div />" } },
         { path: "/issue", name: "issue-list", component: { template: "<div />" } },
         { path: "/settings", name: "settings", component: { template: "<div />" } },
@@ -59,6 +60,7 @@ describe("Sidebar", () => {
 
     expect(wrapper.get(".sidebar").classes()).toContain("is-collapsed");
     expect(wrapper.find(".repo-section").exists()).toBe(true);
+    expect(wrapper.get('[aria-label="PR 收件箱"]').attributes("title")).toBe("PR 收件箱");
     expect(wrapper.get('[aria-label="拉取请求（PR）"]').attributes("title")).toBe("拉取请求（PR）");
     expect(wrapper.get('[aria-label="Issues"]').attributes("title")).toBe("Issues");
     expect(wrapper.get('[aria-label="设置"]').attributes("title")).toBe("设置");

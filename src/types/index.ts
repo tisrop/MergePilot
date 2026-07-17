@@ -73,6 +73,17 @@ export interface PrSummary {
   labels: string[];
 }
 
+export type ReviewInboxCategory = "review_requested" | "authored";
+
+export interface ReviewInboxItem {
+  platform: Platform;
+  owner: string;
+  repo: string;
+  repository_full_name: string;
+  categories: ReviewInboxCategory[];
+  summary: PrSummary;
+}
+
 export interface PrDetail {
   summary: PrSummary;
   body: string;

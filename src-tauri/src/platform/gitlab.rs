@@ -67,6 +67,55 @@ impl GitLabAdapter {
         Ok(resp.json().await?)
     }
 
+    async fn list_all_inbox_merge_requests(&self, filter_name: &str, user_id: u64) -> Result<Vec<Value>, AppError> {
+        const REMOTE_PAGE_SIZE: u64 = 100;
+        let url = format!("{}/merge_requests", self.base_url);
+        let mut page = 1_u64;
+        let mut items = Vec::new();
+
+        loop {
+            let response = self
+                .client
+                .raw_client()
+                .get(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .header("User-Agent", "mergebeacon")
+                .query(&[("scope", "all"), ("state", "opened"), ("order_by", "updated_at"), ("sort", "desc")])
+                .query(&[(filter_name, user_id), ("page", page), ("per_page", REMOTE_PAGE_SIZE)])
+                .send()
+                .await?
+                .error_for_status()?;
+            let total_pages = response
+                .headers()
+                .get("x-total-pages")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok());
+            let page_items: Vec<Value> = response.json().await?;
+            let fetched = page_items.len() as u64;
+            items.extend(page_items);
+
+            let has_more = total_pages.map_or(fetched == REMOTE_PAGE_SIZE, |total| page < total);
+            if !has_more {
+                break;
+            }
+            page = page.saturating_add(1);
+        }
+
+        Ok(items)
+    }
+
+    fn repository_from_merge_request(json: &Value) -> Result<(String, String), AppError> {
+        let full_reference = json["references"]["full"]
+            .as_str()
+            .ok_or_else(|| AppError::Api("GitLab 收件箱响应缺少 references.full".into()))?;
+        let full_name = full_reference.rsplit_once('!').map(|(path, _)| path).unwrap_or(full_reference);
+        let (owner, repo) = full_name
+            .rsplit_once('/')
+            .filter(|(owner, repo)| !owner.is_empty() && !repo.is_empty())
+            .ok_or_else(|| AppError::Api("GitLab 收件箱响应中的项目路径无效".into()))?;
+        Ok((owner.to_string(), repo.to_string()))
+    }
+
     fn map_user(json: &Value) -> User {
         User {
             id: json["id"].clone(),
@@ -325,6 +374,60 @@ impl GitPlatform for GitLabAdapter {
             .collect();
 
         Ok(Paginated { items: mrs, page, total_pages, total_count })
+    }
+
+    async fn list_review_inbox(
+        &self,
+        category: &ReviewInboxCategory,
+        page: u32,
+        per_page: u32,
+    ) -> Result<Paginated<ReviewInboxItem>, AppError> {
+        let user = self.current_user().await?;
+        let user_id = user.id.as_u64().ok_or_else(|| AppError::Api("GitLab 当前用户响应缺少数字 id".into()))?;
+        let raw_items = match category {
+            ReviewInboxCategory::ReviewRequested => {
+                let (review_requests, assignments) = tokio::try_join!(
+                    self.list_all_inbox_merge_requests("reviewer_id", user_id),
+                    self.list_all_inbox_merge_requests("assignee_id", user_id),
+                )?;
+                review_requests.into_iter().chain(assignments).collect::<Vec<_>>()
+            }
+            ReviewInboxCategory::Authored => self.list_all_inbox_merge_requests("author_id", user_id).await?,
+        };
+
+        let mut items = Vec::with_capacity(raw_items.len());
+        for mr in raw_items {
+            let (owner, repo) = Self::repository_from_merge_request(&mr)?;
+            items.push(ReviewInboxItem {
+                platform: self.name().to_string(),
+                repository_full_name: format!("{owner}/{repo}"),
+                owner,
+                repo,
+                categories: vec![*category],
+                summary: PrSummary {
+                    number: mr["iid"].as_u64().unwrap_or(0),
+                    title: mr["title"].as_str().unwrap_or("").to_string(),
+                    author: Self::map_user(&mr["author"]),
+                    state: PrState::Open,
+                    created_at: mr["created_at"].as_str().unwrap_or("").to_string(),
+                    updated_at: mr["updated_at"].as_str().unwrap_or("").to_string(),
+                    labels: mr["labels"]
+                        .as_array()
+                        .map(|labels| labels.iter().filter_map(|label| label.as_str().map(str::to_string)).collect())
+                        .unwrap_or_default(),
+                },
+            });
+        }
+        items.sort_by(|left, right| right.summary.updated_at.cmp(&left.summary.updated_at));
+        let mut seen = std::collections::HashSet::new();
+        items.retain(|item| seen.insert((item.repository_full_name.clone(), item.summary.number)));
+
+        let total_count = items.len() as u32;
+        let total_pages = if total_count == 0 { 1 } else { total_count.div_ceil(per_page) };
+        let start = page.saturating_sub(1).saturating_mul(per_page) as usize;
+        let page_items = items.into_iter().skip(start).take(per_page as usize).collect();
+
+        Ok(Paginated { items: page_items, page, total_pages, total_count })
     }
 
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError> {

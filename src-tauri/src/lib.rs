@@ -13,7 +13,7 @@ mod state;
 pub mod vault;
 mod window_state;
 
-use commands::{ai as ai_cmds, auth, capabilities, issue, pr, review, support, update};
+use commands::{ai as ai_cmds, auth, capabilities, inbox, issue, pr, review, support, update};
 use local_store::CommentSnapshotStore;
 use state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -122,6 +122,7 @@ pub fn run() {
             // Repo
             auth::repo_list,
             // PR
+            inbox::review_inbox_list,
             pr::pr_list,
             pr::pr_detail,
             pr::pr_merge_readiness,

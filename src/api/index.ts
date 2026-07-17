@@ -7,6 +7,8 @@ import type {
   PrComment,
   PrState,
   PrSummary,
+  ReviewInboxCategory,
+  ReviewInboxItem,
   PrDetail,
   PrMergeReadiness,
   DiffResult,
@@ -110,6 +112,15 @@ export async function repoList(
 }
 
 // ── PR ──
+export async function reviewInboxList(
+  platform: Platform,
+  category: ReviewInboxCategory = "review_requested",
+  page: number = 1,
+  perPage: number = 20,
+): Promise<Paginated<ReviewInboxItem>> {
+  return invoke("review_inbox_list", { platform, category, page, perPage });
+}
+
 export async function prList(
   platform: Platform,
   owner: string,

@@ -1,6 +1,6 @@
 use mergebeacon_lib::error::AppError;
 use mergebeacon_lib::http_client::HttpClient;
-use mergebeacon_lib::models::{PrState, ReviewEvent};
+use mergebeacon_lib::models::{PrState, ReviewEvent, ReviewInboxCategory};
 use mergebeacon_lib::platform::{gitlab::GitLabAdapter, GitPlatform};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -746,4 +746,85 @@ async fn test_gitlab_file_content_encodes_nested_project_and_file_path() {
 
     assert_eq!(content.content, "fn main() {}\n");
     assert_eq!(content.revision, "base-sha");
+}
+
+#[tokio::test]
+async fn test_gitlab_review_inbox_combines_reviewers_and_assignees() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 7,
+            "username": "reviewer",
+            "name": "Reviewer",
+            "avatar_url": ""
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/merge_requests"))
+        .and(query_param("scope", "all"))
+        .and(query_param("state", "opened"))
+        .and(query_param("reviewer_id", "7"))
+        .and(query_param("page", "1"))
+        .and(query_param("per_page", "100"))
+        .respond_with(
+            ResponseTemplate::new(200).append_header("x-total", "1").append_header("x-total-pages", "1").set_body_json(
+                serde_json::json!([{
+                    "iid": 9,
+                    "title": "Nested project MR",
+                    "state": "opened",
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "updated_at": "2025-01-03T00:00:00Z",
+                    "author": { "id": 1, "username": "dev", "name": "Dev", "avatar_url": "" },
+                    "labels": ["backend"],
+                    "references": { "full": "group/subgroup/project!9" }
+                }]),
+            ),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/merge_requests"))
+        .and(query_param("assignee_id", "7"))
+        .and(query_param("page", "1"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "iid": 9,
+                "title": "Nested project MR",
+                "state": "opened",
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-03T00:00:00Z",
+                "author": { "id": 1, "username": "dev", "name": "Dev", "avatar_url": "" },
+                "labels": ["backend"],
+                "references": { "full": "group/subgroup/project!9" }
+            },
+            {
+                "iid": 10,
+                "title": "Assigned MR",
+                "state": "opened",
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-02T00:00:00Z",
+                "author": { "id": 2, "username": "dev2", "name": "Dev 2", "avatar_url": "" },
+                "labels": [],
+                "references": { "full": "group/assigned!10" }
+            }
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 1, 20)
+        .await
+        .expect("should list review inbox");
+
+    assert_eq!(result.total_count, 2);
+    assert_eq!(result.items.iter().map(|item| item.summary.number).collect::<Vec<_>>(), vec![9, 10]);
+    assert_eq!(result.items[0].owner, "group/subgroup");
+    assert_eq!(result.items[0].repo, "project");
+    assert_eq!(result.items[0].repository_full_name, "group/subgroup/project");
+    assert_eq!(result.items[0].platform, "gitlab");
+    assert_eq!(result.items[1].repository_full_name, "group/assigned");
 }

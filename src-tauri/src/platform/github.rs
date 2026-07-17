@@ -371,6 +371,66 @@ impl GitHubAdapter {
         diff
     }
 
+    async fn list_all_inbox_search(&self, qualifier: &str) -> Result<Vec<Value>, AppError> {
+        const REMOTE_PAGE_SIZE: u32 = 100;
+        const SEARCH_RESULT_LIMIT: u32 = 1_000;
+
+        let url = format!("{}/search/issues", self.base_url);
+        let query = format!("is:pr is:open {qualifier}");
+        let mut page = 1_u32;
+        let mut items = Vec::new();
+
+        loop {
+            let response = self
+                .client
+                .raw_client()
+                .get(&url)
+                .header("Authorization", self.auth_header())
+                .header("User-Agent", "mergebeacon")
+                .header("Accept", "application/vnd.github.v3+json")
+                .query(&[("q", query.as_str()), ("sort", "updated"), ("order", "desc")])
+                .query(&[("page", page), ("per_page", REMOTE_PAGE_SIZE)])
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, body)));
+            }
+
+            let mut json: Value = response.json().await?;
+            let total_count = json["total_count"].as_u64().unwrap_or(0).min(u64::from(SEARCH_RESULT_LIMIT)) as u32;
+            let page_items =
+                json["items"].as_array_mut().ok_or_else(|| AppError::Api("GitHub 收件箱响应缺少 items".into()))?;
+            let fetched = page_items.len();
+            items.append(page_items);
+
+            let total_pages = total_count.div_ceil(REMOTE_PAGE_SIZE);
+            if fetched == 0 || page >= total_pages || items.len() >= SEARCH_RESULT_LIMIT as usize {
+                break;
+            }
+            page = page.saturating_add(1);
+        }
+
+        items.truncate(SEARCH_RESULT_LIMIT as usize);
+        Ok(items)
+    }
+
+    fn repository_from_api_url(url: &str) -> Result<(String, String), AppError> {
+        let path = url
+            .split_once("/repos/")
+            .map(|(_, path)| path)
+            .ok_or_else(|| AppError::Api("GitHub 收件箱响应缺少仓库路径".into()))?;
+        let mut parts = path.split('/');
+        let owner = parts.next().unwrap_or_default();
+        let repo = parts.next().unwrap_or_default();
+        if owner.is_empty() || repo.is_empty() {
+            return Err(AppError::Api("GitHub 收件箱响应中的仓库路径无效".into()));
+        }
+        Ok((owner.to_string(), repo.to_string()))
+    }
+
     fn map_user(json: &Value) -> User {
         User {
             id: json["id"].clone(),
@@ -544,6 +604,60 @@ impl GitPlatform for GitHubAdapter {
         };
 
         Ok(Paginated { items: prs, page, total_pages: last_page, total_count })
+    }
+
+    async fn list_review_inbox(
+        &self,
+        category: &ReviewInboxCategory,
+        page: u32,
+        per_page: u32,
+    ) -> Result<Paginated<ReviewInboxItem>, AppError> {
+        let raw_items = match category {
+            ReviewInboxCategory::ReviewRequested => {
+                let (review_requests, assignments) = tokio::try_join!(
+                    self.list_all_inbox_search("review-requested:@me"),
+                    self.list_all_inbox_search("assignee:@me"),
+                )?;
+                review_requests.into_iter().chain(assignments).collect::<Vec<_>>()
+            }
+            ReviewInboxCategory::Authored => self.list_all_inbox_search("author:@me").await?,
+        };
+
+        let mut items = Vec::with_capacity(raw_items.len());
+        for pr in raw_items {
+            let (owner, repo) = Self::repository_from_api_url(pr["repository_url"].as_str().unwrap_or(""))?;
+            items.push(ReviewInboxItem {
+                platform: self.name().to_string(),
+                repository_full_name: format!("{owner}/{repo}"),
+                owner,
+                repo,
+                categories: vec![*category],
+                summary: PrSummary {
+                    number: pr["number"].as_u64().unwrap_or(0),
+                    title: pr["title"].as_str().unwrap_or("").to_string(),
+                    author: Self::map_user(&pr["user"]),
+                    state: PrState::Open,
+                    created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
+                    updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
+                    labels: pr["labels"]
+                        .as_array()
+                        .map(|labels| {
+                            labels.iter().filter_map(|label| label["name"].as_str().map(str::to_string)).collect()
+                        })
+                        .unwrap_or_default(),
+                },
+            });
+        }
+        items.sort_by(|left, right| right.summary.updated_at.cmp(&left.summary.updated_at));
+        let mut seen = std::collections::HashSet::new();
+        items.retain(|item| seen.insert((item.repository_full_name.clone(), item.summary.number)));
+
+        let total_count = items.len() as u32;
+        let total_pages = if total_count == 0 { 1 } else { total_count.div_ceil(per_page) };
+        let start = page.saturating_sub(1).saturating_mul(per_page) as usize;
+        let page_items = items.into_iter().skip(start).take(per_page as usize).collect();
+
+        Ok(Paginated { items: page_items, page, total_pages, total_count })
     }
 
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError> {

@@ -89,6 +89,13 @@ pub trait GitPlatform: Send + Sync {
         per_page: u32,
     ) -> Result<Paginated<PrSummary>, AppError>;
 
+    async fn list_review_inbox(
+        &self,
+        category: &ReviewInboxCategory,
+        page: u32,
+        per_page: u32,
+    ) -> Result<Paginated<ReviewInboxItem>, AppError>;
+
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError>;
 
     async fn get_merge_readiness(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrMergeReadiness, AppError>;

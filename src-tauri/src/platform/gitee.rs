@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures::{stream, StreamExt};
 use serde_json::Value;
 
 use super::GitPlatform;
@@ -266,6 +267,217 @@ impl GiteeAdapter {
         Ok(resp.json().await?)
     }
 
+    fn repository_parts(full_name: &str) -> Result<(String, String), AppError> {
+        let (owner, repo) = full_name
+            .rsplit_once('/')
+            .filter(|(owner, repo)| !owner.is_empty() && !repo.is_empty())
+            .ok_or_else(|| AppError::Api("Gitee 收件箱响应中的仓库路径无效".into()))?;
+        Ok((owner.to_string(), repo.to_string()))
+    }
+
+    fn matches_inbox_category(json: &Value, category: &ReviewInboxCategory, login: &str, filter_name: &str) -> bool {
+        match category {
+            ReviewInboxCategory::Authored => json["user"]["login"].as_str() == Some(login),
+            ReviewInboxCategory::ReviewRequested => {
+                let mut found_login = false;
+                let mut pending = false;
+                let mut found_other_reviewer = false;
+                let responsibility_fields: &[&str] = match filter_name {
+                    "tester" => &["testers"],
+                    _ => &["assignees", "api_reviewers"],
+                };
+                for field in responsibility_fields {
+                    if let Some(reviewers) = json[field].as_array() {
+                        for reviewer in reviewers {
+                            if reviewer["login"].as_str() == Some(login) {
+                                found_login = true;
+                                pending |= reviewer["accept"].as_bool() != Some(true);
+                            } else {
+                                found_other_reviewer = true;
+                            }
+                        }
+                    }
+                }
+                if found_login {
+                    pending
+                } else {
+                    // The repository endpoint's active responsibility filter is authoritative. Some Gitee
+                    // responses omit reviewer/tester arrays, so retain those results; only reject
+                    // explicit responsibility lists that do not contain the current user.
+                    !found_other_reviewer
+                }
+            }
+        }
+    }
+
+    fn inbox_api_error(status: reqwest::StatusCode, url: &str, body: &str) -> AppError {
+        let detail = serde_json::from_str::<Value>(body)
+            .ok()
+            .and_then(|json| json["message"].as_str().map(str::to_string))
+            .or_else(|| {
+                let trimmed = body.trim();
+                (!trimmed.is_empty() && !trimmed.starts_with('<'))
+                    .then(|| trimmed.chars().take(240).collect::<String>())
+            })
+            .unwrap_or_else(|| "远端返回了非 JSON 错误页面".to_string());
+        AppError::Api(format!("Gitee API {status} ({url}): {detail}"))
+    }
+
+    async fn send_inbox_request(&self, url: &str, query: &[(&str, String)]) -> Result<reqwest::Response, AppError> {
+        let response = self
+            .client
+            .get(url)
+            .header("User-Agent", "mergebeacon")
+            .query(query)
+            .query(&[("access_token", &self.token)])
+            .send()
+            .await
+            .map_err(|_| AppError::Api(format!("Gitee 收件箱请求失败（{url}）")))?;
+        if response.status().is_success() {
+            return Ok(response);
+        }
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        Err(Self::inbox_api_error(status, url, &body))
+    }
+
+    async fn list_inbox_repositories(&self) -> Result<Vec<(String, String)>, AppError> {
+        const REMOTE_PAGE_SIZE: usize = 100;
+        let url = format!("{}/user/repos", self.base_url);
+        let mut page = 1_u32;
+        let mut repositories = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        loop {
+            let query = [
+                ("visibility", "all".to_string()),
+                ("sort", "updated".to_string()),
+                ("direction", "desc".to_string()),
+                ("page", page.to_string()),
+                ("per_page", REMOTE_PAGE_SIZE.to_string()),
+            ];
+            let response = self.send_inbox_request(&url, &query).await?;
+            let link_header = response.headers().get("link").and_then(|value| value.to_str().ok());
+            let total_pages = response
+                .headers()
+                .get("x-total-pages")
+                .or_else(|| response.headers().get("total_page"))
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or_else(|| Self::parse_last_page_gitee(link_header, page));
+            let raw_repositories: Vec<Value> = response.json().await?;
+            let fetched = raw_repositories.len();
+
+            for repository in raw_repositories {
+                let full_name = repository["full_name"]
+                    .as_str()
+                    .ok_or_else(|| AppError::Api("Gitee 收件箱仓库响应缺少 full_name".into()))?;
+                let parts = Self::repository_parts(full_name)?;
+                if seen.insert(full_name.to_string()) {
+                    repositories.push(parts);
+                }
+            }
+
+            if page >= total_pages && fetched < REMOTE_PAGE_SIZE {
+                break;
+            }
+            page = page.saturating_add(1);
+        }
+        Ok(repositories)
+    }
+
+    async fn list_repository_inbox_by_filter(
+        &self,
+        owner: &str,
+        repo: &str,
+        category: ReviewInboxCategory,
+        login: &str,
+        filter_name: &str,
+    ) -> Result<Vec<ReviewInboxItem>, AppError> {
+        const REMOTE_PAGE_SIZE: usize = 100;
+        let url = format!("{}/repos/{owner}/{repo}/pulls", self.base_url);
+        let filter_value = login;
+        let mut page = 1_u32;
+        let mut items = Vec::new();
+
+        loop {
+            let query = [
+                ("state", "open".to_string()),
+                ("sort", "updated".to_string()),
+                ("direction", "desc".to_string()),
+                (filter_name, filter_value.to_string()),
+                ("page", page.to_string()),
+                ("per_page", REMOTE_PAGE_SIZE.to_string()),
+            ];
+            let response = self.send_inbox_request(&url, &query).await?;
+            let link_header = response.headers().get("link").and_then(|value| value.to_str().ok());
+            let total_pages = response
+                .headers()
+                .get("x-total-pages")
+                .or_else(|| response.headers().get("total_page"))
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or_else(|| Self::parse_last_page_gitee(link_header, page));
+            let raw_items: Vec<Value> = response.json().await?;
+            let fetched = raw_items.len();
+
+            for pr in raw_items.iter().filter(|pr| Self::matches_inbox_category(pr, &category, login, filter_name)) {
+                items.push(ReviewInboxItem {
+                    platform: self.name().to_string(),
+                    owner: owner.to_string(),
+                    repo: repo.to_string(),
+                    repository_full_name: format!("{owner}/{repo}"),
+                    categories: vec![category],
+                    summary: PrSummary {
+                        number: pr["number"].as_u64().unwrap_or(0),
+                        title: pr["title"].as_str().unwrap_or("").to_string(),
+                        author: Self::map_user(&pr["user"]),
+                        state: PrState::Open,
+                        created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
+                        updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
+                        labels: pr["labels"]
+                            .as_array()
+                            .map(|labels| {
+                                labels.iter().filter_map(|label| label["name"].as_str().map(str::to_string)).collect()
+                            })
+                            .unwrap_or_default(),
+                    },
+                });
+            }
+
+            if page >= total_pages && fetched < REMOTE_PAGE_SIZE {
+                break;
+            }
+            page = page.saturating_add(1);
+        }
+        Ok(items)
+    }
+
+    async fn list_repository_inbox(
+        &self,
+        owner: &str,
+        repo: &str,
+        category: ReviewInboxCategory,
+        login: &str,
+    ) -> Result<Vec<ReviewInboxItem>, AppError> {
+        match category {
+            ReviewInboxCategory::ReviewRequested => {
+                let (reviews, tests) = tokio::try_join!(
+                    self.list_repository_inbox_by_filter(owner, repo, category, login, "assignee"),
+                    self.list_repository_inbox_by_filter(owner, repo, category, login, "tester"),
+                )?;
+                let mut items = reviews.into_iter().chain(tests).collect::<Vec<_>>();
+                items.sort_by(|left, right| right.summary.updated_at.cmp(&left.summary.updated_at));
+                let mut seen = std::collections::HashSet::new();
+                items.retain(|item| seen.insert((item.repository_full_name.clone(), item.summary.number)));
+                Ok(items)
+            }
+            ReviewInboxCategory::Authored => {
+                self.list_repository_inbox_by_filter(owner, repo, category, login, "author").await
+            }
+        }
+    }
+
     fn map_user(json: &Value) -> User {
         User {
             id: json["id"].clone(),
@@ -453,6 +665,40 @@ impl GitPlatform for GiteeAdapter {
         };
 
         Ok(Paginated { items: prs, page, total_pages: last_page, total_count })
+    }
+
+    async fn list_review_inbox(
+        &self,
+        category: &ReviewInboxCategory,
+        page: u32,
+        per_page: u32,
+    ) -> Result<Paginated<ReviewInboxItem>, AppError> {
+        let user = self.current_user().await?;
+        let repositories = self.list_inbox_repositories().await?;
+        let category = *category;
+        let login = user.login;
+        let batches = stream::iter(repositories.into_iter().map(|(owner, repo)| {
+            let login = login.clone();
+            async move { self.list_repository_inbox(&owner, &repo, category, &login).await }
+        }))
+        .buffer_unordered(6)
+        .collect::<Vec<_>>()
+        .await;
+
+        let mut items = Vec::new();
+        for batch in batches {
+            items.extend(batch?);
+        }
+        items.sort_by(|left, right| right.summary.updated_at.cmp(&left.summary.updated_at));
+        let mut seen = std::collections::HashSet::new();
+        items.retain(|item| seen.insert((item.repository_full_name.clone(), item.summary.number)));
+
+        let total_count = items.len() as u32;
+        let total_pages = if total_count == 0 { 1 } else { total_count.div_ceil(per_page) };
+        let start = page.saturating_sub(1).saturating_mul(per_page) as usize;
+        let page_items = items.into_iter().skip(start).take(per_page as usize).collect();
+
+        Ok(Paginated { items: page_items, page, total_pages, total_count })
     }
 
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError> {

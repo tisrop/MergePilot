@@ -1,4 +1,5 @@
 use mergebeacon_lib::http_client::HttpClient;
+use mergebeacon_lib::models::ReviewInboxCategory;
 use mergebeacon_lib::platform::{gitee::GiteeAdapter, GitPlatform};
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1037,4 +1038,201 @@ async fn test_gitee_pr_detail_exposes_base_and_head_revisions() {
 
     assert_eq!(detail.base_sha, "base-sha");
     assert_eq!(detail.head_sha, "head-sha");
+}
+
+#[tokio::test]
+async fn test_gitee_review_inbox_filters_pending_reviewers_and_testers() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 7,
+            "login": "reviewer",
+            "name": "Reviewer",
+            "avatar_url": ""
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user/repos"))
+        .and(query_param("visibility", "all"))
+        .and(query_param("sort", "updated"))
+        .and(query_param("direction", "desc"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 1, "full_name": "team/project" }
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/project/pulls"))
+        .and(query_param("state", "open"))
+        .and(query_param("sort", "updated"))
+        .and(query_param("direction", "desc"))
+        .and(query_param("assignee", "reviewer"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "number": 11,
+                "title": "Pending review",
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-03T00:00:00Z",
+                "user": { "id": 1, "login": "dev", "name": "Dev", "avatar_url": "" },
+                "labels": [],
+                "assignees": [{ "login": "reviewer", "accept": false }],
+                "api_reviewers": []
+            },
+            {
+                "number": 12,
+                "title": "Already accepted",
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-02T00:00:00Z",
+                "user": { "id": 2, "login": "dev2", "name": "Dev 2", "avatar_url": "" },
+                "labels": [],
+                "assignees": [{ "login": "reviewer", "accept": true }],
+                "api_reviewers": [],
+                "testers": []
+            },
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/project/pulls"))
+        .and(query_param("state", "open"))
+        .and(query_param("sort", "updated"))
+        .and(query_param("direction", "desc"))
+        .and(query_param("tester", "reviewer"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .and(query_param("access_token", "test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {
+                "number": 13,
+                "title": "Pending test",
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-04T00:00:00Z",
+                "user": { "id": 3, "login": "dev3", "name": "Dev 3", "avatar_url": "" },
+                "labels": [],
+                "assignees": [],
+                "api_reviewers": [],
+                "testers": [{ "login": "reviewer", "accept": false }]
+            },
+            {
+                "number": 14,
+                "title": "Test already accepted",
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-05T00:00:00Z",
+                "user": { "id": 4, "login": "dev4", "name": "Dev 4", "avatar_url": "" },
+                "labels": [],
+                "assignees": [],
+                "api_reviewers": [],
+                "testers": [{ "login": "reviewer", "accept": true }]
+            }
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let result = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 1, 20)
+        .await
+        .expect("should list review inbox");
+
+    assert_eq!(result.items.len(), 2);
+    assert_eq!(result.items.iter().map(|item| item.summary.number).collect::<Vec<_>>(), vec![13, 11]);
+    assert_eq!(result.items[0].repository_full_name, "team/project");
+    assert_eq!(result.items[0].platform, "gitee");
+}
+
+#[tokio::test]
+async fn test_gitee_review_inbox_aggregates_repositories_and_paginates() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 7, "login": "author", "name": "Author", "avatar_url": ""
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user/repos"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 1, "full_name": "team/newer" },
+            { "id": 2, "full_name": "team/older" }
+        ])))
+        .mount(&mock_server)
+        .await;
+    for (repo, number, updated_at) in [("newer", 21, "2025-01-03T00:00:00Z"), ("older", 22, "2025-01-01T00:00:00Z")] {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v5/repos/team/{repo}/pulls")))
+            .and(query_param("author", "author"))
+            .and(query_param("state", "open"))
+            .and(query_param("access_token", "test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "number": number,
+                "title": format!("PR {number}"),
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": updated_at,
+                "user": { "id": 7, "login": "author", "name": "Author", "avatar_url": "" },
+                "labels": []
+            }])))
+            .mount(&mock_server)
+            .await;
+    }
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let result = adapter
+        .list_review_inbox(&ReviewInboxCategory::Authored, 2, 1)
+        .await
+        .expect("should aggregate and paginate review inbox");
+
+    assert_eq!(result.total_count, 2);
+    assert_eq!(result.total_pages, 2);
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].summary.number, 22);
+    assert_eq!(result.items[0].repository_full_name, "team/older");
+}
+
+#[tokio::test]
+async fn test_gitee_review_inbox_sanitizes_html_errors() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 7, "login": "reviewer", "name": "Reviewer", "avatar_url": ""
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/user/repos"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "id": 1, "full_name": "team/project" }
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/project/pulls"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("<html><body>Not Found</body></html>"))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".to_string())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    let error = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 1, 20)
+        .await
+        .expect_err("HTML error response must fail");
+    let message = error.to_string();
+
+    assert!(message.contains("非 JSON 错误页面"));
+    assert!(!message.contains("<html>"));
+    assert!(!message.contains("test-token"));
 }

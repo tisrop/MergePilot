@@ -1,7 +1,20 @@
 use mergebeacon_lib::http_client::HttpClient;
+use mergebeacon_lib::models::ReviewInboxCategory;
 use mergebeacon_lib::platform::{github::GitHubAdapter, GitPlatform};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn github_search_issue(number: u64, title: &str, updated_at: &str) -> serde_json::Value {
+    serde_json::json!({
+        "number": number,
+        "title": title,
+        "repository_url": "https://api.github.com/repos/octocat/hello-world",
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": updated_at,
+        "user": { "id": 1, "login": "dev1", "name": "", "avatar_url": "" },
+        "labels": [{ "name": "review" }]
+    })
+}
 
 #[tokio::test]
 async fn test_github_current_user() {
@@ -772,4 +785,148 @@ async fn test_github_pr_detail_exposes_base_and_head_revisions() {
 
     assert_eq!(detail.base_sha, "base-sha");
     assert_eq!(detail.head_sha, "head-sha");
+}
+
+#[tokio::test]
+async fn test_github_review_inbox_combines_reviewer_and_assignee_without_or_query() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open review-requested:@me"))
+        .and(query_param("sort", "updated"))
+        .and(query_param("order", "desc"))
+        .and(query_param("page", "1"))
+        .and(query_param("per_page", "100"))
+        .and(header("Authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 2,
+            "items": [
+                github_search_issue(42, "Reviewer and assignee", "2025-01-02T00:00:00Z"),
+                github_search_issue(43, "Reviewer only", "2025-01-04T00:00:00Z")
+            ]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open assignee:@me"))
+        .and(query_param("sort", "updated"))
+        .and(query_param("order", "desc"))
+        .and(query_param("page", "1"))
+        .and(query_param("per_page", "100"))
+        .and(header("Authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 2,
+            "items": [
+                github_search_issue(44, "Assignee only", "2025-01-03T00:00:00Z"),
+                github_search_issue(42, "Reviewer and assignee", "2025-01-02T00:00:00Z")
+            ]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 1, 2)
+        .await
+        .expect("should combine review requests and assignments");
+
+    assert_eq!(result.total_pages, 2);
+    assert_eq!(result.total_count, 3);
+    assert_eq!(result.items.iter().map(|item| item.summary.number).collect::<Vec<_>>(), vec![43, 44]);
+    assert_eq!(result.items[0].platform, "github");
+    assert_eq!(result.items[0].repository_full_name, "octocat/hello-world");
+    assert_eq!(result.items[0].categories, vec![ReviewInboxCategory::ReviewRequested]);
+
+    let requests = mock_server.received_requests().await.expect("requests");
+    assert!(requests.iter().all(|request| request.url.query_pairs().all(|(_, value)| !value.contains(" OR "))));
+}
+
+#[tokio::test]
+async fn test_github_review_inbox_fetches_all_remote_pages_before_local_pagination() {
+    let mock_server = MockServer::start().await;
+    let first_page = (1..=100)
+        .map(|number| github_search_issue(number, &format!("PR {number}"), &format!("{number:04}-01-01T00:00:00Z")))
+        .collect::<Vec<_>>();
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open review-requested:@me"))
+        .and(query_param("page", "1"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 101,
+            "items": first_page
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open review-requested:@me"))
+        .and(query_param("page", "2"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 101,
+            "items": [github_search_issue(101, "PR 101", "0101-01-01T00:00:00Z")]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open assignee:@me"))
+        .and(query_param("page", "1"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 0,
+            "items": []
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 6, 20)
+        .await
+        .expect("should fetch all GitHub search pages");
+
+    assert_eq!(result.total_count, 101);
+    assert_eq!(result.total_pages, 6);
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].summary.number, 1);
+}
+
+#[tokio::test]
+async fn test_github_review_inbox_fails_when_assignment_search_fails() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open review-requested:@me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 0,
+            "items": []
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open assignee:@me"))
+        .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
+            "message": "Validation Failed"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let error = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 1, 20)
+        .await
+        .expect_err("assignment search failure must not be ignored");
+
+    assert!(error.to_string().contains("422 Unprocessable Entity"));
+    assert!(error.to_string().contains("Validation Failed"));
+    assert!(!error.to_string().contains("test-token"));
 }

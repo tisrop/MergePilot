@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod auth;
 pub mod capabilities;
+pub mod inbox;
 pub mod issue;
 pub mod pr;
 pub mod review;

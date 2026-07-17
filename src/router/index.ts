@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import LoginPage from "@/pages/LoginPage.vue";
 import PrListPage from "@/pages/PrListPage.vue";
+import ReviewInboxPage from "@/pages/ReviewInboxPage.vue";
 import PrDetailPage from "@/pages/PrDetailPage.vue";
 import IssueListPage from "@/pages/IssueListPage.vue";
 import IssueNewPage from "@/pages/IssueNewPage.vue";
@@ -17,6 +18,12 @@ const routes = [
     path: "/login",
     name: "login",
     component: LoginPage,
+  },
+  {
+    path: "/inbox",
+    name: "review-inbox",
+    component: ReviewInboxPage,
+    meta: { requiresAuth: true },
   },
   {
     path: "/pr",

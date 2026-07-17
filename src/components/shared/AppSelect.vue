@@ -10,6 +10,7 @@ const props = withDefaults(
     options: SelectOption[];
     placeholder?: string;
     size?: "sm" | "md";
+    ariaLabel?: string;
   }>(),
   {
     placeholder: "请选择",
@@ -132,6 +133,7 @@ onUnmounted(() => {
       role="combobox"
       aria-haspopup="listbox"
       :aria-expanded="open"
+      :aria-label="ariaLabel"
       @click="toggle"
       @keydown="onKeydown"
     >

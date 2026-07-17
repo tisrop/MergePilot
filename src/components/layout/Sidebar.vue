@@ -241,6 +241,28 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
     <!-- Navigation -->
     <nav class="nav" aria-label="主导航">
       <router-link
+        to="/inbox"
+        :class="{ active: isActive('review-inbox') }"
+        aria-label="PR 收件箱"
+        :title="isSidebarCollapsed ? 'PR 收件箱' : undefined"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M4 4h16v16H4z" />
+          <path d="m4 8 8 5 8-5" />
+        </svg>
+        <span class="nav-label">PR 收件箱</span>
+      </router-link>
+      <router-link
         to="/pr"
         :class="{ active: isActive('pr') }"
         aria-label="拉取请求（PR）"

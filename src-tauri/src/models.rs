@@ -67,6 +67,23 @@ pub struct PrSummary {
     pub labels: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewInboxCategory {
+    ReviewRequested,
+    Authored,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewInboxItem {
+    pub platform: String,
+    pub owner: String,
+    pub repo: String,
+    pub repository_full_name: String,
+    pub categories: Vec<ReviewInboxCategory>,
+    pub summary: PrSummary,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrDetail {
     pub summary: PrSummary,
