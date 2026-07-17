@@ -133,6 +133,121 @@ impl GitLabAdapter {
             .ok_or_else(|| AppError::Api(format!("GitLab {label} 缺少 {field}")))
     }
 
+    fn inbox_status(mr: &Value) -> ReviewInboxStatusSummary {
+        let draft = mr["draft"].as_bool().or_else(|| mr["work_in_progress"].as_bool());
+        let merge_status = mr["detailed_merge_status"].as_str().or_else(|| mr["merge_status"].as_str()).unwrap_or("");
+        let has_conflicts = mr["has_conflicts"].as_bool().or(match merge_status {
+            "conflict" | "conflicts" | "cannot_be_merged" => Some(true),
+            "mergeable" | "can_be_merged" => Some(false),
+            _ => None,
+        });
+        let mut blocking_reasons = Vec::new();
+        if draft == Some(true) {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Draft,
+                message: "MR 仍处于 Draft 状态".into(),
+            });
+        }
+        if has_conflicts == Some(true) {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Conflicts,
+                message: "源分支存在合并冲突".into(),
+            });
+        }
+
+        let checks_status = match mr["head_pipeline"]["status"].as_str() {
+            Some("success") | Some("skipped") => ReadinessState::Ready,
+            Some("failed") | Some("canceled") => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChecksFailed,
+                    message: "CI 检查未通过".into(),
+                });
+                ReadinessState::Blocked
+            }
+            Some("created")
+            | Some("waiting_for_resource")
+            | Some("preparing")
+            | Some("pending")
+            | Some("running")
+            | Some("scheduled")
+            | Some("manual") => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChecksPending,
+                    message: "CI 检查仍在进行中".into(),
+                });
+                ReadinessState::Pending
+            }
+            Some(_) => ReadinessState::Unknown,
+            None if matches!(merge_status, "mergeable" | "can_be_merged") => ReadinessState::Ready,
+            None if matches!(merge_status, "ci_still_running" | "checking" | "unchecked") => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChecksPending,
+                    message: "CI 或合并状态仍在检查中".into(),
+                });
+                ReadinessState::Pending
+            }
+            None => ReadinessState::Unknown,
+        };
+
+        let approvals_status = match merge_status {
+            "requested_changes" => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChangesRequested,
+                    message: "已有评审请求修改".into(),
+                });
+                ReadinessState::Blocked
+            }
+            "not_approved" | "approvals_syncing" => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ApprovalsRequired,
+                    message: "审批尚未满足合并要求".into(),
+                });
+                ReadinessState::Blocked
+            }
+            "mergeable" | "can_be_merged" => ReadinessState::Ready,
+            _ => ReadinessState::Unknown,
+        };
+
+        if matches!(merge_status, "need_rebase" | "behind") {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::BranchBehind,
+                message: "源分支落后于目标分支".into(),
+            });
+        }
+        if merge_status == "discussions_not_resolved" || mr["blocking_discussions_resolved"].as_bool() == Some(false) {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::DiscussionsUnresolved,
+                message: "仍有未解决的讨论线程".into(),
+            });
+        }
+        if matches!(merge_status, "blocked_status" | "broken_status") {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::PlatformBlocked,
+                message: "GitLab 报告当前 MR 被平台规则阻塞".into(),
+            });
+        }
+
+        let has_hard_blocker =
+            blocking_reasons.iter().any(|reason| reason.code != MergeBlockingReasonCode::ChecksPending);
+        let status = if has_hard_blocker
+            || checks_status == ReadinessState::Blocked
+            || approvals_status == ReadinessState::Blocked
+        {
+            ReadinessState::Blocked
+        } else if checks_status == ReadinessState::Pending {
+            ReadinessState::Pending
+        } else if matches!(merge_status, "mergeable" | "can_be_merged")
+            && draft != Some(true)
+            && has_conflicts != Some(true)
+        {
+            ReadinessState::Ready
+        } else {
+            ReadinessState::Unknown
+        };
+
+        ReviewInboxStatusSummary { status, draft, has_conflicts, checks_status, approvals_status, blocking_reasons }
+    }
+
     fn unified_diff(change: &Value) -> String {
         let patch = change["diff"].as_str().unwrap_or("");
         let old_path = change["old_path"].as_str().unwrap_or("");
@@ -355,21 +470,26 @@ impl GitPlatform for GitLabAdapter {
 
         let mrs: Vec<PrSummary> = items
             .iter()
-            .map(|mr| PrSummary {
-                number: mr["iid"].as_u64().unwrap_or(0),
-                title: mr["title"].as_str().unwrap_or("").to_string(),
-                author: Self::map_user(&mr["author"]),
-                state: match (mr["state"].as_str().unwrap_or(""), mr["merged_at"].is_null()) {
-                    (_, false) => PrState::Merged,
+            .map(|mr| {
+                let state = mr["state"].as_str().unwrap_or("");
+                let mr_state = match (state, mr["merged_at"].is_null()) {
+                    ("merged", _) | (_, false) => PrState::Merged,
                     ("closed", _) => PrState::Closed,
                     _ => PrState::Open,
-                },
-                created_at: mr["created_at"].as_str().unwrap_or("").to_string(),
-                updated_at: mr["updated_at"].as_str().unwrap_or("").to_string(),
-                labels: mr["labels"]
-                    .as_array()
-                    .map(|arr| arr.iter().filter_map(|l| l.as_str().map(String::from)).collect())
-                    .unwrap_or_default(),
+                };
+                PrSummary {
+                    number: mr["iid"].as_u64().unwrap_or(0),
+                    title: mr["title"].as_str().unwrap_or("").to_string(),
+                    author: Self::map_user(&mr["author"]),
+                    status: matches!(mr_state, PrState::Open).then(|| Self::inbox_status(mr)),
+                    state: mr_state,
+                    created_at: mr["created_at"].as_str().unwrap_or("").to_string(),
+                    updated_at: mr["updated_at"].as_str().unwrap_or("").to_string(),
+                    labels: mr["labels"]
+                        .as_array()
+                        .map(|arr| arr.iter().filter_map(|l| l.as_str().map(String::from)).collect())
+                        .unwrap_or_default(),
+                }
             })
             .collect();
 
@@ -390,13 +510,22 @@ impl GitPlatform for GitLabAdapter {
                     self.list_all_inbox_merge_requests("reviewer_id", user_id),
                     self.list_all_inbox_merge_requests("assignee_id", user_id),
                 )?;
-                review_requests.into_iter().chain(assignments).collect::<Vec<_>>()
+                review_requests
+                    .into_iter()
+                    .map(|item| (item, ReviewInboxRelationship::Reviewer))
+                    .chain(assignments.into_iter().map(|item| (item, ReviewInboxRelationship::Assignee)))
+                    .collect::<Vec<_>>()
             }
-            ReviewInboxCategory::Authored => self.list_all_inbox_merge_requests("author_id", user_id).await?,
+            ReviewInboxCategory::Authored => self
+                .list_all_inbox_merge_requests("author_id", user_id)
+                .await?
+                .into_iter()
+                .map(|item| (item, ReviewInboxRelationship::Author))
+                .collect(),
         };
 
         let mut items = Vec::with_capacity(raw_items.len());
-        for mr in raw_items {
+        for (mr, relationship) in raw_items {
             let (owner, repo) = Self::repository_from_merge_request(&mr)?;
             items.push(ReviewInboxItem {
                 platform: self.name().to_string(),
@@ -404,6 +533,8 @@ impl GitPlatform for GitLabAdapter {
                 owner,
                 repo,
                 categories: vec![*category],
+                relationships: vec![relationship],
+                status: Self::inbox_status(&mr),
                 summary: PrSummary {
                     number: mr["iid"].as_u64().unwrap_or(0),
                     title: mr["title"].as_str().unwrap_or("").to_string(),
@@ -415,12 +546,12 @@ impl GitPlatform for GitLabAdapter {
                         .as_array()
                         .map(|labels| labels.iter().filter_map(|label| label.as_str().map(str::to_string)).collect())
                         .unwrap_or_default(),
+                    status: None,
                 },
             });
         }
+        let mut items = super::merge_review_inbox_items(items);
         items.sort_by(|left, right| right.summary.updated_at.cmp(&left.summary.updated_at));
-        let mut seen = std::collections::HashSet::new();
-        items.retain(|item| seen.insert((item.repository_full_name.clone(), item.summary.number)));
 
         let total_count = items.len() as u32;
         let total_pages = if total_count == 0 { 1 } else { total_count.div_ceil(per_page) };
@@ -450,6 +581,7 @@ impl GitPlatform for GitLabAdapter {
                 .as_array()
                 .map(|arr| arr.iter().filter_map(|l| l.as_str().map(String::from)).collect())
                 .unwrap_or_default(),
+            status: None,
         };
 
         Ok(PrDetail {

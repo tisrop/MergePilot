@@ -1,5 +1,5 @@
 use mergebeacon_lib::http_client::HttpClient;
-use mergebeacon_lib::models::ReviewInboxCategory;
+use mergebeacon_lib::models::{ReadinessState, ReviewInboxCategory, ReviewInboxRelationship};
 use mergebeacon_lib::platform::{gitee::GiteeAdapter, GitPlatform};
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -47,6 +47,11 @@ async fn test_gitee_list_prs_open() {
                         "title": "Fix bug",
                         "state": "open",
                         "merged_at": null,
+                        "mergeable": true,
+                        "assignees_number": 1,
+                        "assignees": [{ "accept": true }],
+                        "testers_number": 1,
+                        "testers": [{ "accept": true }],
                         "created_at": "2025-01-01T00:00:00Z",
                         "updated_at": "2025-01-02T00:00:00Z",
                         "user": { "id": 1, "login": "dev1", "name": "", "avatar_url": "" },
@@ -69,6 +74,10 @@ async fn test_gitee_list_prs_open() {
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].number, 42);
     assert_eq!(result.items[0].title, "Fix bug");
+    let status = result.items[0].status.as_ref().expect("open PR should expose status summary");
+    assert_eq!(status.status, ReadinessState::Ready);
+    assert_eq!(status.approvals_status, ReadinessState::Ready);
+    assert_eq!(status.checks_status, ReadinessState::Ready);
     assert_eq!(result.total_count, 1);
     assert_eq!(result.total_pages, 1);
 }
@@ -116,6 +125,9 @@ async fn test_gitee_list_prs_pagination_headers() {
 
     assert_eq!(result.total_count, 25);
     assert_eq!(result.total_pages, 2);
+    let status = result.items[0].status.as_ref().expect("open PR should expose status summary");
+    assert_eq!(status.status, ReadinessState::Unknown);
+    assert_ne!(status.status, ReadinessState::Ready);
 }
 
 #[tokio::test]
@@ -145,7 +157,7 @@ async fn test_gitee_list_prs_merged() {
                         "number": 101,
                         "title": "Another merge",
                         "state": "merged",
-                        "merged_at": "2025-01-04T00:00:00Z",
+                        "merged_at": null,
                         "created_at": "2025-01-02T00:00:00Z",
                         "updated_at": "2025-01-04T00:00:00Z",
                         "user": { "id": 2, "login": "dev2", "name": "", "avatar_url": "" },
@@ -169,8 +181,10 @@ async fn test_gitee_list_prs_merged() {
     assert_eq!(result.items[0].number, 100);
     assert_eq!(result.items[0].title, "Merged feature");
     assert!(matches!(result.items[0].state, mergebeacon_lib::models::PrState::Merged));
+    assert!(result.items[0].status.is_none());
     assert_eq!(result.items[1].number, 101);
     assert!(matches!(result.items[1].state, mergebeacon_lib::models::PrState::Merged));
+    assert!(result.items[1].status.is_none());
     assert_eq!(result.total_count, 2);
     assert_eq!(result.total_pages, 1);
 }
@@ -1084,8 +1098,13 @@ async fn test_gitee_review_inbox_filters_pending_reviewers_and_testers() {
                 "updated_at": "2025-01-03T00:00:00Z",
                 "user": { "id": 1, "login": "dev", "name": "Dev", "avatar_url": "" },
                 "labels": [],
+                "mergeable": true,
+                "assignees_number": 1,
+                "api_reviewers_number": 0,
+                "testers_number": 1,
                 "assignees": [{ "login": "reviewer", "accept": false }],
-                "api_reviewers": []
+                "api_reviewers": [],
+                "testers": [{ "login": "reviewer", "accept": false }]
             },
             {
                 "number": 12,
@@ -1113,12 +1132,29 @@ async fn test_gitee_review_inbox_filters_pending_reviewers_and_testers() {
         .and(query_param("access_token", "test-token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
             {
+                "number": 11,
+                "title": "Pending review and test",
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-03T00:00:00Z",
+                "user": { "id": 1, "login": "dev", "name": "Dev", "avatar_url": "" },
+                "labels": [],
+                "mergeable": true,
+                "assignees_number": 1,
+                "api_reviewers_number": 0,
+                "testers_number": 1,
+                "assignees": [{ "login": "reviewer", "accept": false }],
+                "api_reviewers": [],
+                "testers": [{ "login": "reviewer", "accept": false }]
+            },
+            {
                 "number": 13,
                 "title": "Pending test",
                 "created_at": "2025-01-01T00:00:00Z",
                 "updated_at": "2025-01-04T00:00:00Z",
                 "user": { "id": 3, "login": "dev3", "name": "Dev 3", "avatar_url": "" },
                 "labels": [],
+                "mergeable": true,
+                "testers_number": 1,
                 "assignees": [],
                 "api_reviewers": [],
                 "testers": [{ "login": "reviewer", "accept": false }]
@@ -1149,6 +1185,13 @@ async fn test_gitee_review_inbox_filters_pending_reviewers_and_testers() {
     assert_eq!(result.items.iter().map(|item| item.summary.number).collect::<Vec<_>>(), vec![13, 11]);
     assert_eq!(result.items[0].repository_full_name, "team/project");
     assert_eq!(result.items[0].platform, "gitee");
+    assert_eq!(result.items[0].relationships, vec![ReviewInboxRelationship::Tester]);
+    assert_eq!(result.items[0].status.status, ReadinessState::Pending);
+    let combined = result.items.iter().find(|item| item.summary.number == 11).expect("combined PR");
+    assert_eq!(combined.relationships, vec![ReviewInboxRelationship::Reviewer, ReviewInboxRelationship::Tester]);
+    assert_eq!(combined.status.status, ReadinessState::Blocked);
+    assert_eq!(combined.status.checks_status, ReadinessState::Pending);
+    assert_eq!(combined.status.approvals_status, ReadinessState::Blocked);
 }
 
 #[tokio::test]
@@ -1181,7 +1224,8 @@ async fn test_gitee_review_inbox_aggregates_repositories_and_paginates() {
                 "created_at": "2025-01-01T00:00:00Z",
                 "updated_at": updated_at,
                 "user": { "id": 7, "login": "author", "name": "Author", "avatar_url": "" },
-                "labels": []
+                "labels": [],
+                "mergeable": true
             }])))
             .mount(&mock_server)
             .await;
@@ -1199,6 +1243,10 @@ async fn test_gitee_review_inbox_aggregates_repositories_and_paginates() {
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].summary.number, 22);
     assert_eq!(result.items[0].repository_full_name, "team/older");
+    assert_eq!(result.items[0].relationships, vec![ReviewInboxRelationship::Author]);
+    assert_eq!(result.items[0].status.status, ReadinessState::Unknown);
+    assert_eq!(result.items[0].status.checks_status, ReadinessState::Unknown);
+    assert_eq!(result.items[0].status.approvals_status, ReadinessState::Unknown);
 }
 
 #[tokio::test]

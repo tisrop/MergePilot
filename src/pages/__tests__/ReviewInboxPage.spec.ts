@@ -30,6 +30,20 @@ function result(platform: Platform): Paginated<ReviewInboxItem> {
         repo: `${platform}-repo`,
         repository_full_name: `team/${platform}-repo`,
         categories: ["review_requested"],
+        relationships: [
+          platform === "gitee" ? "tester" : platform === "gitlab" ? "assignee" : "reviewer",
+        ],
+        status: {
+          status: platform === "github" ? "ready" : "blocked",
+          draft: false,
+          has_conflicts: platform === "gitlab",
+          checks_status: platform === "github" ? "ready" : "pending",
+          approvals_status: platform === "github" ? "ready" : "blocked",
+          blocking_reasons:
+            platform === "gitlab"
+              ? [{ code: "approvals_required", message: "审批尚未满足合并要求" }]
+              : [],
+        },
         summary: {
           number: platform === "github" ? 1 : 2,
           title: `${platform} review`,
@@ -86,6 +100,10 @@ describe("ReviewInboxPage", () => {
       "team/gitlab-repo",
       "team/github-repo",
     ]);
+    expect(wrapper.text()).toContain("负责人");
+    expect(wrapper.text()).toContain("评审人");
+    expect(wrapper.text()).toContain("可合并");
+    expect(wrapper.text()).toContain("被阻塞");
 
     await wrapper.get('input[type="search"]').setValue("github-repo");
     expect(wrapper.findAll(".inbox-card")).toHaveLength(1);
@@ -129,7 +147,7 @@ describe("ReviewInboxPage", () => {
       number: "2",
     });
   });
-  it("状态和平台筛选可以展开、选择并更新结果", async () => {
+  it("范围、平台、角色和合并状态筛选可以展开、选择并更新结果", async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -153,6 +171,29 @@ describe("ReviewInboxPage", () => {
       },
     });
     await flushPromises();
+
+    const relationshipSelect = wrapper.get('[aria-label="收件箱角色"]');
+    await relationshipSelect.trigger("click");
+    expect(wrapper.findAll(".filter-field")[2].text()).toContain("评审人");
+    expect(wrapper.findAll(".filter-field")[2].text()).toContain("负责人");
+    expect(wrapper.findAll(".filter-field")[2].text()).not.toContain("我创建的");
+    await wrapper.get('.dropdown-option[data-value="assignee"]').trigger("click");
+    expect(wrapper.findAll(".repository-name").map((node) => node.text())).toEqual([
+      "team/gitlab-repo",
+    ]);
+    await relationshipSelect.trigger("click");
+    await wrapper.get('.dropdown-option[data-value="all"]').trigger("click");
+
+    const readinessSelect = wrapper.get('[aria-label="收件箱合并状态"]');
+    await readinessSelect.trigger("click");
+    expect(wrapper.findAll(".filter-field")[3].text()).toContain("可合并");
+    expect(wrapper.findAll(".filter-field")[3].text()).toContain("被阻塞");
+    await wrapper.get('.dropdown-option[data-value="ready"]').trigger("click");
+    expect(wrapper.findAll(".repository-name").map((node) => node.text())).toEqual([
+      "team/github-repo",
+    ]);
+    await readinessSelect.trigger("click");
+    await wrapper.get('.dropdown-option[data-value="all"]').trigger("click");
 
     const statusSelect = wrapper.get('[aria-label="PR 收件箱分类"]');
     await statusSelect.trigger("click");

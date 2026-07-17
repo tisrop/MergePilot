@@ -1,5 +1,5 @@
 use mergebeacon_lib::http_client::HttpClient;
-use mergebeacon_lib::models::ReviewInboxCategory;
+use mergebeacon_lib::models::{ReadinessState, ReviewInboxCategory, ReviewInboxRelationship};
 use mergebeacon_lib::platform::{github::GitHubAdapter, GitPlatform};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -7,6 +7,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn github_search_issue(number: u64, title: &str, updated_at: &str) -> serde_json::Value {
     serde_json::json!({
         "number": number,
+        "node_id": format!("PR_node_{number}"),
         "title": title,
         "repository_url": "https://api.github.com/repos/octocat/hello-world",
         "created_at": "2025-01-01T00:00:00Z",
@@ -52,6 +53,7 @@ async fn test_github_list_prs() {
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
             {
                 "number": 42,
+                "node_id": "PR_node_42",
                 "title": "Fix bug in parser",
                 "state": "open",
                 "merged_at": null,
@@ -62,6 +64,7 @@ async fn test_github_list_prs() {
             },
             {
                 "number": 43,
+                "node_id": "PR_node_43",
                 "title": "Add new feature",
                 "state": "closed",
                 "merged_at": "2025-01-03T00:00:00Z",
@@ -71,6 +74,23 @@ async fn test_github_list_prs() {
                 "labels": []
             }
         ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "nodes": [{
+                    "id": "PR_node_42",
+                    "isDraft": false,
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "reviewDecision": "APPROVED",
+                    "commits": { "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }] }
+                }]
+            }
+        })))
+        .expect(1)
         .mount(&mock_server)
         .await;
 
@@ -86,9 +106,58 @@ async fn test_github_list_prs() {
     assert_eq!(result.items[0].number, 42);
     assert_eq!(result.items[0].title, "Fix bug in parser");
     assert!(matches!(result.items[0].state, mergebeacon_lib::models::PrState::Open));
+    let status = result.items[0].status.as_ref().expect("open PR should expose status summary");
+    assert_eq!(status.status, ReadinessState::Ready);
+    assert_eq!(status.approvals_status, ReadinessState::Ready);
+    assert_eq!(status.checks_status, ReadinessState::Ready);
     assert_eq!(result.items[1].number, 43);
     // PR #43 has merged_at set, should be Merged
     assert!(matches!(result.items[1].state, mergebeacon_lib::models::PrState::Merged));
+    assert!(result.items[1].status.is_none());
+
+    let requests = mock_server.received_requests().await.expect("requests");
+    let graphql = requests.iter().find(|request| request.url.path() == "/graphql").expect("GraphQL request");
+    let body: serde_json::Value = serde_json::from_slice(&graphql.body).expect("GraphQL JSON body");
+    assert_eq!(body["variables"]["ids"], serde_json::json!(["PR_node_42"]));
+}
+
+#[tokio::test]
+async fn test_github_list_prs_keeps_open_items_when_status_batch_fails() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/pulls"))
+        .and(query_param("state", "open"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+            "number": 42,
+            "node_id": "PR_node_42",
+            "title": "Fix bug in parser",
+            "state": "open",
+            "merged_at": null,
+            "created_at": "2025-01-01T00:00:00Z",
+            "updated_at": "2025-01-02T00:00:00Z",
+            "user": { "id": 1, "login": "dev1", "name": "", "avatar_url": "" },
+            "labels": []
+        }])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_pull_requests("octocat", "hello-world", &mergebeacon_lib::models::PrState::Open, 1, 20)
+        .await
+        .expect("status failure must not fail PR listing");
+
+    assert_eq!(result.items.len(), 1);
+    let status = result.items[0].status.as_ref().expect("open PR should fall back to unknown status");
+    assert_eq!(status.status, ReadinessState::Unknown);
+    assert_eq!(status.approvals_status, ReadinessState::Unknown);
+    assert_eq!(status.checks_status, ReadinessState::Unknown);
 }
 
 #[tokio::test]
@@ -839,9 +908,157 @@ async fn test_github_review_inbox_combines_reviewer_and_assignee_without_or_quer
     assert_eq!(result.items[0].platform, "github");
     assert_eq!(result.items[0].repository_full_name, "octocat/hello-world");
     assert_eq!(result.items[0].categories, vec![ReviewInboxCategory::ReviewRequested]);
+    assert_eq!(result.items[0].relationships, vec![ReviewInboxRelationship::Reviewer]);
 
     let requests = mock_server.received_requests().await.expect("requests");
     assert!(requests.iter().all(|request| request.url.query_pairs().all(|(_, value)| !value.contains(" OR "))));
+}
+
+#[tokio::test]
+async fn test_github_review_inbox_batches_status_for_current_page() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open review-requested:@me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 2,
+            "items": [
+                github_search_issue(42, "Older", "2025-01-02T00:00:00Z"),
+                github_search_issue(43, "Current page", "2025-01-04T00:00:00Z")
+            ]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open assignee:@me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 0,
+            "items": []
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "nodes": [{
+                    "id": "PR_node_43",
+                    "isDraft": false,
+                    "mergeable": "CONFLICTING",
+                    "mergeStateStatus": "DIRTY",
+                    "reviewDecision": "CHANGES_REQUESTED",
+                    "commits": { "nodes": [{ "commit": { "statusCheckRollup": { "state": "FAILURE" } } }] }
+                }]
+            }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 1, 1)
+        .await
+        .expect("should batch status for the current page");
+
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].summary.number, 43);
+    assert_eq!(result.items[0].status.status, ReadinessState::Blocked);
+    assert_eq!(result.items[0].status.checks_status, ReadinessState::Blocked);
+    assert_eq!(result.items[0].status.approvals_status, ReadinessState::Blocked);
+    assert_eq!(result.items[0].status.has_conflicts, Some(true));
+
+    let requests = mock_server.received_requests().await.expect("requests");
+    let graphql = requests.iter().find(|request| request.url.path() == "/graphql").expect("GraphQL request");
+    let body: serde_json::Value = serde_json::from_slice(&graphql.body).expect("GraphQL JSON body");
+    assert_eq!(body["variables"]["ids"], serde_json::json!(["PR_node_43"]));
+}
+
+#[tokio::test]
+async fn test_github_review_inbox_keeps_missing_mergeability_unknown() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open review-requested:@me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "items": [github_search_issue(42, "Review", "2025-01-02T00:00:00Z")]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open assignee:@me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 0,
+            "items": []
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {
+                "nodes": [{
+                    "id": "PR_node_42",
+                    "isDraft": false,
+                    "mergeStateStatus": "CLEAN",
+                    "reviewDecision": null,
+                    "commits": { "nodes": [{ "commit": { "statusCheckRollup": null } }] }
+                }]
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 1, 20)
+        .await
+        .expect("missing mergeability must remain unknown");
+
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].status.status, ReadinessState::Unknown);
+    assert_eq!(result.items[0].status.checks_status, ReadinessState::Unknown);
+    assert_eq!(result.items[0].status.approvals_status, ReadinessState::Unknown);
+}
+
+#[tokio::test]
+async fn test_github_review_inbox_keeps_items_when_batched_status_fails() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open review-requested:@me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "items": [github_search_issue(42, "Review", "2025-01-02T00:00:00Z")]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "is:pr is:open assignee:@me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 0,
+            "items": []
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({"message": "unavailable"})))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_review_inbox(&ReviewInboxCategory::ReviewRequested, 1, 20)
+        .await
+        .expect("status failure must not fail inbox listing");
+
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].status.status, ReadinessState::Unknown);
 }
 
 #[tokio::test]

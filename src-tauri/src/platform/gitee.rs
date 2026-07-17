@@ -161,6 +161,121 @@ impl GiteeAdapter {
         }
     }
 
+    fn inbox_acceptance_progress(json: &Value, gates: &[(&str, &str)]) -> (Option<u32>, Option<u32>) {
+        let progress = Self::acceptance_progress(json, gates);
+        if progress.0.is_some() {
+            return progress;
+        }
+
+        let mut required = 0_u32;
+        let mut received = 0_u32;
+        let mut found = false;
+        for (_, participants_field) in gates {
+            let Some(participants) = json[*participants_field].as_array() else {
+                continue;
+            };
+            if participants.is_empty() {
+                continue;
+            }
+            found = true;
+            required = required.saturating_add(participants.len() as u32);
+            received = received.saturating_add(
+                participants.iter().filter(|participant| participant["accept"].as_bool() == Some(true)).count() as u32,
+            );
+        }
+        if found {
+            (Some(required), Some(received))
+        } else {
+            (None, None)
+        }
+    }
+
+    fn inbox_status(pr: &Value) -> ReviewInboxStatusSummary {
+        let mergeable = pr["mergeable"].as_bool();
+        let draft = pr["draft"].as_bool().or_else(|| pr["work_in_progress"].as_bool());
+        let has_conflicts = pr["has_conflicts"]
+            .as_bool()
+            .or_else(|| pr["conflict"].as_bool())
+            .or_else(|| (mergeable == Some(true)).then_some(false));
+        let mut blocking_reasons = Vec::new();
+
+        if draft == Some(true) {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Draft,
+                message: "PR 仍处于 Draft 状态".into(),
+            });
+        }
+        if has_conflicts == Some(true) {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Conflicts,
+                message: "源分支存在合并冲突".into(),
+            });
+        }
+        if mergeable == Some(false) && has_conflicts != Some(true) {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::PlatformBlocked,
+                message: "平台报告当前 PR 不可合并".into(),
+            });
+        }
+
+        let (approvals_required, approvals_received) = Self::inbox_acceptance_progress(
+            pr,
+            &[("assignees_number", "assignees"), ("api_reviewers_number", "api_reviewers")],
+        );
+        let approvals_status = match (approvals_required, approvals_received) {
+            (Some(required), Some(received)) if received >= required => ReadinessState::Ready,
+            (Some(required), Some(received)) => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ApprovalsRequired,
+                    message: format!("还需要 {} 个审批", required.saturating_sub(received)),
+                });
+                ReadinessState::Blocked
+            }
+            _ => ReadinessState::Unknown,
+        };
+
+        let (tests_required, tests_received) = Self::inbox_acceptance_progress(pr, &[("testers_number", "testers")]);
+        let checks_status = match (tests_required, tests_received) {
+            (Some(required), Some(received)) if received >= required => ReadinessState::Ready,
+            (Some(required), Some(received)) => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChecksPending,
+                    message: format!("还需要 {} 个测试通过", required.saturating_sub(received)),
+                });
+                ReadinessState::Pending
+            }
+            _ => ReadinessState::Unknown,
+        };
+
+        let has_hard_blocker =
+            blocking_reasons.iter().any(|reason| reason.code != MergeBlockingReasonCode::ChecksPending);
+        let status = if has_hard_blocker || approvals_status == ReadinessState::Blocked {
+            ReadinessState::Blocked
+        } else if checks_status == ReadinessState::Pending {
+            ReadinessState::Pending
+        } else if mergeable == Some(true)
+            && approvals_status == ReadinessState::Ready
+            && checks_status == ReadinessState::Ready
+            && draft != Some(true)
+            && has_conflicts != Some(true)
+        {
+            ReadinessState::Ready
+        } else {
+            ReadinessState::Unknown
+        };
+
+        ReviewInboxStatusSummary { status, draft, has_conflicts, checks_status, approvals_status, blocking_reasons }
+    }
+
+    fn inbox_relationship(filter_name: &str) -> ReviewInboxRelationship {
+        match filter_name {
+            "assignee" => ReviewInboxRelationship::Reviewer,
+            "tester" => ReviewInboxRelationship::Tester,
+            "author" => ReviewInboxRelationship::Author,
+            _ => ReviewInboxRelationship::Reviewer,
+        }
+    }
+
     fn file_paths(value: &Value) -> (&str, &str) {
         let old_path = value["previous_filename"]
             .as_str()
@@ -428,6 +543,8 @@ impl GiteeAdapter {
                     repo: repo.to_string(),
                     repository_full_name: format!("{owner}/{repo}"),
                     categories: vec![category],
+                    relationships: vec![Self::inbox_relationship(filter_name)],
+                    status: Self::inbox_status(pr),
                     summary: PrSummary {
                         number: pr["number"].as_u64().unwrap_or(0),
                         title: pr["title"].as_str().unwrap_or("").to_string(),
@@ -441,6 +558,7 @@ impl GiteeAdapter {
                                 labels.iter().filter_map(|label| label["name"].as_str().map(str::to_string)).collect()
                             })
                             .unwrap_or_default(),
+                        status: None,
                     },
                 });
             }
@@ -466,10 +584,8 @@ impl GiteeAdapter {
                     self.list_repository_inbox_by_filter(owner, repo, category, login, "assignee"),
                     self.list_repository_inbox_by_filter(owner, repo, category, login, "tester"),
                 )?;
-                let mut items = reviews.into_iter().chain(tests).collect::<Vec<_>>();
+                let mut items = super::merge_review_inbox_items(reviews.into_iter().chain(tests).collect());
                 items.sort_by(|left, right| right.summary.updated_at.cmp(&left.summary.updated_at));
-                let mut seen = std::collections::HashSet::new();
-                items.retain(|item| seen.insert((item.repository_full_name.clone(), item.summary.number)));
                 Ok(items)
             }
             ReviewInboxCategory::Authored => {
@@ -627,17 +743,19 @@ impl GitPlatform for GiteeAdapter {
             .map(|pr| {
                 let state_str = pr["state"].as_str().unwrap_or("");
                 let merged = !pr["merged_at"].is_null();
+                let pr_state = if merged || state_str == "merged" {
+                    PrState::Merged
+                } else if state_str == "closed" {
+                    PrState::Closed
+                } else {
+                    PrState::Open
+                };
                 PrSummary {
                     number: pr["number"].as_u64().unwrap_or(0),
                     title: pr["title"].as_str().unwrap_or("").to_string(),
                     author: Self::map_user(&pr["user"]),
-                    state: if merged {
-                        PrState::Merged
-                    } else if state_str == "closed" {
-                        PrState::Closed
-                    } else {
-                        PrState::Open
-                    },
+                    status: matches!(pr_state, PrState::Open).then(|| Self::inbox_status(pr)),
+                    state: pr_state,
                     created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
                     updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
                     labels: pr["labels"]
@@ -689,9 +807,8 @@ impl GitPlatform for GiteeAdapter {
         for batch in batches {
             items.extend(batch?);
         }
+        let mut items = super::merge_review_inbox_items(items);
         items.sort_by(|left, right| right.summary.updated_at.cmp(&left.summary.updated_at));
-        let mut seen = std::collections::HashSet::new();
-        items.retain(|item| seen.insert((item.repository_full_name.clone(), item.summary.number)));
 
         let total_count = items.len() as u32;
         let total_pages = if total_count == 0 { 1 } else { total_count.div_ceil(per_page) };
@@ -726,6 +843,7 @@ impl GitPlatform for GiteeAdapter {
                 .as_array()
                 .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect())
                 .unwrap_or_default(),
+            status: None,
         };
 
         Ok(PrDetail {

@@ -69,6 +69,70 @@ pub fn normalize_api_base(platform: &str, url: &str) -> String {
     }
 }
 
+fn readiness_rank(state: ReadinessState) -> u8 {
+    match state {
+        ReadinessState::Blocked => 4,
+        ReadinessState::Pending => 3,
+        ReadinessState::Ready => 2,
+        ReadinessState::Unknown => 1,
+    }
+}
+
+fn merge_readiness_state(left: ReadinessState, right: ReadinessState) -> ReadinessState {
+    if readiness_rank(right) > readiness_rank(left) {
+        right
+    } else {
+        left
+    }
+}
+
+fn merge_optional_flag(left: Option<bool>, right: Option<bool>) -> Option<bool> {
+    match (left, right) {
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        (Some(false), _) | (_, Some(false)) => Some(false),
+        (None, None) => None,
+    }
+}
+
+fn merge_inbox_status(left: &mut ReviewInboxStatusSummary, right: ReviewInboxStatusSummary) {
+    left.status = merge_readiness_state(left.status, right.status);
+    left.checks_status = merge_readiness_state(left.checks_status, right.checks_status);
+    left.approvals_status = merge_readiness_state(left.approvals_status, right.approvals_status);
+    left.draft = merge_optional_flag(left.draft, right.draft);
+    left.has_conflicts = merge_optional_flag(left.has_conflicts, right.has_conflicts);
+    for reason in right.blocking_reasons {
+        if !left.blocking_reasons.contains(&reason) {
+            left.blocking_reasons.push(reason);
+        }
+    }
+}
+
+pub(crate) fn merge_review_inbox_items(items: Vec<ReviewInboxItem>) -> Vec<ReviewInboxItem> {
+    let mut merged = Vec::<ReviewInboxItem>::new();
+    let mut indexes = std::collections::HashMap::<(String, u64), usize>::new();
+    for item in items {
+        let key = (item.repository_full_name.clone(), item.summary.number);
+        if let Some(index) = indexes.get(&key).copied() {
+            let existing = &mut merged[index];
+            for category in item.categories {
+                if !existing.categories.contains(&category) {
+                    existing.categories.push(category);
+                }
+            }
+            for relationship in item.relationships {
+                if !existing.relationships.contains(&relationship) {
+                    existing.relationships.push(relationship);
+                }
+            }
+            merge_inbox_status(&mut existing.status, item.status);
+        } else {
+            indexes.insert(key, merged.len());
+            merged.push(item);
+        }
+    }
+    merged
+}
+
 /// Common interface for all Git platforms (GitHub, GitLab, Gitee)
 #[async_trait]
 #[allow(clippy::too_many_arguments)]

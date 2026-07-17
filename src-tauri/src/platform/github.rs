@@ -417,6 +417,150 @@ impl GitHubAdapter {
         Ok(items)
     }
 
+    fn inbox_status(node: &Value) -> ReviewInboxStatusSummary {
+        let draft = node["isDraft"].as_bool();
+        let mergeable = node["mergeable"].as_str();
+        let merge_state = node["mergeStateStatus"].as_str();
+        let review_decision = node["reviewDecision"].as_str();
+        let check_rollup = node["commits"]["nodes"]
+            .as_array()
+            .and_then(|nodes| nodes.last())
+            .and_then(|commit| commit["commit"]["statusCheckRollup"]["state"].as_str());
+        let has_conflicts = match mergeable {
+            Some("CONFLICTING") => Some(true),
+            Some("MERGEABLE") => Some(false),
+            _ => None,
+        };
+        let mut blocking_reasons = Vec::new();
+
+        if draft == Some(true) || merge_state == Some("DRAFT") {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Draft,
+                message: "PR 仍处于 Draft 状态".into(),
+            });
+        }
+        if has_conflicts == Some(true) || merge_state == Some("DIRTY") {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::Conflicts,
+                message: "源分支存在合并冲突".into(),
+            });
+        }
+        if merge_state == Some("BEHIND") {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::BranchBehind,
+                message: "源分支落后于目标分支".into(),
+            });
+        }
+        if merge_state == Some("BLOCKED") {
+            blocking_reasons.push(MergeBlockingReason {
+                code: MergeBlockingReasonCode::PlatformBlocked,
+                message: "GitHub 分支保护或仓库规则阻止合并".into(),
+            });
+        }
+
+        let checks_status = match check_rollup {
+            Some("SUCCESS") => ReadinessState::Ready,
+            Some("FAILURE") | Some("ERROR") => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChecksFailed,
+                    message: "CI 检查未通过".into(),
+                });
+                ReadinessState::Blocked
+            }
+            Some("PENDING") | Some("EXPECTED") => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChecksPending,
+                    message: "CI 检查仍在进行中".into(),
+                });
+                ReadinessState::Pending
+            }
+            Some(_) | None => ReadinessState::Unknown,
+        };
+        let approvals_status = match review_decision {
+            Some("APPROVED") => ReadinessState::Ready,
+            Some("CHANGES_REQUESTED") => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ChangesRequested,
+                    message: "已有评审请求修改".into(),
+                });
+                ReadinessState::Blocked
+            }
+            Some("REVIEW_REQUIRED") => {
+                blocking_reasons.push(MergeBlockingReason {
+                    code: MergeBlockingReasonCode::ApprovalsRequired,
+                    message: "审批尚未满足合并要求".into(),
+                });
+                ReadinessState::Blocked
+            }
+            Some(_) | None => ReadinessState::Unknown,
+        };
+
+        let has_hard_blocker =
+            blocking_reasons.iter().any(|reason| reason.code != MergeBlockingReasonCode::ChecksPending);
+        let status = if has_hard_blocker
+            || checks_status == ReadinessState::Blocked
+            || approvals_status == ReadinessState::Blocked
+        {
+            ReadinessState::Blocked
+        } else if checks_status == ReadinessState::Pending || mergeable == Some("UNKNOWN") {
+            ReadinessState::Pending
+        } else if matches!(merge_state, Some("CLEAN") | Some("HAS_HOOKS") | Some("UNSTABLE"))
+            && mergeable == Some("MERGEABLE")
+            && draft != Some(true)
+        {
+            ReadinessState::Ready
+        } else {
+            ReadinessState::Unknown
+        };
+
+        ReviewInboxStatusSummary { status, draft, has_conflicts, checks_status, approvals_status, blocking_reasons }
+    }
+
+    async fn inbox_statuses(
+        &self,
+        node_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, ReviewInboxStatusSummary>, AppError> {
+        if node_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let url = format!("{}/graphql", self.base_url);
+        let payload = serde_json::json!({
+            "query": r#"query ReviewInboxStatuses($ids: [ID!]!) {
+                nodes(ids: $ids) {
+                    ... on PullRequest {
+                        id
+                        isDraft
+                        mergeable
+                        mergeStateStatus
+                        reviewDecision
+                        commits(last: 1) {
+                            nodes {
+                                commit {
+                                    statusCheckRollup { state }
+                                }
+                            }
+                        }
+                    }
+                }
+            }"#,
+            "variables": { "ids": node_ids },
+        });
+        let response = self.post_json(&url, &payload).await?;
+        if let Some(errors) = response["errors"].as_array().filter(|errors| !errors.is_empty()) {
+            return Err(AppError::Api(format!("GitHub GraphQL 收件箱状态查询失败: {errors:?}")));
+        }
+        let nodes = response["data"]["nodes"]
+            .as_array()
+            .ok_or_else(|| AppError::Api("GitHub GraphQL 收件箱状态响应缺少 data.nodes".into()))?;
+        let mut statuses = std::collections::HashMap::new();
+        for node in nodes {
+            if let Some(id) = node["id"].as_str() {
+                statuses.insert(id.to_string(), Self::inbox_status(node));
+            }
+        }
+        Ok(statuses)
+    }
+
     fn repository_from_api_url(url: &str) -> Result<(String, String), AppError> {
         let path = url
             .split_once("/repos/")
@@ -571,29 +715,50 @@ impl GitPlatform for GitHubAdapter {
         }
 
         let items: Vec<Value> = resp.json().await?;
+        let node_ids = items
+            .iter()
+            .filter_map(|pr| Some((pr["number"].as_u64()?, pr["node_id"].as_str()?.to_string())))
+            .collect::<std::collections::HashMap<_, _>>();
 
         let all_prs: Vec<PrSummary> = items
             .iter()
-            .map(|pr| PrSummary {
-                number: pr["number"].as_u64().unwrap_or(0),
-                title: pr["title"].as_str().unwrap_or("").to_string(),
-                author: Self::map_user(&pr["user"]),
-                state: Self::map_pr_state(pr["state"].as_str().unwrap_or(""), !pr["merged_at"].is_null()),
-                created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
-                updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
-                labels: pr["labels"]
-                    .as_array()
-                    .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect())
-                    .unwrap_or_default(),
+            .map(|pr| {
+                let pr_state = Self::map_pr_state(pr["state"].as_str().unwrap_or(""), !pr["merged_at"].is_null());
+                PrSummary {
+                    number: pr["number"].as_u64().unwrap_or(0),
+                    title: pr["title"].as_str().unwrap_or("").to_string(),
+                    author: Self::map_user(&pr["user"]),
+                    status: matches!(pr_state, PrState::Open).then(PrStatusSummary::default),
+                    state: pr_state,
+                    created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
+                    updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
+                    labels: pr["labels"]
+                        .as_array()
+                        .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect())
+                        .unwrap_or_default(),
+                }
             })
             .collect();
 
         // Filter by requested state (needed because GitHub groups merged into closed)
-        let prs: Vec<PrSummary> = match state {
+        let mut prs: Vec<PrSummary> = match state {
             PrState::Merged => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Merged)).collect(),
             PrState::Closed => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Closed)).collect(),
             _ => all_prs,
         };
+
+        let requested_ids = prs
+            .iter()
+            .filter(|pr| matches!(pr.state, PrState::Open))
+            .filter_map(|pr| node_ids.get(&pr.number).cloned())
+            .collect::<Vec<_>>();
+        if let Ok(statuses) = self.inbox_statuses(&requested_ids).await {
+            for pr in &mut prs {
+                if let Some(status) = node_ids.get(&pr.number).and_then(|node_id| statuses.get(node_id)) {
+                    pr.status = Some(status.clone());
+                }
+            }
+        }
 
         let total_count = if prs.is_empty() {
             0
@@ -618,22 +783,39 @@ impl GitPlatform for GitHubAdapter {
                     self.list_all_inbox_search("review-requested:@me"),
                     self.list_all_inbox_search("assignee:@me"),
                 )?;
-                review_requests.into_iter().chain(assignments).collect::<Vec<_>>()
+                review_requests
+                    .into_iter()
+                    .map(|item| (item, ReviewInboxRelationship::Reviewer))
+                    .chain(assignments.into_iter().map(|item| (item, ReviewInboxRelationship::Assignee)))
+                    .collect::<Vec<_>>()
             }
-            ReviewInboxCategory::Authored => self.list_all_inbox_search("author:@me").await?,
+            ReviewInboxCategory::Authored => self
+                .list_all_inbox_search("author:@me")
+                .await?
+                .into_iter()
+                .map(|item| (item, ReviewInboxRelationship::Author))
+                .collect(),
         };
 
+        let mut node_ids = std::collections::HashMap::<(String, u64), String>::new();
         let mut items = Vec::with_capacity(raw_items.len());
-        for pr in raw_items {
+        for (pr, relationship) in raw_items {
             let (owner, repo) = Self::repository_from_api_url(pr["repository_url"].as_str().unwrap_or(""))?;
+            let repository_full_name = format!("{owner}/{repo}");
+            let number = pr["number"].as_u64().unwrap_or(0);
+            if let Some(node_id) = pr["node_id"].as_str() {
+                node_ids.insert((repository_full_name.clone(), number), node_id.to_string());
+            }
             items.push(ReviewInboxItem {
                 platform: self.name().to_string(),
-                repository_full_name: format!("{owner}/{repo}"),
+                repository_full_name,
                 owner,
                 repo,
                 categories: vec![*category],
+                relationships: vec![relationship],
+                status: ReviewInboxStatusSummary::default(),
                 summary: PrSummary {
-                    number: pr["number"].as_u64().unwrap_or(0),
+                    number,
                     title: pr["title"].as_str().unwrap_or("").to_string(),
                     author: Self::map_user(&pr["user"]),
                     state: PrState::Open,
@@ -645,17 +827,29 @@ impl GitPlatform for GitHubAdapter {
                             labels.iter().filter_map(|label| label["name"].as_str().map(str::to_string)).collect()
                         })
                         .unwrap_or_default(),
+                    status: None,
                 },
             });
         }
+        let mut items = super::merge_review_inbox_items(items);
         items.sort_by(|left, right| right.summary.updated_at.cmp(&left.summary.updated_at));
-        let mut seen = std::collections::HashSet::new();
-        items.retain(|item| seen.insert((item.repository_full_name.clone(), item.summary.number)));
 
         let total_count = items.len() as u32;
         let total_pages = if total_count == 0 { 1 } else { total_count.div_ceil(per_page) };
         let start = page.saturating_sub(1).saturating_mul(per_page) as usize;
-        let page_items = items.into_iter().skip(start).take(per_page as usize).collect();
+        let mut page_items = items.into_iter().skip(start).take(per_page as usize).collect::<Vec<_>>();
+        let requested_ids = page_items
+            .iter()
+            .filter_map(|item| node_ids.get(&(item.repository_full_name.clone(), item.summary.number)).cloned())
+            .collect::<Vec<_>>();
+        if let Ok(statuses) = self.inbox_statuses(&requested_ids).await {
+            for item in &mut page_items {
+                let key = (item.repository_full_name.clone(), item.summary.number);
+                if let Some(status) = node_ids.get(&key).and_then(|node_id| statuses.get(node_id)) {
+                    item.status = status.clone();
+                }
+            }
+        }
 
         Ok(Paginated { items: page_items, page, total_pages, total_count })
     }
@@ -675,6 +869,7 @@ impl GitPlatform for GitHubAdapter {
                 .as_array()
                 .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().map(String::from)).collect())
                 .unwrap_or_default(),
+            status: None,
         };
 
         Ok(PrDetail {

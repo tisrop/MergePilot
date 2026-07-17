@@ -25,6 +25,19 @@ const categoryOptions = [
   { value: "review_requested", label: "待我处理" },
   { value: "authored", label: "我创建的" },
 ];
+const relationshipOptions = [
+  { value: "all", label: "全部角色" },
+  { value: "reviewer", label: "评审人" },
+  { value: "assignee", label: "负责人" },
+  { value: "tester", label: "测试人" },
+];
+const readinessOptions = [
+  { value: "all", label: "全部合并状态" },
+  { value: "ready", label: "可合并" },
+  { value: "blocked", label: "被阻塞" },
+  { value: "pending", label: "检查中" },
+  { value: "unknown", label: "状态未知" },
+];
 const loggedInPlatforms = computed<Platform[]>(() =>
   (Object.keys(auth.platforms) as Platform[]).filter(
     (platform) => auth.platforms[platform].isLoggedIn,
@@ -144,7 +157,7 @@ function openItem(item: ReviewInboxItem): void {
       </div>
       <div class="filter-bar" aria-label="PR 收件箱筛选">
         <div class="filter-field">
-          <span>状态</span>
+          <span>范围</span>
           <AppSelect
             v-model="inbox.filters.category"
             size="sm"
@@ -159,6 +172,24 @@ function openItem(item: ReviewInboxItem): void {
             size="sm"
             :options="platformOptions"
             aria-label="代码托管平台"
+          />
+        </div>
+        <div class="filter-field">
+          <span>角色</span>
+          <AppSelect
+            v-model="inbox.filters.relationship"
+            size="sm"
+            :options="relationshipOptions"
+            aria-label="收件箱角色"
+          />
+        </div>
+        <div class="filter-field">
+          <span>合并状态</span>
+          <AppSelect
+            v-model="inbox.filters.readiness"
+            size="sm"
+            :options="readinessOptions"
+            aria-label="收件箱合并状态"
           />
         </div>
         <label class="repository-filter">
@@ -227,7 +258,15 @@ function openItem(item: ReviewInboxItem): void {
           <path d="M4 4h16v16H4z" />
           <path d="m4 8 8 5 8-5" />
         </svg>
-        <p v-if="inbox.filters.repository">当前仓库筛选下没有结果</p>
+        <p
+          v-if="
+            inbox.filters.repository ||
+            inbox.filters.relationship !== 'all' ||
+            inbox.filters.readiness !== 'all'
+          "
+        >
+          当前筛选条件下没有结果
+        </p>
         <p v-else-if="visibleErrors.length">暂未加载到可展示的 Pull Request</p>
         <p v-else>当前没有需要处理的 Pull Request</p>
       </div>

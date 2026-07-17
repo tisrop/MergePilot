@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { reviewInboxList } from "@/api";
 import { useReviewInboxStore } from "@/stores/useReviewInboxStore";
-import type { Paginated, Platform, ReviewInboxItem } from "@/types";
+import type {
+  Paginated,
+  Platform,
+  ReviewInboxItem,
+  ReviewInboxRelationship,
+  ReviewInboxStatusSummary,
+} from "@/types";
 
 vi.mock("@/api", () => ({
   reviewInboxList: vi.fn(),
@@ -13,6 +19,15 @@ function item(
   repository: string,
   number: number,
   updatedAt: string,
+  relationships: ReviewInboxRelationship[] = ["reviewer"],
+  status: ReviewInboxStatusSummary = {
+    status: "unknown",
+    draft: null,
+    has_conflicts: null,
+    checks_status: "unknown",
+    approvals_status: "unknown",
+    blocking_reasons: [],
+  },
 ): ReviewInboxItem {
   const parts = repository.split("/");
   return {
@@ -21,6 +36,8 @@ function item(
     repo: parts.at(-1) ?? "",
     repository_full_name: repository,
     categories: ["review_requested"],
+    relationships,
+    status,
     summary: {
       number,
       title: `${platform} #${number}`,
@@ -71,6 +88,52 @@ describe("useReviewInboxStore", () => {
     store.filters.repository = "";
     store.filters.platform = "github";
     expect(store.items.map((entry) => entry.platform)).toEqual(["github"]);
+  });
+
+  it("去重时合并角色和状态，并支持角色与合并状态筛选", async () => {
+    vi.mocked(reviewInboxList).mockResolvedValue(
+      page([
+        item("github", "team/a", 1, "2025-01-01T00:00:00Z", ["reviewer"], {
+          status: "pending",
+          draft: false,
+          has_conflicts: false,
+          checks_status: "pending",
+          approvals_status: "ready",
+          blocking_reasons: [{ code: "checks_pending", message: "CI 检查仍在进行中" }],
+        }),
+        item("github", "team/a", 1, "2025-01-01T00:00:00Z", ["assignee"], {
+          status: "blocked",
+          draft: true,
+          has_conflicts: null,
+          checks_status: "unknown",
+          approvals_status: "blocked",
+          blocking_reasons: [{ code: "draft", message: "PR 仍处于 Draft 状态" }],
+        }),
+        item("github", "team/b", 2, "2025-01-02T00:00:00Z", ["tester"], {
+          status: "ready",
+          draft: false,
+          has_conflicts: false,
+          checks_status: "ready",
+          approvals_status: "ready",
+          blocking_reasons: [],
+        }),
+      ]),
+    );
+    const store = useReviewInboxStore();
+
+    await store.refresh(["github"]);
+
+    const merged = store.items.find((entry) => entry.summary.number === 1);
+    expect(merged?.relationships).toEqual(["reviewer", "assignee"]);
+    expect(merged?.status.status).toBe("blocked");
+    expect(merged?.status.draft).toBe(true);
+    expect(merged?.status.blocking_reasons).toHaveLength(2);
+
+    store.filters.relationship = "assignee";
+    expect(store.items.map((entry) => entry.summary.number)).toEqual([1]);
+    store.filters.relationship = "all";
+    store.filters.readiness = "ready";
+    expect(store.items.map((entry) => entry.summary.number)).toEqual([2]);
   });
 
   it("平台筛选只请求选中的平台，全部平台模式才执行聚合请求", async () => {

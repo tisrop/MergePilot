@@ -1,6 +1,6 @@
 use mergebeacon_lib::error::AppError;
 use mergebeacon_lib::http_client::HttpClient;
-use mergebeacon_lib::models::{PrState, ReviewEvent, ReviewInboxCategory};
+use mergebeacon_lib::models::{PrState, ReadinessState, ReviewEvent, ReviewInboxCategory, ReviewInboxRelationship};
 use mergebeacon_lib::platform::{gitlab::GitLabAdapter, GitPlatform};
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -76,6 +76,80 @@ async fn test_gitlab_nested_subgroup_project_path_is_fully_encoded() {
         .expect("should list merge requests");
 
     assert!(result.items.is_empty());
+}
+
+#[tokio::test]
+async fn test_gitlab_open_pr_list_uses_list_fields_for_status_summary() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests"))
+        .and(query_param("state", "opened"))
+        .respond_with(
+            ResponseTemplate::new(200).insert_header("x-total-pages", "1").insert_header("x-total", "1").set_body_json(
+                serde_json::json!([{
+                    "iid": 3,
+                    "title": "Blocked MR",
+                    "author": gitlab_user(),
+                    "state": "opened",
+                    "merged_at": null,
+                    "created_at": "2026-07-15T10:00:00Z",
+                    "updated_at": "2026-07-16T10:00:00Z",
+                    "labels": ["backend"],
+                    "draft": true,
+                    "has_conflicts": true,
+                    "detailed_merge_status": "not_approved",
+                    "head_pipeline": { "status": "failed" },
+                    "blocking_discussions_resolved": false
+                }]),
+            ),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result =
+        adapter.list_pull_requests("group", "repo", &PrState::Open, 1, 20).await.expect("should list merge requests");
+
+    let status = result.items[0].status.as_ref().expect("open MR should expose status summary");
+    assert_eq!(status.status, ReadinessState::Blocked);
+    assert_eq!(status.approvals_status, ReadinessState::Blocked);
+    assert_eq!(status.checks_status, ReadinessState::Blocked);
+    assert_eq!(status.draft, Some(true));
+    assert_eq!(status.has_conflicts, Some(true));
+}
+
+#[tokio::test]
+async fn test_gitlab_closed_pr_list_omits_live_status_summary() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests"))
+        .and(query_param("state", "closed"))
+        .respond_with(
+            ResponseTemplate::new(200).insert_header("x-total-pages", "1").insert_header("x-total", "1").set_body_json(
+                serde_json::json!([{
+                    "iid": 4,
+                    "title": "Closed MR",
+                    "author": gitlab_user(),
+                    "state": "closed",
+                    "merged_at": null,
+                    "created_at": "2026-07-15T10:00:00Z",
+                    "updated_at": "2026-07-16T10:00:00Z",
+                    "labels": [],
+                    "detailed_merge_status": "not_approved",
+                    "head_pipeline": { "status": "failed" }
+                }]),
+            ),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_pull_requests("group", "repo", &PrState::Closed, 1, 20)
+        .await
+        .expect("should list closed merge requests");
+
+    assert!(result.items[0].status.is_none());
 }
 
 #[tokio::test]
@@ -778,7 +852,11 @@ async fn test_gitlab_review_inbox_combines_reviewers_and_assignees() {
                     "updated_at": "2025-01-03T00:00:00Z",
                     "author": { "id": 1, "username": "dev", "name": "Dev", "avatar_url": "" },
                     "labels": ["backend"],
-                    "references": { "full": "group/subgroup/project!9" }
+                    "references": { "full": "group/subgroup/project!9" },
+                    "draft": false,
+                    "has_conflicts": false,
+                    "detailed_merge_status": "not_approved",
+                    "head_pipeline": { "status": "success" }
                 }]),
             ),
         )
@@ -798,7 +876,11 @@ async fn test_gitlab_review_inbox_combines_reviewers_and_assignees() {
                 "updated_at": "2025-01-03T00:00:00Z",
                 "author": { "id": 1, "username": "dev", "name": "Dev", "avatar_url": "" },
                 "labels": ["backend"],
-                "references": { "full": "group/subgroup/project!9" }
+                "references": { "full": "group/subgroup/project!9" },
+                "draft": false,
+                "has_conflicts": false,
+                "detailed_merge_status": "not_approved",
+                "head_pipeline": { "status": "success" }
             },
             {
                 "iid": 10,
@@ -808,7 +890,11 @@ async fn test_gitlab_review_inbox_combines_reviewers_and_assignees() {
                 "updated_at": "2025-01-02T00:00:00Z",
                 "author": { "id": 2, "username": "dev2", "name": "Dev 2", "avatar_url": "" },
                 "labels": [],
-                "references": { "full": "group/assigned!10" }
+                "references": { "full": "group/assigned!10" },
+                "draft": false,
+                "has_conflicts": false,
+                "detailed_merge_status": "can_be_merged",
+                "head_pipeline": { "status": "success" }
             }
         ])))
         .mount(&mock_server)
@@ -826,5 +912,14 @@ async fn test_gitlab_review_inbox_combines_reviewers_and_assignees() {
     assert_eq!(result.items[0].repo, "project");
     assert_eq!(result.items[0].repository_full_name, "group/subgroup/project");
     assert_eq!(result.items[0].platform, "gitlab");
+    assert_eq!(
+        result.items[0].relationships,
+        vec![ReviewInboxRelationship::Reviewer, ReviewInboxRelationship::Assignee]
+    );
+    assert_eq!(result.items[0].status.status, ReadinessState::Blocked);
+    assert_eq!(result.items[0].status.checks_status, ReadinessState::Ready);
+    assert_eq!(result.items[0].status.approvals_status, ReadinessState::Blocked);
     assert_eq!(result.items[1].repository_full_name, "group/assigned");
+    assert_eq!(result.items[1].relationships, vec![ReviewInboxRelationship::Assignee]);
+    assert_eq!(result.items[1].status.status, ReadinessState::Ready);
 }

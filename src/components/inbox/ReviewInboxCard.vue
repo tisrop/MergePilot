@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { ReviewInboxCategory, ReviewInboxItem } from "@/types";
+import PrStatusSummary from "@/components/pr/PrStatusSummary.vue";
+import type { ReviewInboxItem, ReviewInboxRelationship } from "@/types";
 
 const props = defineProps<{
   item: ReviewInboxItem;
@@ -15,9 +16,11 @@ const platformLabels = {
   gitee: "Gitee",
 } as const;
 
-const categoryLabels: Record<ReviewInboxCategory, string> = {
-  review_requested: "待我处理",
-  authored: "我创建的",
+const relationshipLabels: Record<ReviewInboxRelationship, string> = {
+  reviewer: "评审人",
+  assignee: "负责人",
+  tester: "测试人",
+  author: "我创建的",
 };
 
 function formatUpdatedAt(value: string): string {
@@ -48,10 +51,15 @@ function formatUpdatedAt(value: string): string {
         <span class="pr-number">#{{ props.item.summary.number }}</span>
         <span>{{ props.item.summary.author.login }} 创建</span>
         <span>{{ formatUpdatedAt(props.item.summary.updated_at) }} 更新</span>
-        <span v-for="category in props.item.categories" :key="category" class="category-badge">
-          {{ categoryLabels[category] }}
+        <span
+          v-for="relationship in props.item.relationships"
+          :key="relationship"
+          class="relationship-badge"
+        >
+          {{ relationshipLabels[relationship] }}
         </span>
       </span>
+      <PrStatusSummary :status="props.item.status" />
     </span>
     <svg
       class="chevron"
@@ -151,6 +159,7 @@ function formatUpdatedAt(value: string): string {
 }
 
 .card-meta {
+  flex-wrap: wrap;
   color: var(--color-text-secondary);
   font-size: 12px;
 }
@@ -161,7 +170,7 @@ function formatUpdatedAt(value: string): string {
 }
 
 .platform-badge,
-.category-badge {
+.relationship-badge {
   flex: 0 0 auto;
   padding: 2px 7px;
   border: 1px solid var(--color-border-light);
@@ -188,7 +197,7 @@ function formatUpdatedAt(value: string): string {
   color: #c71d23;
 }
 
-.category-badge {
+.relationship-badge {
   background: var(--color-primary-light);
   color: var(--color-primary);
 }
@@ -207,7 +216,7 @@ function formatUpdatedAt(value: string): string {
 }
 
 @media (max-width: 760px) {
-  .card-meta > span:not(.pr-number):not(.category-badge) {
+  .card-meta > span:not(.pr-number):not(.relationship-badge) {
     display: none;
   }
 }

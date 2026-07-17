@@ -1,16 +1,61 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { reviewInboxList } from "@/api";
-import type { Paginated, Platform, ReviewInboxCategory, ReviewInboxItem } from "@/types";
+import type {
+  Paginated,
+  Platform,
+  ReadinessState,
+  ReviewInboxCategory,
+  ReviewInboxItem,
+  ReviewInboxRelationship,
+  ReviewInboxStatusSummary,
+} from "@/types";
 
 const PLATFORMS: Platform[] = ["github", "gitlab", "gitee"];
 const PER_PAGE = 20;
+
+type RelationshipFilter = "all" | Exclude<ReviewInboxRelationship, "author">;
+type ReadinessFilter = "all" | ReadinessState;
 
 function platformRecord<T>(factory: () => T): Record<Platform, T> {
   return {
     github: factory(),
     gitlab: factory(),
     gitee: factory(),
+  };
+}
+
+function readinessRank(state: ReadinessState): number {
+  return { blocked: 4, pending: 3, ready: 2, unknown: 1 }[state];
+}
+
+function mergeReadiness(left: ReadinessState, right: ReadinessState): ReadinessState {
+  return readinessRank(right) > readinessRank(left) ? right : left;
+}
+
+function mergeOptionalFlag(left: boolean | null, right: boolean | null): boolean | null {
+  if (left === true || right === true) return true;
+  if (left === false || right === false) return false;
+  return null;
+}
+
+function mergeStatus(
+  left: ReviewInboxStatusSummary,
+  right: ReviewInboxStatusSummary,
+): ReviewInboxStatusSummary {
+  const reasons = new Map(
+    [...left.blocking_reasons, ...right.blocking_reasons].map((reason) => [
+      `${reason.code}\u0000${reason.message}`,
+      reason,
+    ]),
+  );
+  return {
+    status: mergeReadiness(left.status, right.status),
+    draft: mergeOptionalFlag(left.draft, right.draft),
+    has_conflicts: mergeOptionalFlag(left.has_conflicts, right.has_conflicts),
+    checks_status: mergeReadiness(left.checks_status, right.checks_status),
+    approvals_status: mergeReadiness(left.approvals_status, right.approvals_status),
+    blocking_reasons: Array.from(reasons.values()),
   };
 }
 
@@ -26,6 +71,8 @@ function dedupeItems(items: ReviewInboxItem[]): ReviewInboxItem[] {
     merged.set(key, {
       ...existing,
       categories: Array.from(new Set([...existing.categories, ...item.categories])),
+      relationships: Array.from(new Set([...existing.relationships, ...item.relationships])),
+      status: mergeStatus(existing.status, item.status),
     });
   }
   return Array.from(merged.values());
@@ -42,10 +89,14 @@ export const useReviewInboxStore = defineStore("review-inbox", () => {
     category: ReviewInboxCategory;
     platform: "all" | Platform;
     repository: string;
+    relationship: RelationshipFilter;
+    readiness: ReadinessFilter;
   }>({
     category: "review_requested",
     platform: "all",
     repository: "",
+    relationship: "all",
+    readiness: "all",
   });
   const loggedInPlatforms = ref<Platform[]>([]);
   const requestSequences: Record<Platform, number> = platformRecord(() => 0);
@@ -63,8 +114,11 @@ export const useReviewInboxStore = defineStore("review-inbox", () => {
     )
       .filter(
         (item) =>
-          !repositoryQuery ||
-          item.repository_full_name.toLocaleLowerCase().includes(repositoryQuery),
+          (!repositoryQuery ||
+            item.repository_full_name.toLocaleLowerCase().includes(repositoryQuery)) &&
+          (filters.value.relationship === "all" ||
+            item.relationships.includes(filters.value.relationship)) &&
+          (filters.value.readiness === "all" || item.status.status === filters.value.readiness),
       )
       .sort((left, right) => right.summary.updated_at.localeCompare(left.summary.updated_at));
   });

@@ -71,9 +71,22 @@ export interface PrSummary {
   created_at: string;
   updated_at: string;
   labels: string[];
+  status?: PrStatusSummary | null;
 }
 
 export type ReviewInboxCategory = "review_requested" | "authored";
+export type ReviewInboxRelationship = "reviewer" | "assignee" | "tester" | "author";
+
+export interface PrStatusSummary {
+  status: ReadinessState;
+  draft: boolean | null;
+  has_conflicts: boolean | null;
+  checks_status: ReadinessState;
+  approvals_status: ReadinessState;
+  blocking_reasons: MergeBlockingReason[];
+}
+
+export type ReviewInboxStatusSummary = PrStatusSummary;
 
 export interface ReviewInboxItem {
   platform: Platform;
@@ -81,6 +94,8 @@ export interface ReviewInboxItem {
   repo: string;
   repository_full_name: string;
   categories: ReviewInboxCategory[];
+  relationships: ReviewInboxRelationship[];
+  status: ReviewInboxStatusSummary;
   summary: PrSummary;
 }
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PrStatusSummary from "@/components/pr/PrStatusSummary.vue";
 import type { PrSummary } from "@/types";
 
 defineProps<{
@@ -25,6 +26,7 @@ defineEmits<{
         <span class="pr-title">{{ pr.title }}</span>
         <span class="badge" :class="`badge-${pr.state}`">{{ pr.state }}</span>
       </div>
+      <PrStatusSummary v-if="pr.state === 'open' && pr.status" :status="pr.status" />
       <div class="pr-card-meta">
         <span class="pr-number">#{{ pr.number }}</span>
         <span>由 {{ pr.author.login }} 更新</span>
@@ -101,15 +103,17 @@ defineEmits<{
 }
 
 .pr-content {
+  display: flex;
   min-width: 0;
   flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .pr-card-top {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-2);
 }
 
 .pr-title {
