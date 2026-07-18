@@ -470,6 +470,8 @@ function pairHunkLines(lines: PatchLine[], hunkKey: string): ControlledDiffRow[]
       deletions.push(line);
     } else if (line.kind === "addition") {
       additions.push(line);
+    } else if (line.kind === "no_newline") {
+      continue;
     } else {
       flushChanges();
       if (previousKind === "deletion") appendRow(line, null);
