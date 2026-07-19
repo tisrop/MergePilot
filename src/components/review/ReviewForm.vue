@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import type { Platform, ReviewEvent } from "@/types";
 import { reviewSubmit } from "@/api";
 import { getErrorMessage } from "@/utils/error";
 import { useCapabilityStore } from "@/stores/useCapabilityStore";
+import { useReviewDraftStore } from "@/stores/useReviewDraftStore";
 
 const props = defineProps<{
   platform: Platform;
@@ -15,6 +16,7 @@ const props = defineProps<{
 }>();
 
 const capabilities = useCapabilityStore();
+const reviewDrafts = useReviewDraftStore();
 const body = ref("");
 const event = ref<ReviewEvent>("comment");
 const submitting = ref(false);
@@ -22,6 +24,44 @@ const error = ref("");
 const success = ref(false);
 const confirmingPendingWork = ref(false);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
+const draftContext = computed(() => ({
+  platform: props.platform,
+  owner: props.owner,
+  repo: props.repo,
+  prNumber: props.prNumber,
+}));
+const unifiedDraftCount = computed(() => reviewDrafts.count(draftContext.value));
+
+function loadManualDraft(): void {
+  const draft = reviewDrafts
+    .list(draftContext.value)
+    .find((candidate) => candidate.source === "manual");
+  body.value = draft?.body ?? "";
+  event.value = draft?.event ?? "comment";
+}
+
+watch(() => `${props.platform}:${props.owner}:${props.repo}:${props.prNumber}`, loadManualDraft, {
+  immediate: true,
+});
+watch([body, event], () => {
+  if (!body.value.trim()) {
+    reviewDrafts.remove(draftContext.value, "manual-review");
+    return;
+  }
+  reviewDrafts.upsert(draftContext.value, {
+    id: "manual-review",
+    source: "manual",
+    body: body.value,
+    event: event.value,
+    headSha: "",
+    path: "",
+    startLine: null,
+    endLine: null,
+    suggestionIndex: null,
+    historyId: null,
+    touchedAt: Date.now(),
+  });
+});
 
 const allEvents: { value: ReviewEvent; label: string }[] = [
   { value: "comment", label: "评论" },
@@ -82,11 +122,16 @@ function focusComposer(): void {
 }
 
 defineExpose({ focusComposer });
+
+onUnmounted(() => reviewDrafts.flushPersistence());
 </script>
 
 <template>
   <div class="review-form">
     <h4>提交评审意见</h4>
+    <p v-if="unifiedDraftCount" class="draft-summary">
+      本 PR 共有 {{ unifiedDraftCount }} 条本地草稿，人工意见与 AI 建议统一保存在本机。
+    </p>
 
     <div class="event-select">
       <button
@@ -146,6 +191,12 @@ h4 {
   margin-bottom: var(--space-3);
   font-size: 15px;
   font-weight: 600;
+}
+
+.draft-summary {
+  margin: calc(var(--space-2) * -1) 0 var(--space-3);
+  color: var(--color-text-tertiary);
+  font-size: 12px;
 }
 
 .event-select {

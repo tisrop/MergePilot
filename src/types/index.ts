@@ -441,6 +441,7 @@ export interface AiStreamEvent<T> {
 export interface PrContext {
   title: string;
   body: string;
+  repository_rules?: string | null;
 }
 
 export interface AiReviewResult {
@@ -460,6 +461,20 @@ export interface AiSuggestion {
 }
 
 export type AiSuggestionAction = "accept" | "reject" | "submitted" | { edit: string };
+
+export type AiReviewMode = "full" | "incremental";
+
+export interface AiReviewHistoryEntry {
+  id: string;
+  created_at: number;
+  head_sha: string;
+  base_sha: string | null;
+  focus: AiReviewFocus;
+  mode: AiReviewMode;
+  model: string;
+  truncated: boolean;
+  result: AiReviewResult;
+}
 
 // ── AI 预设 ──
 export interface AiPreset {

@@ -7,6 +7,7 @@ import type { Platform, PlatformCapabilities } from "@/types";
 
 vi.mock("@/api", () => ({ reviewSubmit: vi.fn(), getPlatformCapabilities: vi.fn() }));
 
+const storage = new Map<string, string>();
 const props = { owner: "team", repo: "repo", prNumber: 1 };
 function capabilities(platform: Platform): PlatformCapabilities {
   return {
@@ -38,6 +39,12 @@ async function mountForm(platform: Platform) {
 
 describe("ReviewForm", () => {
   beforeEach(() => {
+    storage.clear();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
     setActivePinia(createPinia());
     vi.clearAllMocks();
   });
@@ -117,5 +124,18 @@ describe("ReviewForm", () => {
     await wrapper.get(".btn-primary").trigger("click");
     await flushPromises();
     expect(reviewSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("重新挂载后恢复人工草稿并纳入统一草稿计数", async () => {
+    const first = await mountForm("github");
+    await first.get("textarea").setValue("尚未提交的人工意见");
+    await first.vm.$nextTick();
+    first.unmount();
+
+    setActivePinia(createPinia());
+    const restored = await mountForm("github");
+
+    expect(restored.get<HTMLTextAreaElement>("textarea").element.value).toBe("尚未提交的人工意见");
+    expect(restored.text()).toContain("共有 1 条本地草稿");
   });
 });

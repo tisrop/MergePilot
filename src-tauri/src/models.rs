@@ -509,6 +509,8 @@ pub struct AiReviewRequest {
 pub struct PrContext {
     pub title: String,
     pub body: String,
+    #[serde(default)]
+    pub repository_rules: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
