@@ -1,7 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import type { Platform, PrComment, PrFile, Review, ReviewThreadSummary } from "@/types";
-import { reviewCommentsList, reviewList, reviewThreadSetResolved } from "@/api";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import type {
+  Platform,
+  PrComment,
+  PrFile,
+  Review,
+  ReviewThreadSummary,
+  StandardPatchFile,
+} from "@/types";
+import {
+  reviewCommentDelete,
+  reviewCommentUpdate,
+  reviewCommentsList,
+  reviewList,
+  reviewThreadReply,
+  reviewThreadSetResolved,
+} from "@/api";
 import { getErrorMessage } from "@/utils/error";
 import MiniDiffView from "./MiniDiffView.vue";
 
@@ -35,6 +49,7 @@ const props = defineProps<{
   prNumber: number;
   headSha: string | null;
   diffFiles?: PrFile[];
+  diffPatches?: StandardPatchFile[];
   canResolveThreads?: boolean;
 }>();
 
@@ -61,6 +76,9 @@ interface ReviewThread {
   line: number | null;
   startLine: number | null;
   diffHunk: string | null;
+  contextLine: number | null;
+  displayPath: string;
+  canLocate: boolean;
   resolved: boolean | null;
   resolvable: boolean;
   updatedAt: string;
@@ -75,6 +93,15 @@ const expandedBodies = ref(new Set<string>());
 const codeExpanded = ref(new Set<string>());
 const updatingThreads = ref(new Set<string>());
 const threadErrors = ref<Record<string, string>>({});
+const replyBodies = ref<Record<string, string>>({});
+const editingComments = ref(new Set<string>());
+const editingBodies = ref<Record<string, string>>({});
+const deletingComments = ref(new Set<string>());
+const deleteConfirmations = ref(new Set<string>());
+const commentErrors = ref<Record<string, string>>({});
+const activeThreadId = ref<string | null>(null);
+const threadElements = new Map<string, HTMLElement>();
+const loadedComments = ref<PrComment[]>([]);
 let requestSequence = 0;
 let resolutionOperationSequence = 0;
 const activeResolutionOperations = new Map<string, number>();
@@ -114,8 +141,9 @@ function toggleCode(id: string): void {
 }
 
 function isOutdated(comment: PrComment): boolean {
-  if (!comment.original_commit_id || !props.headSha) return false;
-  return comment.original_commit_id !== props.headSha;
+  const originalCommit = comment.original_commit_id ?? comment.commit_id;
+  if (!originalCommit || !props.headSha) return false;
+  return originalCommit !== props.headSha;
 }
 
 function threadIsOutdated(thread: ReviewThread): boolean {
@@ -147,19 +175,42 @@ function buildThreads(comments: PrComment[]): ReviewThread[] {
       const root =
         chronological.find((comment) => comment.reply_to_id === null) ?? chronological[0];
       const sorted = [root, ...chronological.filter((comment) => comment !== root)];
+      const patch = props.diffPatches?.find(
+        (candidate) =>
+          candidate.filename === root.path ||
+          candidate.old_path === root.path ||
+          candidate.new_path === root.path,
+      );
+      const displayPath = patch?.filename ?? root.path;
+      const file = props.diffFiles?.find((candidate) => candidate.filename === displayPath);
       let diffHunk = root.diff_hunk;
-      if (!diffHunk && root.path && root.line && props.diffFiles) {
-        const file = props.diffFiles.find((candidate) => candidate.filename === root.path);
-        if (file?.patch) diffHunk = extractHunkFromPatch(file.patch, root.line) ?? null;
+      if (!diffHunk && displayPath && root.line && file?.patch) {
+        diffHunk = extractHunkFromPatch(file.patch, root.line) ?? null;
       }
       const latest = chronological.at(-1) ?? root;
+      const canLocate =
+        !props.diffFiles && !props.diffPatches
+          ? true
+          : Boolean(
+              file &&
+              (!root.line ||
+                !patch ||
+                patch.hunks.some((hunk) =>
+                  hunk.lines.some(
+                    (line) => line.new_line === root.line || line.old_line === root.line,
+                  ),
+                )),
+            );
       return {
         id,
         comments: sorted,
         path: root.path,
+        displayPath,
         line: root.line,
         startLine: root.start_line,
         diffHunk,
+        contextLine: isOutdated(root) ? (root.original_line ?? root.line) : root.line,
+        canLocate,
         resolved: root.resolved,
         resolvable: root.resolvable,
         updatedAt: latest.created_at,
@@ -178,13 +229,171 @@ function emitSummary(): void {
     by_file: {},
   };
   threads.value.forEach((thread) => {
-    if (!thread.path) return;
-    const current = summary.by_file[thread.path] ?? { comments: 0, unresolved: 0 };
+    if (!thread.displayPath) return;
+    const current = summary.by_file[thread.displayPath] ?? { comments: 0, unresolved: 0 };
     current.comments += thread.comments.length;
     if (thread.resolved === false) current.unresolved += 1;
-    summary.by_file[thread.path] = current;
+    summary.by_file[thread.displayPath] = current;
   });
   emit("threadSummary", summary);
+}
+
+function commentKey(thread: ReviewThread, comment: PrComment): string {
+  return `${thread.id}:${String(comment.id)}`;
+}
+
+function setThreadElement(threadId: string, element: unknown): void {
+  if (element instanceof HTMLElement) threadElements.set(threadId, element);
+  else threadElements.delete(threadId);
+}
+
+function threadContextKey(): string {
+  return reviewContextKey();
+}
+
+async function reloadAfterMutation(contextKey: string): Promise<void> {
+  if (threadContextKey() !== contextKey) return;
+  await loadReviews();
+}
+
+function setCommentError(key: string, message: string): void {
+  commentErrors.value = { ...commentErrors.value, [key]: message };
+}
+
+async function replyToThread(thread: ReviewThread): Promise<void> {
+  const body = replyBodies.value[thread.id]?.trim() ?? "";
+  if (!body || thread.comments.length === 0) return;
+  const contextKey = threadContextKey();
+  const root = thread.comments[0];
+  const operationKey = `${thread.id}:reply`;
+  const nextUpdating = new Set(updatingThreads.value);
+  nextUpdating.add(operationKey);
+  updatingThreads.value = nextUpdating;
+  setCommentError(operationKey, "");
+  try {
+    await reviewThreadReply(
+      props.platform,
+      props.owner,
+      props.repo,
+      props.prNumber,
+      thread.id,
+      String(root.id),
+      body,
+    );
+    if (threadContextKey() === contextKey) {
+      replyBodies.value = { ...replyBodies.value, [thread.id]: "" };
+    }
+    await reloadAfterMutation(contextKey);
+  } catch (mutationError) {
+    if (threadContextKey() === contextKey)
+      setCommentError(operationKey, getErrorMessage(mutationError, "回复线程失败"));
+  } finally {
+    if (threadContextKey() === contextKey) {
+      const after = new Set(updatingThreads.value);
+      after.delete(operationKey);
+      updatingThreads.value = after;
+    }
+  }
+}
+
+function beginEdit(comment: PrComment): void {
+  const key = String(comment.id);
+  editingComments.value = new Set(editingComments.value).add(key);
+  editingBodies.value = { ...editingBodies.value, [key]: comment.body };
+}
+
+function cancelEdit(comment: PrComment): void {
+  const key = String(comment.id);
+  const next = new Set(editingComments.value);
+  next.delete(key);
+  editingComments.value = next;
+}
+
+async function saveEdit(thread: ReviewThread, comment: PrComment): Promise<void> {
+  const commentId = String(comment.id);
+  const body = editingBodies.value[commentId]?.trim() ?? "";
+  if (!body) return;
+  const contextKey = threadContextKey();
+  const operationKey = `${thread.id}:${commentId}:edit`;
+  const nextUpdating = new Set(updatingThreads.value);
+  nextUpdating.add(operationKey);
+  updatingThreads.value = nextUpdating;
+  setCommentError(operationKey, "");
+  try {
+    await reviewCommentUpdate(
+      props.platform,
+      props.owner,
+      props.repo,
+      props.prNumber,
+      thread.id,
+      commentId,
+      body,
+    );
+    await reloadAfterMutation(contextKey);
+  } catch (mutationError) {
+    if (threadContextKey() === contextKey)
+      setCommentError(operationKey, getErrorMessage(mutationError, "编辑评论失败"));
+  } finally {
+    if (threadContextKey() === contextKey) {
+      const after = new Set(updatingThreads.value);
+      after.delete(operationKey);
+      updatingThreads.value = after;
+    }
+  }
+}
+
+async function deleteComment(thread: ReviewThread, comment: PrComment): Promise<void> {
+  const commentId = String(comment.id);
+  const confirmationKey = commentKey(thread, comment);
+  if (!deleteConfirmations.value.has(confirmationKey)) {
+    deleteConfirmations.value = new Set(deleteConfirmations.value).add(confirmationKey);
+    return;
+  }
+  const contextKey = threadContextKey();
+  const operationKey = `${thread.id}:${commentId}:delete`;
+  const nextDeleting = new Set(deletingComments.value);
+  nextDeleting.add(commentId);
+  deletingComments.value = nextDeleting;
+  setCommentError(operationKey, "");
+  try {
+    await reviewCommentDelete(
+      props.platform,
+      props.owner,
+      props.repo,
+      props.prNumber,
+      thread.id,
+      commentId,
+    );
+    await reloadAfterMutation(contextKey);
+  } catch (mutationError) {
+    if (threadContextKey() === contextKey)
+      setCommentError(operationKey, getErrorMessage(mutationError, "删除评论失败"));
+  } finally {
+    if (threadContextKey() === contextKey) {
+      const after = new Set(deletingComments.value);
+      after.delete(commentId);
+      deletingComments.value = after;
+    }
+  }
+}
+
+function navigateUnresolvedThread(direction: -1 | 1): void {
+  const candidates = threads.value.filter((thread) => thread.resolved === false);
+  if (candidates.length === 0) return;
+  threadFilter.value = "all";
+  const currentIndex = candidates.findIndex((thread) => thread.id === activeThreadId.value);
+  const nextIndex =
+    currentIndex < 0
+      ? direction > 0
+        ? 0
+        : candidates.length - 1
+      : (currentIndex + direction + candidates.length) % candidates.length;
+  const target = candidates[nextIndex];
+  activeThreadId.value = target.id;
+  void nextTick(() => {
+    threadElements.get(target.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    threadElements.get(target.id)?.focus();
+  });
 }
 
 async function loadReviews(): Promise<void> {
@@ -197,6 +406,7 @@ async function loadReviews(): Promise<void> {
       reviewCommentsList(props.platform, props.owner, props.repo, props.prNumber),
     ]);
     if (sequence !== requestSequence) return;
+    loadedComments.value = comments;
     generalItems.value = reviews
       .filter((review) => review.body.trim().length > 0)
       .map((review) => ({
@@ -285,7 +495,8 @@ async function setThreadResolved(thread: ReviewThread, resolved: boolean): Promi
 }
 
 function locateThread(thread: ReviewThread): void {
-  emit("locateComment", thread.path, thread.line);
+  if (!thread.canLocate) return;
+  emit("locateComment", thread.displayPath, thread.line);
 }
 
 const PREVIEW_LENGTH = 180;
@@ -299,10 +510,28 @@ watch(
   () => {
     updatingThreads.value = new Set();
     threadErrors.value = {};
+    replyBodies.value = {};
+    editingComments.value = new Set();
+    editingBodies.value = {};
+    deletingComments.value = new Set();
+    deleteConfirmations.value = new Set();
+    commentErrors.value = {};
+    activeThreadId.value = null;
+    threadElements.clear();
     expandedBodies.value = new Set();
     codeExpanded.value = new Set();
     void loadReviews();
   },
+);
+
+watch(
+  [() => props.diffFiles, () => props.diffPatches, () => props.headSha],
+  () => {
+    if (loadedComments.value.length === 0) return;
+    threads.value = buildThreads(loadedComments.value);
+    emitSummary();
+  },
+  { deep: true },
 );
 
 defineExpose({ refresh: loadReviews });
@@ -389,6 +618,26 @@ defineExpose({ refresh: loadReviews });
               已解决 {{ resolvedCount }}
             </button>
           </div>
+          <div class="thread-navigation" aria-label="未解决线程导航">
+            <button
+              class="btn btn-sm"
+              type="button"
+              :disabled="unresolvedCount === 0"
+              title="上一个未解决线程"
+              @click="navigateUnresolvedThread(-1)"
+            >
+              上一个未解决
+            </button>
+            <button
+              class="btn btn-sm"
+              type="button"
+              :disabled="unresolvedCount === 0"
+              title="下一个未解决线程"
+              @click="navigateUnresolvedThread(1)"
+            >
+              下一个未解决
+            </button>
+          </div>
         </div>
 
         <div v-if="threads.length === 0" class="empty-state">
@@ -401,14 +650,26 @@ defineExpose({ refresh: loadReviews });
           <article
             v-for="thread in filteredThreads"
             :key="thread.id"
+            :ref="(element) => setThreadElement(thread.id, element)"
+            tabindex="-1"
             class="review-thread"
-            :class="{ outdated: threadIsOutdated(thread), resolved: thread.resolved === true }"
+            :class="{
+              outdated: threadIsOutdated(thread),
+              resolved: thread.resolved === true,
+              active: activeThreadId === thread.id,
+            }"
           >
             <header class="thread-header">
               <div class="thread-location">
                 <span class="kind-badge">行级评论</span>
-                <button type="button" class="path-button" @click="locateThread(thread)">
-                  {{ thread.path }}<template v-if="thread.line">:{{ thread.line }}</template>
+                <button
+                  type="button"
+                  class="path-button"
+                  :disabled="!thread.canLocate"
+                  :title="thread.canLocate ? '跳转到当前 Diff' : '当前 Diff 无法定位此评论'"
+                  @click="locateThread(thread)"
+                >
+                  {{ thread.displayPath }}<template v-if="thread.line">:{{ thread.line }}</template>
                 </button>
                 <span v-if="threadIsOutdated(thread)" class="outdated-badge">代码已过期</span>
               </div>
@@ -453,9 +714,20 @@ defineExpose({ refresh: loadReviews });
                 v-if="codeExpanded.has(thread.id)"
                 :diff-hunk="thread.diffHunk"
                 :outdated="threadIsOutdated(thread)"
-                :comment-line="thread.line ?? undefined"
+                :comment-line="thread.contextLine ?? undefined"
                 :comment-start-line="thread.startLine ?? undefined"
               />
+            </div>
+            <div v-else-if="!thread.canLocate" class="original-context-fallback">
+              <strong>当前 Diff 无法定位此评论</strong>
+              <span>
+                原始位置：{{ thread.path || "未知文件"
+                }}<template v-if="thread.contextLine"> :{{ thread.contextLine }}</template>
+              </span>
+              <span v-if="thread.comments[0]?.original_commit_id">
+                原始提交：{{ thread.comments[0].original_commit_id }}
+              </span>
+              <span>评论正文仍保留在下方线程中。</span>
             </div>
 
             <ol class="thread-comments">
@@ -475,8 +747,50 @@ defineExpose({ refresh: loadReviews });
                   <time :datetime="comment.created_at">{{
                     new Date(comment.created_at).toLocaleString()
                   }}</time>
+                  <span v-if="comment.can_edit || comment.can_delete" class="comment-actions">
+                    <button
+                      v-if="comment.can_edit && !editingComments.has(String(comment.id))"
+                      type="button"
+                      class="text-button"
+                      @click="beginEdit(comment)"
+                    >
+                      编辑
+                    </button>
+                    <button
+                      v-if="comment.can_delete"
+                      type="button"
+                      class="text-button danger"
+                      :disabled="deletingComments.has(String(comment.id))"
+                      @click="deleteComment(thread, comment)"
+                    >
+                      {{
+                        deleteConfirmations.has(commentKey(thread, comment)) ? "确认删除" : "删除"
+                      }}
+                    </button>
+                  </span>
                 </header>
+                <template v-if="editingComments.has(String(comment.id))">
+                  <textarea
+                    v-model="editingBodies[String(comment.id)]"
+                    class="comment-editor"
+                    rows="4"
+                  />
+                  <div class="comment-edit-actions">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-primary"
+                      :disabled="updatingThreads.has(`${thread.id}:${String(comment.id)}:edit`)"
+                      @click="saveEdit(thread, comment)"
+                    >
+                      保存
+                    </button>
+                    <button type="button" class="btn btn-sm" @click="cancelEdit(comment)">
+                      取消
+                    </button>
+                  </div>
+                </template>
                 <button
+                  v-else
                   type="button"
                   class="comment-body comment-body-button"
                   :aria-expanded="
@@ -490,8 +804,47 @@ defineExpose({ refresh: loadReviews });
                       : comment.body
                   }}
                 </button>
+                <p
+                  v-if="
+                    commentErrors[`${thread.id}:${String(comment.id)}:edit`] ||
+                    commentErrors[`${thread.id}:${String(comment.id)}:delete`]
+                  "
+                  class="error-msg comment-error"
+                  role="alert"
+                >
+                  {{
+                    commentErrors[`${thread.id}:${String(comment.id)}:edit`] ||
+                    commentErrors[`${thread.id}:${String(comment.id)}:delete`]
+                  }}
+                </p>
               </li>
             </ol>
+            <form class="thread-reply-form" @submit.prevent="replyToThread(thread)">
+              <textarea
+                v-model="replyBodies[thread.id]"
+                rows="3"
+                placeholder="回复此线程..."
+                :disabled="updatingThreads.has(`${thread.id}:reply`)"
+              />
+              <div class="thread-reply-actions">
+                <button
+                  type="submit"
+                  class="btn btn-sm btn-primary"
+                  :disabled="
+                    updatingThreads.has(`${thread.id}:reply`) || !replyBodies[thread.id]?.trim()
+                  "
+                >
+                  {{ updatingThreads.has(`${thread.id}:reply`) ? "回复中..." : "回复" }}
+                </button>
+              </div>
+            </form>
+            <p
+              v-if="commentErrors[`${thread.id}:reply`]"
+              class="error-msg thread-error"
+              role="alert"
+            >
+              {{ commentErrors[`${thread.id}:reply`] }}
+            </p>
             <p v-if="threadErrors[thread.id]" class="error-msg thread-error" role="alert">
               {{ threadErrors[thread.id] }}
             </p>
@@ -573,6 +926,11 @@ defineExpose({ refresh: loadReviews });
   border-color: var(--color-warning-border);
 }
 
+.review-thread.active {
+  outline: 2px solid var(--color-primary-border);
+  outline-offset: 2px;
+}
+
 .comment-header {
   gap: var(--space-2);
   min-width: 0;
@@ -588,6 +946,24 @@ defineExpose({ refresh: loadReviews });
   margin-left: auto;
   color: var(--color-text-tertiary);
   white-space: nowrap;
+}
+
+.comment-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin-left: var(--space-2);
+}
+
+.text-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 11px;
+}
+
+.text-button.danger {
+  color: var(--color-danger);
 }
 
 .avatar {
@@ -679,6 +1055,11 @@ defineExpose({ refresh: loadReviews });
   box-shadow: var(--shadow-sm);
 }
 
+.thread-navigation {
+  display: flex;
+  gap: var(--space-1);
+}
+
 .thread-header {
   align-items: flex-start;
   padding-bottom: var(--space-3);
@@ -749,6 +1130,53 @@ defineExpose({ refresh: loadReviews });
   border-left: 2px solid var(--color-primary-border);
 }
 
+.original-context-fallback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-light);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.original-context-fallback strong {
+  color: var(--color-warning);
+}
+
+.thread-reply-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.thread-reply-form textarea,
+.comment-editor {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+}
+
+.thread-reply-actions,
+.comment-edit-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.comment-edit-actions {
+  margin-top: var(--space-2);
+}
+
+.comment-error {
+  margin-top: var(--space-2);
+}
+
 .thread-error {
   margin-top: var(--space-3);
 }
@@ -771,6 +1199,10 @@ defineExpose({ refresh: loadReviews });
 
   .thread-filters {
     align-self: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .thread-navigation {
     flex-wrap: wrap;
   }
 

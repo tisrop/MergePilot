@@ -656,6 +656,8 @@ impl GitHubAdapter {
             reply_to_id,
             resolved: Some(resolved),
             resolvable,
+            can_edit: false,
+            can_delete: false,
         })
     }
 
@@ -1609,6 +1611,8 @@ impl GitPlatform for GitHubAdapter {
             reply_to_id: None,
             resolved: None,
             resolvable: false,
+            can_edit: true,
+            can_delete: true,
         })
     }
 
@@ -1709,6 +1713,48 @@ impl GitPlatform for GitHubAdapter {
             );
         }
         Ok(comments)
+    }
+
+    async fn reply_to_review_thread(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        _thread_id: &str,
+        reply_to_id: &str,
+        body: &str,
+    ) -> Result<(), AppError> {
+        let url =
+            format!("{}/repos/{}/{}/pulls/{}/comments/{}/replies", self.base_url, owner, repo, pr_number, reply_to_id);
+        self.post_json(&url, &serde_json::json!({ "body": body })).await?;
+        Ok(())
+    }
+
+    async fn update_review_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        _pr_number: u64,
+        _thread_id: &str,
+        comment_id: &str,
+        body: &str,
+    ) -> Result<(), AppError> {
+        let url = format!("{}/repos/{}/{}/pulls/comments/{}", self.base_url, owner, repo, comment_id);
+        self.patch_json(&url, &serde_json::json!({ "body": body })).await?;
+        Ok(())
+    }
+
+    async fn delete_review_comment(
+        &self,
+        owner: &str,
+        repo: &str,
+        _pr_number: u64,
+        _thread_id: &str,
+        comment_id: &str,
+    ) -> Result<(), AppError> {
+        let url = format!("{}/repos/{}/{}/pulls/comments/{}", self.base_url, owner, repo, comment_id);
+        self.delete_json(&url, &Value::Null).await?;
+        Ok(())
     }
 
     async fn set_review_thread_resolved(

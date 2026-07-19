@@ -10,6 +10,8 @@ const props = defineProps<{
   owner: string;
   repo: string;
   prNumber: number;
+  unviewedFileCount?: number;
+  unresolvedThreadCount?: number;
 }>();
 
 const capabilities = useCapabilityStore();
@@ -18,6 +20,7 @@ const event = ref<ReviewEvent>("comment");
 const submitting = ref(false);
 const error = ref("");
 const success = ref(false);
+const confirmingPendingWork = ref(false);
 
 const allEvents: { value: ReviewEvent; label: string }[] = [
   { value: "comment", label: "评论" },
@@ -42,6 +45,13 @@ watch(
 
 async function handleSubmit() {
   if (!body.value.trim() || !isSupported(event.value)) return;
+  if (
+    !confirmingPendingWork.value &&
+    ((props.unviewedFileCount ?? 0) > 0 || (props.unresolvedThreadCount ?? 0) > 0)
+  ) {
+    confirmingPendingWork.value = true;
+    return;
+  }
   submitting.value = true;
   error.value = "";
   success.value = false;
@@ -57,6 +67,7 @@ async function handleSubmit() {
     );
     success.value = true;
     body.value = "";
+    confirmingPendingWork.value = false;
   } catch (e) {
     error.value = getErrorMessage(e, "提交失败");
   } finally {
@@ -90,13 +101,21 @@ async function handleSubmit() {
         :disabled="submitting || !body.trim() || !isSupported(event)"
         @click="handleSubmit"
       >
-        {{ submitting ? "提交中..." : "提交评审" }}
+        {{ submitting ? "提交中..." : confirmingPendingWork ? "仍然提交" : "提交评审" }}
       </button>
       <span v-if="success" class="success-msg">✓ 评审已提交</span>
       <span v-if="error || capabilities.errors[platform]" class="error-msg">{{
         error || capabilities.errors[platform]
       }}</span>
     </div>
+    <p v-if="confirmingPendingWork" class="pending-review-warning" role="alert">
+      <template v-if="unviewedFileCount">还有 {{ unviewedFileCount }} 个文件未查看。</template>
+      <template v-if="unviewedFileCount && unresolvedThreadCount"> </template>
+      <template v-if="unresolvedThreadCount"
+        >还有 {{ unresolvedThreadCount }} 个未解决线程。</template
+      >
+      再次点击“仍然提交”继续。
+    </p>
   </div>
 </template>
 
@@ -163,6 +182,12 @@ textarea {
   color: var(--color-success);
   font-size: 13px;
   font-weight: 500;
+}
+
+.pending-review-warning {
+  margin: var(--space-3) 0 0;
+  color: var(--color-warning);
+  font-size: 12px;
 }
 .error-msg {
   color: var(--color-danger);

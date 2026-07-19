@@ -100,6 +100,15 @@ impl CommentSnapshotStore {
         }
     }
 
+    pub fn delete_snapshot(&self, comment_id: &str, platform: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM comment_snapshots WHERE comment_id = ?1 AND platform = ?2",
+            params![comment_id, platform],
+        )?;
+        Ok(())
+    }
+
     pub fn get_snapshots_for_pr(
         &self,
         platform: &str,

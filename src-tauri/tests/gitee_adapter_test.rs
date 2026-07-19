@@ -1320,6 +1320,43 @@ async fn test_gitee_review_inbox_sanitizes_html_errors() {
 }
 
 #[tokio::test]
+async fn test_gitee_replies_edits_and_deletes_review_comment() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/42/comments"))
+        .and(body_json(serde_json::json!({ "body": "回复", "in_reply_to": 100 })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/comments/100"))
+        .and(body_json(serde_json::json!({ "body": "编辑后" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v5/repos/octocat/hello-world/pulls/comments/100"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "test-token".into())
+        .with_base_url(format!("{}/api/v5", mock_server.uri()));
+    adapter
+        .reply_to_review_thread("octocat", "hello-world", 42, "100", "100", "回复")
+        .await
+        .expect("reply should succeed");
+    adapter
+        .update_review_comment("octocat", "hello-world", 42, "100", "100", "编辑后")
+        .await
+        .expect("edit should succeed");
+    adapter.delete_review_comment("octocat", "hello-world", 42, "100", "100").await.expect("delete should succeed");
+}
+
+#[tokio::test]
 async fn test_gitee_updates_pull_request_metadata_without_unsupported_fields() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))

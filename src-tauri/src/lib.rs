@@ -136,6 +136,9 @@ pub fn run() {
             // Review
             review::review_submit,
             review::review_comment_add,
+            review::review_thread_reply,
+            review::review_comment_update,
+            review::review_comment_delete,
             review::review_list,
             review::review_comments_list,
             review::review_thread_set_resolved,

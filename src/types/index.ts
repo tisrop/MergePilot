@@ -334,6 +334,8 @@ export interface PrComment {
   reply_to_id: string | null;
   resolved: boolean | null;
   resolvable: boolean;
+  can_edit?: boolean;
+  can_delete?: boolean;
 }
 
 export interface ReviewThreadFileSummary {

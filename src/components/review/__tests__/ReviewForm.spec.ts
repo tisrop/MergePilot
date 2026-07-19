@@ -89,4 +89,33 @@ describe("ReviewForm", () => {
       [],
     );
   });
+
+  it("提交前提示未查看文件和未解决线程", async () => {
+    vi.mocked(reviewSubmit).mockResolvedValue({
+      id: 1,
+      body: "评审意见",
+      state: "commented",
+      author: { id: 1, login: "user", name: "User", avatar_url: "" },
+      submitted_at: "",
+    });
+    const wrapper = mount(ReviewForm, {
+      props: {
+        ...props,
+        platform: "github",
+        unviewedFileCount: 2,
+        unresolvedThreadCount: 1,
+      },
+    });
+    await flushPromises();
+    await wrapper.get("textarea").setValue("评审意见");
+    await wrapper.get(".btn-primary").trigger("click");
+
+    expect(reviewSubmit).not.toHaveBeenCalled();
+    expect(wrapper.get('[role="alert"]').text()).toContain("2 个文件未查看");
+    expect(wrapper.get('[role="alert"]').text()).toContain("1 个未解决线程");
+
+    await wrapper.get(".btn-primary").trigger("click");
+    await flushPromises();
+    expect(reviewSubmit).toHaveBeenCalledTimes(1);
+  });
 });

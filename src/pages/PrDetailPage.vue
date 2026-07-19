@@ -153,6 +153,7 @@ function handleReviewCommentLocate(path: string, line: number | null): void {
 
 const reviewListRef = ref<InstanceType<typeof ReviewList> | null>(null);
 const reviewThreadSummary = ref<ReviewThreadSummary | null>(null);
+const unviewedFileCount = ref(0);
 const commentError = ref("");
 const commentSuccess = ref(false);
 
@@ -660,10 +661,18 @@ onMounted(async () => {
             "
             @add-comment="handleAddComment"
             @location-result="handleDiffLocationResult"
+            @review-progress="unviewedFileCount = $event"
           />
           <p v-if="commentError" class="error-msg">{{ commentError }}</p>
           <p v-if="commentSuccess" class="success-msg">✓ 行内评论已提交</p>
-          <ReviewForm :platform="platform" :owner="owner" :repo="repo" :pr-number="number" />
+          <ReviewForm
+            :platform="platform"
+            :owner="owner"
+            :repo="repo"
+            :pr-number="number"
+            :unviewed-file-count="unviewedFileCount"
+            :unresolved-thread-count="reviewThreadSummary?.unresolved ?? 0"
+          />
         </div>
         <div v-show="activeTab === 'reviews'">
           <ReviewList
@@ -674,6 +683,7 @@ onMounted(async () => {
             :pr-number="number"
             :head-sha="pr.currentPr?.head_sha ?? null"
             :diff-files="pr.diff?.files"
+            :diff-patches="pr.diff?.patches"
             :can-resolve-threads="platformCapabilities?.supports_review_thread_resolution ?? false"
             @thread-summary="reviewThreadSummary = $event"
             @locate-comment="handleReviewCommentLocate"

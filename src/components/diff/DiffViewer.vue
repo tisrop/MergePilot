@@ -55,6 +55,7 @@ const emit = defineEmits<{
     body: string,
   ];
   locationResult: [result: DiffLocationResult];
+  reviewProgress: [unviewedFileCount: number];
 }>();
 
 interface FileTreeNode {
@@ -1129,6 +1130,8 @@ watch(
   },
   { immediate: true },
 );
+
+watch(unviewedFileCount, (count) => emit("reviewProgress", count), { immediate: true });
 
 // 同一批文件再次加载（例如切换 PR 但文件名未变）时，也回到第一个文件。
 watch(

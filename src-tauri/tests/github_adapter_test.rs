@@ -488,6 +488,46 @@ async fn test_github_resolves_and_reopens_review_thread() {
 }
 
 #[tokio::test]
+async fn test_github_replies_edits_and_deletes_review_comment() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v3/repos/octocat/hello-world/pulls/42/comments/100/replies"))
+        .and(body_json(serde_json::json!({ "body": "回复" })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/api/v3/repos/octocat/hello-world/pulls/comments/100"))
+        .and(body_json(serde_json::json!({ "body": "编辑后" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v3/repos/octocat/hello-world/pulls/comments/100"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".into())
+        .with_base_url(format!("{}/api/v3", mock_server.uri()));
+    adapter
+        .reply_to_review_thread("octocat", "hello-world", 42, "thread-1", "100", "回复")
+        .await
+        .expect("reply should succeed");
+    adapter
+        .update_review_comment("octocat", "hello-world", 42, "thread-1", "100", "编辑后")
+        .await
+        .expect("edit should succeed");
+    adapter
+        .delete_review_comment("octocat", "hello-world", 42, "thread-1", "100")
+        .await
+        .expect("delete should succeed");
+}
+
+#[tokio::test]
 async fn test_github_lists_viewed_files_with_pagination() {
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))

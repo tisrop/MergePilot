@@ -280,6 +280,64 @@ export async function reviewThreadSetResolved(
   });
 }
 
+export async function reviewThreadReply(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  threadId: string,
+  replyToId: string,
+  body: string,
+): Promise<void> {
+  return invoke("review_thread_reply", {
+    platform,
+    owner,
+    repo,
+    prNumber,
+    threadId,
+    replyToId,
+    body,
+  });
+}
+
+export async function reviewCommentUpdate(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  threadId: string,
+  commentId: string,
+  body: string,
+): Promise<void> {
+  return invoke("review_comment_update", {
+    platform,
+    owner,
+    repo,
+    prNumber,
+    threadId,
+    commentId,
+    body,
+  });
+}
+
+export async function reviewCommentDelete(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  threadId: string,
+  commentId: string,
+): Promise<void> {
+  return invoke("review_comment_delete", {
+    platform,
+    owner,
+    repo,
+    prNumber,
+    threadId,
+    commentId,
+  });
+}
+
 export async function reviewViewedFilesList(
   platform: Platform,
   owner: string,

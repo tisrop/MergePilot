@@ -382,6 +382,10 @@ pub struct PrComment {
     pub reply_to_id: Option<String>,
     pub resolved: Option<bool>,
     pub resolvable: bool,
+    #[serde(default)]
+    pub can_edit: bool,
+    #[serde(default)]
+    pub can_delete: bool,
 }
 
 // ── Issue ──

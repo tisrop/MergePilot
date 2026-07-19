@@ -634,6 +634,37 @@ async fn test_gitlab_resolves_and_reopens_discussion() {
 }
 
 #[tokio::test]
+async fn test_gitlab_replies_edits_and_deletes_discussion_note() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/9/discussions/thread-1/notes"))
+        .and(body_json(serde_json::json!({ "body": "回复" })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/9/discussions/thread-1/notes/50"))
+        .and(body_json(serde_json::json!({ "body": "编辑后" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/9/discussions/thread-1/notes/50"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".into())
+        .with_base_url(format!("{}/api/v4", mock_server.uri()));
+    adapter.reply_to_review_thread("group", "repo", 9, "thread-1", "50", "回复").await.expect("reply should succeed");
+    adapter.update_review_comment("group", "repo", 9, "thread-1", "50", "编辑后").await.expect("edit should succeed");
+    adapter.delete_review_comment("group", "repo", 9, "thread-1", "50").await.expect("delete should succeed");
+}
+
+#[tokio::test]
 async fn test_gitlab_rejects_invalid_comment_input_before_request() {
     let mock_server = MockServer::start().await;
     let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());

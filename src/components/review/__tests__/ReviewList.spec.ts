@@ -6,6 +6,9 @@ import type { PrComment, Review } from "@/types";
 const mocks = vi.hoisted(() => ({
   reviewList: vi.fn(),
   reviewCommentsList: vi.fn(),
+  reviewThreadReply: vi.fn(),
+  reviewCommentUpdate: vi.fn(),
+  reviewCommentDelete: vi.fn(),
   reviewThreadSetResolved: vi.fn(),
 }));
 
@@ -36,6 +39,8 @@ function comment(overrides: Partial<PrComment>): PrComment {
     reply_to_id: null,
     resolved: false,
     resolvable: true,
+    can_edit: false,
+    can_delete: false,
     ...overrides,
   };
 }
@@ -97,6 +102,9 @@ describe("ReviewList", () => {
       }),
     ]);
     mocks.reviewThreadSetResolved.mockResolvedValue(undefined);
+    mocks.reviewThreadReply.mockResolvedValue(undefined);
+    mocks.reviewCommentUpdate.mockResolvedValue(undefined);
+    mocks.reviewCommentDelete.mockResolvedValue(undefined);
   });
 
   it("按 Discussion 组织行级评论并保留回复关系和过期状态", async () => {
@@ -204,5 +212,96 @@ describe("ReviewList", () => {
 
     expect(wrapper.text()).toContain("新 PR 未解决线程");
     expect(wrapper.get(".review-thread .resolution-badge").text()).toBe("未解决");
+  });
+
+  it("支持回复线程以及编辑、删除自己的评论", async () => {
+    mocks.reviewCommentsList.mockResolvedValue([comment({ can_edit: true, can_delete: true })]);
+    const wrapper = await mountList();
+
+    await wrapper.get(".thread-reply-form textarea").setValue("补充一个回归测试");
+    await wrapper.get(".thread-reply-form").trigger("submit");
+    expect(mocks.reviewThreadReply).toHaveBeenCalledWith(
+      "gitlab",
+      "group",
+      "repo",
+      9,
+      "thread-1",
+      "100",
+      "补充一个回归测试",
+    );
+
+    await wrapper.get(".comment-actions .text-button").trigger("click");
+    await wrapper.get(".comment-editor").setValue("修改后的评论");
+    await wrapper.get(".comment-edit-actions .btn-primary").trigger("click");
+    expect(mocks.reviewCommentUpdate).toHaveBeenCalledWith(
+      "gitlab",
+      "group",
+      "repo",
+      9,
+      "thread-1",
+      "100",
+      "修改后的评论",
+    );
+
+    const deleteButton = wrapper.findAll(".comment-actions .danger")[0];
+    await deleteButton.trigger("click");
+    expect(deleteButton.text()).toContain("确认删除");
+    await deleteButton.trigger("click");
+    expect(mocks.reviewCommentDelete).toHaveBeenCalledWith(
+      "gitlab",
+      "group",
+      "repo",
+      9,
+      "thread-1",
+      "100",
+    );
+  });
+
+  it("重命名文件使用新路径跳转，并在 Diff 无法定位时保留原始上下文提示", async () => {
+    mocks.reviewCommentsList.mockResolvedValueOnce([
+      comment({ path: "src/old.ts", original_commit_id: "old-head" }),
+    ]);
+    const wrapper = await mountList({
+      diffFiles: [
+        {
+          filename: "src/new.ts",
+          status: "renamed",
+          patch: "@@ -12 +12 @@\n-old\n+new",
+          additions: 1,
+          deletions: 1,
+        },
+      ],
+      diffPatches: [
+        {
+          filename: "src/new.ts",
+          old_path: "src/old.ts",
+          new_path: "src/new.ts",
+          status: "renamed",
+          additions: 1,
+          deletions: 1,
+          content_kind: "text",
+          patch: "@@ -12 +12 @@\n-old\n+new",
+          hunks: [
+            {
+              header: "@@ -12 +12 @@",
+              old_start: 12,
+              old_count: 1,
+              new_start: 12,
+              new_count: 1,
+              section_header: null,
+              lines: [
+                { kind: "deletion", content: "old", old_line: 12, new_line: null },
+                { kind: "addition", content: "new", old_line: null, new_line: 12 },
+              ],
+            },
+          ],
+          message: null,
+        },
+      ],
+    });
+
+    expect(wrapper.find(".path-button").text()).toContain("src/new.ts");
+    await wrapper.get(".path-button").trigger("click");
+    expect(wrapper.emitted("locateComment")?.at(-1)).toEqual(["src/new.ts", 12]);
   });
 });
