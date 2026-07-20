@@ -24,6 +24,10 @@
   --color-beacon-navy: #101d36;
   --gradient-beacon: linear-gradient(145deg, #182b4d 0%, #101d36 58%, #243d78 100%);
   --color-focus: #526fe0;
+  --color-focus-ring: rgba(82, 111, 224, 0.14);
+  --color-control-selected: #f0f3fa;
+  --color-control-highlight: #f6f8fb;
+  --shadow-control-focus: 0 0 0 3px var(--color-focus-ring);
   --color-danger: #c93636;
   --color-danger-light: #fff1f1;
   --color-danger-border: #f1c3c3;
@@ -121,14 +125,19 @@ button {
   cursor: pointer;
 }
 
-:where(a, button, input, textarea, select, [tabindex]):focus-visible {
-  outline: 3px solid rgba(82, 111, 224, 0.28);
+:where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid rgba(82, 111, 224, 0.42);
+  outline-offset: 2px;
+}
+
+:where(input[type="checkbox"], input[type="radio"], input[type="range"]):focus-visible {
+  outline: 2px solid rgba(82, 111, 224, 0.42);
   outline-offset: 2px;
 }
 
 ::selection {
   color: var(--color-text);
-  background: var(--color-primary-border);
+  background: rgba(113, 135, 255, 0.22);
 }
 
 /* Shared utility classes */
@@ -275,9 +284,12 @@ textarea.input {
   border-color: var(--color-primary-border);
 }
 
-.input:focus {
+.input:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 0;
   border-color: var(--color-focus);
-  box-shadow: 0 0 0 3px rgba(57, 120, 189, 0.14);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-control-focus);
 }
 
 .input::placeholder {
@@ -322,7 +334,8 @@ textarea.input {
 }
 
 .dropdown-option.selected {
-  background: var(--color-primary-light);
+  background: var(--color-control-selected);
+  box-shadow: inset 2px 0 0 var(--color-focus);
   color: var(--color-primary);
   font-weight: 600;
 }

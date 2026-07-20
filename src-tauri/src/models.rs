@@ -202,6 +202,66 @@ pub struct PrMetadataUpdateOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrCreateRequest {
+    pub source_owner: String,
+    pub source_repo: String,
+    pub source_branch: String,
+    pub target_branch: String,
+    pub title: String,
+    pub body: String,
+    pub draft: bool,
+    pub reviewers: Vec<String>,
+    pub assignees: Vec<String>,
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrCreatePreviewRequest {
+    pub source_owner: String,
+    pub source_repo: String,
+    pub source_branch: String,
+    pub target_branch: String,
+    pub commit_sha: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrCommitSummary {
+    pub sha: String,
+    pub title: String,
+    pub author_name: String,
+    pub authored_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PrCreatePreviewData {
+    pub commits: Vec<PrCommitSummary>,
+    pub diff: String,
+    pub files: Vec<PrFile>,
+    pub incomplete: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrBranchOptions {
+    pub branches: Vec<String>,
+    pub default_branch: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrLabel {
+    pub name: String,
+    pub color: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrCreateOutcome {
+    pub number: u64,
+    pub detail: Option<PrDetail>,
+    pub updated_fields: Vec<PrMetadataField>,
+    pub failures: Vec<PrMetadataUpdateFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrFileContent {
     pub path: String,
     pub revision: String,
@@ -332,6 +392,13 @@ pub struct DiffResult {
     pub files: Vec<PrFile>,
     pub patch_schema_version: u32,
     pub patches: Vec<StandardPatchFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrCreatePreview {
+    pub commits: Vec<PrCommitSummary>,
+    pub diff: DiffResult,
+    pub incomplete: bool,
 }
 
 // ── Review ──
@@ -509,6 +576,8 @@ pub struct AiReviewRequest {
 pub struct PrContext {
     pub title: String,
     pub body: String,
+    #[serde(default)]
+    pub repository_rules: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

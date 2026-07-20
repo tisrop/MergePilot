@@ -60,6 +60,11 @@ pub fn build_user_message(diff: &str, context: Option<&PrContext>) -> String {
 
     if let Some(ctx) = context {
         msg.push_str(&format!("PR 标题: {}\nPR 描述: {}\n\n", ctx.title, ctx.body));
+        if let Some(rules) = ctx.repository_rules.as_deref().map(str::trim).filter(|rules| !rules.is_empty()) {
+            msg.push_str("仓库级评审规则（评审时必须遵守）：\n");
+            msg.push_str(rules);
+            msg.push_str("\n\n");
+        }
     }
 
     // Truncate diff if it's too large (max ~64KB for reasonable AI input)
@@ -84,6 +89,7 @@ pub fn build_user_message(diff: &str, context: Option<&PrContext>) -> String {
 #[cfg(test)]
 mod tests {
     use super::build_user_message;
+    use crate::models::PrContext;
 
     #[test]
     fn truncates_chinese_on_utf8_boundary() {
@@ -101,5 +107,19 @@ mod tests {
         assert!(message.contains(&"a".repeat(65_534)));
         assert!(!message.contains("🦀tail"));
         assert!(message.contains("已截断"));
+    }
+
+    #[test]
+    fn includes_repository_rules_in_user_message() {
+        let context = PrContext {
+            title: "规则测试".to_string(),
+            body: "描述".to_string(),
+            repository_rules: Some("禁止在异步任务中持有互斥锁".to_string()),
+        };
+
+        let message = build_user_message("+change", Some(&context));
+
+        assert!(message.contains("仓库级评审规则"));
+        assert!(message.contains("禁止在异步任务中持有互斥锁"));
     }
 }

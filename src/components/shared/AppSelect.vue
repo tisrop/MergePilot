@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
+import { computed } from "vue";
+import { useSelectDropdown } from "@/composables/useSelectDropdown";
 
 type SelectOption = { value: string; label: string; disabled?: boolean };
 
@@ -11,120 +12,63 @@ const props = withDefaults(
     placeholder?: string;
     size?: "sm" | "md";
     ariaLabel?: string;
+    searchable?: boolean;
+    searchPlaceholder?: string;
+    hasMore?: boolean;
+    loadingMore?: boolean;
+    loadMoreText?: string;
   }>(),
   {
     placeholder: "请选择",
     size: "md",
+    searchable: false,
+    searchPlaceholder: "搜索选项",
+    hasMore: false,
+    loadingMore: false,
+    loadMoreText: "加载更多",
   },
 );
 
 const emit = defineEmits<{
   "update:modelValue": [value: string];
+  "load-more": [];
 }>();
-
-const open = ref(false);
-const triggerRef = ref<HTMLElement | null>(null);
-const listRef = ref<HTMLElement | null>(null);
-const highlightIndex = ref(-1);
 
 const selectedLabel = computed(() => {
   const match = props.options.find((o) => o.value === props.modelValue);
   return match ? match.label : "";
 });
-
-function firstEnabledIndex() {
-  return props.options.findIndex((option) => !option.disabled);
-}
-
-function findEnabledIndex(start: number, direction: 1 | -1) {
-  let index = start;
-  while (index >= 0 && index < props.options.length) {
-    if (!props.options[index].disabled) return index;
-    index += direction;
-  }
-  return -1;
-}
-
-function toggle() {
-  open.value = !open.value;
-  if (open.value) {
-    const selectedIndex = props.options.findIndex((o) => o.value === props.modelValue);
-    highlightIndex.value =
-      selectedIndex >= 0 && !props.options[selectedIndex].disabled
-        ? selectedIndex
-        : firstEnabledIndex();
-  }
-}
-
-function select(option: SelectOption) {
-  if (option.disabled) return;
-  emit("update:modelValue", option.value);
-  open.value = false;
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (!open.value) {
-    if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
-      e.preventDefault();
-      open.value = true;
-      const selectedIndex = props.options.findIndex((o) => o.value === props.modelValue);
-      highlightIndex.value =
-        selectedIndex >= 0 && !props.options[selectedIndex].disabled
-          ? selectedIndex
-          : firstEnabledIndex();
-    }
-    return;
-  }
-
-  switch (e.key) {
-    case "Escape":
-      open.value = false;
-      break;
-    case "ArrowDown":
-      e.preventDefault();
-      highlightIndex.value = findEnabledIndex(highlightIndex.value + 1, 1);
-      break;
-    case "ArrowUp":
-      e.preventDefault();
-      highlightIndex.value = findEnabledIndex(highlightIndex.value - 1, -1);
-      break;
-    case "Enter":
-    case " ":
-      e.preventDefault();
-      if (highlightIndex.value >= 0 && highlightIndex.value < props.options.length) {
-        select(props.options[highlightIndex.value]);
-      }
-      break;
-  }
-}
-
-function onClickOutside(e: MouseEvent) {
-  if (!open.value) return;
-  const target = e.target as Node;
-  if (triggerRef.value && !triggerRef.value.contains(target)) {
-    open.value = false;
-  }
-}
-
-watch(highlightIndex, async () => {
-  await nextTick();
-  const el = listRef.value?.children[highlightIndex.value] as HTMLElement | undefined;
-  if (el && typeof el.scrollIntoView === "function") {
-    el.scrollIntoView({ block: "nearest" });
-  }
-});
-
-onMounted(() => {
-  document.addEventListener("click", onClickOutside, true);
-});
-
-onUnmounted(() => {
-  document.removeEventListener("click", onClickOutside, true);
+const optionSource = computed(() => props.options);
+const {
+  open,
+  searchQuery,
+  highlightIndex,
+  wrapperRef,
+  triggerRef,
+  searchInputRef,
+  listRef,
+  filteredOptions,
+  toggleDropdown,
+  selectOption,
+  onTriggerKeydown,
+  onSearchKeydown,
+} = useSelectDropdown<SelectOption>({
+  options: optionSource,
+  searchText: (option) => `${option.label} ${option.value}`,
+  isSelected: (option) => option.value === props.modelValue,
+  onSelect: (option) => emit("update:modelValue", option.value),
+  searchable: () => props.searchable,
+  closeOnSelect: true,
+  optionSelector: ".dropdown-option",
 });
 </script>
 
 <template>
-  <div class="app-select-wrap" :class="[size === 'sm' ? 'app-select-wrap-sm' : '']">
+  <div
+    ref="wrapperRef"
+    class="app-select-wrap"
+    :class="[size === 'sm' ? 'app-select-wrap-sm' : '']"
+  >
     <div
       ref="triggerRef"
       :id="id"
@@ -134,8 +78,8 @@ onUnmounted(() => {
       aria-haspopup="listbox"
       :aria-expanded="open"
       :aria-label="ariaLabel"
-      @click="toggle"
-      @keydown="onKeydown"
+      @click="toggleDropdown"
+      @keydown="onTriggerKeydown"
     >
       <span class="app-select-value" :class="{ placeholder: !selectedLabel }">
         {{ selectedLabel || placeholder }}
@@ -156,23 +100,46 @@ onUnmounted(() => {
       </svg>
     </div>
 
-    <div v-if="open" ref="listRef" class="dropdown-panel" role="listbox">
+    <div v-if="open" class="dropdown-panel">
+      <input
+        v-if="searchable"
+        ref="searchInputRef"
+        v-model="searchQuery"
+        class="dropdown-search"
+        type="search"
+        :placeholder="searchPlaceholder"
+        :aria-label="searchPlaceholder"
+        @keydown="onSearchKeydown"
+      />
+      <div ref="listRef" class="dropdown-options" role="listbox">
+        <button
+          v-for="(opt, i) in filteredOptions"
+          :key="opt.value"
+          :data-value="opt.value"
+          class="dropdown-option"
+          :class="{ selected: opt.value === modelValue, highlighted: i === highlightIndex }"
+          :disabled="opt.disabled"
+          role="option"
+          :aria-selected="opt.value === modelValue"
+          @click.stop="selectOption(opt)"
+          @mouseenter="!opt.disabled && (highlightIndex = i)"
+          type="button"
+        >
+          {{ opt.label }}
+        </button>
+        <div v-if="filteredOptions.length === 0" class="dropdown-empty">
+          {{ searchQuery ? "没有匹配选项" : "无选项" }}
+        </div>
+      </div>
       <button
-        v-for="(opt, i) in options"
-        :key="opt.value"
-        :data-value="opt.value"
-        class="dropdown-option"
-        :class="{ selected: opt.value === modelValue }"
-        :disabled="opt.disabled"
-        role="option"
-        :aria-selected="opt.value === modelValue"
-        @click.stop="select(opt)"
-        @mouseenter="!opt.disabled && (highlightIndex = i)"
+        v-if="hasMore"
+        class="dropdown-load-more"
         type="button"
+        :disabled="loadingMore"
+        @click.stop="emit('load-more')"
       >
-        {{ opt.label }}
+        {{ loadingMore ? "加载中…" : loadMoreText }}
       </button>
-      <div v-if="options.length === 0" class="dropdown-empty">无选项</div>
     </div>
   </div>
 </template>
@@ -208,9 +175,16 @@ onUnmounted(() => {
   user-select: none;
 }
 
-.app-select:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px var(--color-primary-light);
+.app-select:hover,
+.app-select[aria-expanded="true"] {
+  border-color: var(--color-primary-border);
+}
+
+.app-select:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 0;
+  border-color: var(--color-focus);
+  box-shadow: var(--shadow-control-focus);
 }
 
 .app-select-wrap-sm .app-select {
@@ -249,9 +223,61 @@ onUnmounted(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  max-height: 240px;
-  overflow-y: auto;
+  max-height: 280px;
+  overflow: hidden;
   padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-search {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.dropdown-search:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 0;
+  border-color: var(--color-focus);
+  background: var(--color-surface);
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.dropdown-options {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.dropdown-load-more {
+  flex: 0 0 auto;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 10px;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dropdown-load-more:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.dropdown-load-more:disabled {
+  color: var(--color-text-tertiary);
+  cursor: wait;
 }
 
 .dropdown-option {
@@ -273,8 +299,13 @@ onUnmounted(() => {
   background: var(--color-surface-hover);
 }
 
+.dropdown-option.highlighted {
+  background: var(--color-control-highlight);
+}
+
 .dropdown-option.selected {
-  background: var(--color-primary-light);
+  background: var(--color-control-selected);
+  box-shadow: inset 2px 0 0 var(--color-focus);
   color: var(--color-primary);
   font-weight: 600;
 }

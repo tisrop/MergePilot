@@ -161,6 +161,9 @@ const severityLabel: Record<Severity, string> = {
         </svg>
         已忽略
       </span>
+      <span v-else-if="typeof suggestion.action === 'object'" class="accepted">
+        已编辑并加入草稿
+      </span>
     </div>
   </div>
 </template>

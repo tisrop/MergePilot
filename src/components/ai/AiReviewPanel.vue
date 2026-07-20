@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, onUnmounted } from "vue";
+import { computed, ref, onUnmounted, watch } from "vue";
 import type {
   Platform,
   AiReviewFocus,
+  AiReviewHistoryEntry,
+  AiReviewMode,
   AiReviewResult,
   AiSuggestion,
   PrContext,
@@ -12,15 +14,27 @@ import type {
 import {
   aiReview,
   aiReviewCancel,
+  aiGetConfig,
   aiReviewStream,
   prCompareDiff,
+  prDetail,
+  prDiff,
   reviewCommentAdd,
   reviewSubmit,
 } from "@/api";
 import { getErrorMessage } from "@/utils/error";
+import { draftPositionIsCurrent } from "@/utils/aiReviewDraft";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import AiSuggestionCard from "./AiSuggestionCard.vue";
 import AppSelect from "@/components/shared/AppSelect.vue";
+import {
+  appendAiReviewHistory,
+  loadAiReviewHistory,
+  loadRepositoryRules,
+  saveRepositoryRules,
+  updateAiReviewHistoryResult,
+} from "@/services/aiReviewPersistence";
+import { useReviewDraftStore, type UnifiedReviewDraft } from "@/stores/useReviewDraftStore";
 
 const props = defineProps<{
   platform: Platform;
@@ -37,8 +51,6 @@ const emit = defineEmits<{
   locateSuggestion: [suggestion: AiSuggestion];
 }>();
 
-type AiReviewMode = "full" | "incremental";
-
 const focus = ref<AiReviewFocus>("all");
 const reviewMode = ref<AiReviewMode>("full");
 const useStreaming = ref(true);
@@ -49,6 +61,9 @@ const resultHeadSha = ref("");
 const resultFocus = ref<AiReviewFocus | null>(null);
 const resultMode = ref<AiReviewMode>("full");
 const resultBaseSha = ref("");
+const resultModel = ref("");
+const resultTruncated = ref(false);
+const currentHistoryId = ref("");
 const isResultOutdated = computed(
   () => !!result.value && !!resultHeadSha.value && resultHeadSha.value !== props.headSha,
 );
@@ -67,6 +82,18 @@ function loadLastSuccessfulHeadSha(): string {
 }
 
 const lastSuccessfulHeadSha = ref(loadLastSuccessfulHeadSha());
+const repositoryRules = ref(
+  loadRepositoryRules({ platform: props.platform, owner: props.owner, repo: props.repo }),
+);
+const rulesStatus = ref("");
+const history = ref<AiReviewHistoryEntry[]>(
+  loadAiReviewHistory({
+    platform: props.platform,
+    owner: props.owner,
+    repo: props.repo,
+    prNumber: props.prNumber,
+  }),
+);
 const hasIncrementalBase = computed(
   () =>
     props.supportsCompareDiff &&
@@ -92,17 +119,27 @@ function saveLastSuccessfulHeadSha(headSha: string, storageKey = reviewStorageKe
   }
 }
 
-interface ReviewDraft {
-  id: string;
-  suggestionIndex: number;
-  path: string;
-  startLine: number | null;
-  endLine: number | null;
-  body: string;
-  headSha: string;
-}
+type ReviewDraft = UnifiedReviewDraft & { source: "ai"; suggestionIndex: number };
 
-const drafts = ref<ReviewDraft[]>([]);
+const reviewDrafts = useReviewDraftStore();
+const reviewReference = computed(() => ({
+  platform: props.platform,
+  owner: props.owner,
+  repo: props.repo,
+  prNumber: props.prNumber,
+}));
+function loadAiDrafts(): ReviewDraft[] {
+  return reviewDrafts
+    .list(reviewReference.value)
+    .filter(
+      (draft): draft is ReviewDraft => draft.source === "ai" && draft.suggestionIndex !== null,
+    )
+    .map((draft) => ({ ...draft }));
+}
+const drafts = ref<ReviewDraft[]>(loadAiDrafts());
+watch(drafts, (value) => reviewDrafts.replaceSource(reviewReference.value, "ai", value), {
+  deep: true,
+});
 const submittingDrafts = ref(false);
 const draftStatus = ref("");
 const draftError = ref("");
@@ -121,9 +158,13 @@ let activeReviewDiff = "";
 let activeReviewContext: PrContext | null = null;
 let activeReviewMode: AiReviewMode = "full";
 let activeReviewBaseSha = "";
+let activeReviewModel = "未知模型";
+let activeReviewTruncated = false;
 let activeReviewStorageKey = "";
+let historySequence = 0;
 let reviewSequence = 0;
 let disposed = false;
+let resultPersistenceTimer: ReturnType<typeof setTimeout> | null = null;
 
 const foci: { value: AiReviewFocus; label: string }[] = [
   { value: "all", label: "全部" },
@@ -141,6 +182,97 @@ const reviewModes = computed(() => [
     disabled: !hasIncrementalBase.value,
   },
 ]);
+
+watch(
+  () => `${props.platform}:${props.owner}:${props.repo}:${props.prNumber}`,
+  () => {
+    repositoryRules.value = loadRepositoryRules(reviewReference.value);
+    history.value = loadAiReviewHistory(reviewReference.value);
+    currentHistoryId.value = "";
+    rulesStatus.value = "";
+    drafts.value = loadAiDrafts();
+    restoreDraftHistory();
+  },
+);
+
+function saveRules(): void {
+  repositoryRules.value = saveRepositoryRules(reviewReference.value, repositoryRules.value);
+  rulesStatus.value = repositoryRules.value ? "仓库级规则已保存" : "仓库级规则已清除";
+}
+
+function reviewContextWithRules(context: PrContext | null): PrContext | null {
+  const rules = repositoryRules.value.trim();
+  if (!context && !rules) return null;
+  return {
+    title: context?.title ?? "",
+    body: context?.body ?? "",
+    repository_rules: rules || null,
+  };
+}
+
+function cloneResult(reviewResult: AiReviewResult): AiReviewResult {
+  return JSON.parse(JSON.stringify(reviewResult)) as AiReviewResult;
+}
+
+function recordSuccessfulReview(reviewResult: AiReviewResult): void {
+  const createdAt = Date.now();
+  const entry: AiReviewHistoryEntry = {
+    id: `${activeReviewHeadSha}:${createdAt}:${historySequence++}`,
+    created_at: createdAt,
+    head_sha: activeReviewHeadSha,
+    base_sha: activeReviewBaseSha || null,
+    focus: activeReviewFocus ?? "all",
+    mode: activeReviewMode,
+    model: activeReviewModel,
+    truncated: activeReviewTruncated,
+    result: cloneResult(reviewResult),
+  };
+  history.value = appendAiReviewHistory(reviewReference.value, entry);
+  currentHistoryId.value = entry.id;
+}
+
+function persistCurrentResult(): void {
+  if (!result.value || !currentHistoryId.value) return;
+  history.value = updateAiReviewHistoryResult(
+    reviewReference.value,
+    currentHistoryId.value,
+    cloneResult(result.value),
+  );
+}
+
+function scheduleCurrentResultPersistence(): void {
+  if (resultPersistenceTimer) clearTimeout(resultPersistenceTimer);
+  resultPersistenceTimer = setTimeout(() => {
+    resultPersistenceTimer = null;
+    persistCurrentResult();
+  }, 300);
+}
+
+function loadHistoryEntry(entry: AiReviewHistoryEntry): void {
+  const draftHistoryIds = new Set(drafts.value.map((draft) => draft.historyId).filter(Boolean));
+  if (drafts.value.length > 0 && !draftHistoryIds.has(entry.id)) {
+    draftError.value = "请先提交或移除当前草稿，再切换历史评审";
+    return;
+  }
+  result.value = cloneResult(entry.result);
+  resultHeadSha.value = entry.head_sha;
+  resultFocus.value = entry.focus;
+  resultMode.value = entry.mode;
+  resultBaseSha.value = entry.base_sha ?? "";
+  resultModel.value = entry.model;
+  resultTruncated.value = entry.truncated;
+  currentHistoryId.value = entry.id;
+  draftError.value = "";
+}
+
+function restoreDraftHistory(): void {
+  const historyId = drafts.value[0]?.historyId;
+  if (!historyId) return;
+  const entry = history.value.find((candidate) => candidate.id === historyId);
+  if (entry) loadHistoryEntry(entry);
+}
+
+restoreDraftHistory();
 
 async function startReview() {
   if (drafts.value.length > 0) {
@@ -167,7 +299,7 @@ async function startReview() {
   const reviewStorageKeySnapshot = reviewStorageKey.value;
   const reviewHeadSha = props.headSha;
   const reviewDiff = props.diff;
-  const reviewContext = props.context;
+  const reviewContext = reviewContextWithRules(props.context);
 
   await cancelActiveReview();
   if (disposed || sequence !== reviewSequence) return;
@@ -182,6 +314,13 @@ async function startReview() {
   activeReviewContext = reviewContext;
   activeReviewMode = reviewMode.value;
   activeReviewBaseSha = reviewMode.value === "incremental" ? lastSuccessfulHeadSha.value : "";
+  activeReviewModel = "未知模型";
+  try {
+    activeReviewModel = (await aiGetConfig()).model || "未知模型";
+  } catch {
+    // Model metadata is informative and must not block a configured review request.
+  }
+  if (disposed || sequence !== reviewSequence) return;
 
   try {
     if (activeReviewMode === "incremental") {
@@ -206,12 +345,16 @@ async function startReview() {
     return;
   }
   if (disposed || sequence !== reviewSequence) return;
+  activeReviewTruncated = new TextEncoder().encode(activeReviewDiff).length > 65_536;
 
   result.value = null;
   resultHeadSha.value = "";
   resultFocus.value = null;
   resultMode.value = activeReviewMode;
   resultBaseSha.value = activeReviewBaseSha;
+  resultModel.value = activeReviewModel;
+  resultTruncated.value = activeReviewTruncated;
+  currentHistoryId.value = "";
 
   if (useStreaming.value) {
     await startStreamingReview();
@@ -236,7 +379,10 @@ async function startNonStreamingReview() {
     resultFocus.value = reviewFocus;
     resultMode.value = activeReviewMode;
     resultBaseSha.value = activeReviewBaseSha;
+    resultModel.value = activeReviewModel;
+    resultTruncated.value = activeReviewTruncated;
     saveLastSuccessfulHeadSha(reviewHeadSha, activeReviewStorageKey);
+    recordSuccessfulReview(result.value);
   } catch (e) {
     error.value = getErrorMessage(e, "AI 评审失败");
   } finally {
@@ -260,7 +406,10 @@ async function startStreamingReview() {
       resultFocus.value = activeReviewFocus;
       resultMode.value = activeReviewMode;
       resultBaseSha.value = activeReviewBaseSha;
+      resultModel.value = activeReviewModel;
+      resultTruncated.value = activeReviewTruncated;
       saveLastSuccessfulHeadSha(activeReviewHeadSha, activeReviewStorageKey);
+      recordSuccessfulReview(result.value);
       activeRequestId = null;
       loading.value = false;
       cleanupListeners();
@@ -313,6 +462,12 @@ function cleanupListeners() {
 onUnmounted(() => {
   disposed = true;
   reviewSequence += 1;
+  if (resultPersistenceTimer) {
+    clearTimeout(resultPersistenceTimer);
+    resultPersistenceTimer = null;
+    persistCurrentResult();
+  }
+  reviewDrafts.flushPersistence();
   void cancelActiveReview().finally(cleanupListeners);
 });
 
@@ -329,6 +484,7 @@ function onAction(index: number, action: AiSuggestionAction) {
   if (action === "reject") {
     result.value.suggestions[index].action = action;
     drafts.value = drafts.value.filter((draft) => draft.suggestionIndex !== index);
+    persistCurrentResult();
     return;
   }
 
@@ -336,23 +492,64 @@ function onAction(index: number, action: AiSuggestionAction) {
   if (!drafts.value.some((draft) => draft.suggestionIndex === index)) {
     drafts.value.push({
       id: `${resultHeadSha.value}:${index}`,
+      source: "ai",
       suggestionIndex: index,
       path: suggestion.file,
       startLine: suggestion.line_start,
       endLine: suggestion.line_end ?? suggestion.line_start,
       body: draftBody(index),
       headSha: resultHeadSha.value,
+      event: "comment",
+      historyId: currentHistoryId.value || null,
+      touchedAt: Date.now(),
     });
   }
-  suggestion.action = "accept";
+  suggestion.action = typeof action === "object" ? { edit: draftBody(index) } : "accept";
   draftStatus.value = "";
   draftError.value = "";
+  persistCurrentResult();
 }
 
 function removeDraft(index: number) {
   const [removed] = drafts.value.splice(index, 1);
   if (removed && result.value?.suggestions[removed.suggestionIndex]) {
     result.value.suggestions[removed.suggestionIndex].action = undefined;
+    persistCurrentResult();
+  }
+}
+
+function recordDraftEdit(draft: ReviewDraft): void {
+  draft.touchedAt = Date.now();
+  const suggestion = result.value?.suggestions[draft.suggestionIndex];
+  if (!suggestion) return;
+  suggestion.action = draft.body.trim() ? { edit: draft.body } : "accept";
+  scheduleCurrentResultPersistence();
+}
+
+async function validateDraftsAgainstCurrentRevision(): Promise<boolean> {
+  try {
+    const latestDetail = await prDetail(props.platform, props.owner, props.repo, props.prNumber);
+    if (
+      latestDetail.head_sha !== props.headSha ||
+      drafts.value.some((draft) => draft.headSha !== latestDetail.head_sha)
+    ) {
+      draftError.value = "PR 已有新提交，草稿版本校验失败，请刷新 Diff 并重新评审";
+      return false;
+    }
+    const inlineDrafts = drafts.value.filter((draft) => draft.path && draft.endLine);
+    if (inlineDrafts.length === 0) return true;
+    const latestDiff = await prDiff(props.platform, props.owner, props.repo, props.prNumber);
+    const invalidDraft = inlineDrafts.find(
+      (draft) => !draftPositionIsCurrent(draft, latestDiff.patches),
+    );
+    if (invalidDraft) {
+      draftError.value = `草稿位置已失效：${invalidDraft.path}:${invalidDraft.endLine}，请刷新 Diff 后重新定位`;
+      return false;
+    }
+    return true;
+  } catch (cause) {
+    draftError.value = `提交前校验失败：${getErrorMessage(cause, "无法读取最新 PR 版本和 Diff")}`;
+    return false;
   }
 }
 
@@ -366,6 +563,7 @@ async function submitDrafts() {
     draftError.value = "评审草稿内容不能为空";
     return;
   }
+  if (!(await validateDraftsAgainstCurrentRevision())) return;
 
   submittingDrafts.value = true;
   draftStatus.value = "";
@@ -413,6 +611,7 @@ async function submitDrafts() {
       result.value.suggestions[suggestionIndex].action = "submitted";
     }
   }
+  persistCurrentResult();
   submittingDrafts.value = false;
   if (failed.length > 0) {
     draftError.value = `已提交 ${submitted} 条，${failed.length} 条失败：${firstError}`;
@@ -465,6 +664,45 @@ async function submitDrafts() {
       </button>
     </div>
 
+    <div class="ai-context-tools">
+      <details class="repository-rules">
+        <summary>仓库级 AI 规则</summary>
+        <p>规则按平台和仓库保存在本机，并随每次 AI 评审发送给当前模型。</p>
+        <textarea
+          v-model="repositoryRules"
+          class="input"
+          rows="4"
+          maxlength="12000"
+          placeholder="例如：重点检查异步生命周期；禁止建议引入新的 UI 框架。"
+          aria-label="仓库级 AI 评审规则"
+          @input="rulesStatus = ''"
+        />
+        <div class="rules-actions">
+          <button class="btn btn-sm" type="button" @click="saveRules">保存规则</button>
+          <span v-if="rulesStatus" role="status">{{ rulesStatus }}</span>
+        </div>
+      </details>
+
+      <details v-if="history.length > 0" class="review-history">
+        <summary>评审历史（{{ history.length }}）</summary>
+        <div class="history-list">
+          <button
+            v-for="entry in history"
+            :key="entry.id"
+            type="button"
+            class="history-entry"
+            :class="{ active: entry.id === currentHistoryId }"
+            @click="loadHistoryEntry(entry)"
+          >
+            <span
+              ><code>{{ entry.head_sha.slice(0, 12) }}</code> · {{ entry.model }}</span
+            >
+            <small>{{ new Date(entry.created_at).toLocaleString() }}</small>
+          </button>
+        </div>
+      </details>
+    </div>
+
     <!-- Streaming progress: keep the transport detail out of the user-facing review UI. -->
     <div v-if="loading && useStreaming" class="stream-preview" role="status" aria-live="polite">
       <div class="stream-label">
@@ -506,6 +744,10 @@ async function submitDrafts() {
         <span v-if="resultFocus"
           >聚焦范围：{{ foci.find((item) => item.value === resultFocus)?.label }}</span
         >
+        <span
+          >模型：<code>{{ resultModel || "未知模型" }}</code></span
+        >
+        <span>输入状态：{{ resultTruncated ? "Diff 已截断至 64 KiB" : "完整 Diff" }}</span>
       </div>
       <div class="summary-card">
         <h4>
@@ -569,7 +811,13 @@ async function submitDrafts() {
               移除
             </button>
           </div>
-          <textarea v-model="draft.body" class="input" rows="5" aria-label="评审草稿内容" />
+          <textarea
+            v-model="draft.body"
+            class="input"
+            rows="5"
+            aria-label="评审草稿内容"
+            @input="recordDraftEdit(draft)"
+          />
         </article>
       </section>
 
@@ -611,6 +859,89 @@ async function submitDrafts() {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
+}
+
+.ai-context-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.repository-rules,
+.review-history {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.repository-rules summary,
+.review-history summary {
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.repository-rules p {
+  margin: var(--space-2) 0;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.repository-rules textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.rules-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--color-success);
+  font-size: 12px;
+}
+
+.history-list {
+  display: flex;
+  max-height: 220px;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  overflow-y: auto;
+}
+
+.history-entry {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+
+.history-entry:hover,
+.history-entry.active {
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.history-entry code {
+  font-family: var(--font-mono);
+}
+
+.history-entry small {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
 }
 
 .review-mode-select {
@@ -872,5 +1203,11 @@ async function submitDrafts() {
 
 .no-issues svg {
   opacity: 0.6;
+}
+
+@media (max-width: 760px) {
+  .ai-context-tools {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

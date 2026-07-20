@@ -493,7 +493,7 @@ async function copySupportInfo() {
 }
 
 .toggle input:focus-visible + .toggle-slider {
-  outline: 3px solid rgba(57, 120, 189, 0.28);
+  outline: 2px solid rgba(82, 111, 224, 0.42);
   outline-offset: 2px;
 }
 

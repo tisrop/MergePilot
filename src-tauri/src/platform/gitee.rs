@@ -678,6 +678,33 @@ impl GiteeAdapter {
     }
 }
 #[async_trait]
+impl super::JsonPageSource for GiteeAdapter {
+    async fn fetch_json_page(&self, endpoint: &str, page: u32) -> Result<super::JsonPage, AppError> {
+        let url = format!("{endpoint}?per_page={}&page={page}", super::JSON_PAGE_SIZE);
+        let authenticated_url = format!("{}&{}", url, self.auth_query());
+        let response = self.client.get(&authenticated_url).header("User-Agent", "mergebeacon").send().await?;
+        let status = response.status();
+        let link = response.headers().get("link").and_then(|value| value.to_str().ok()).map(str::to_owned);
+        let header_total_pages = response
+            .headers()
+            .get("x-total-pages")
+            .or_else(|| response.headers().get("total_page"))
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u32>().ok());
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Api(format!("Gitee API {status} ({url}): {body}")));
+        }
+        let items = response.json().await?;
+        let link_total_pages = link.as_deref().map(|value| Self::parse_last_page_gitee(Some(value), page));
+        let total_pages = header_total_pages.or(link_total_pages);
+        let next_page = super::next_page_from_link(link.as_deref())
+            .or_else(|| total_pages.filter(|total| page < *total).map(|_| page.saturating_add(1)));
+        Ok(super::JsonPage { items, next_page, pagination_known: header_total_pages.is_some() || link.is_some() })
+    }
+}
+
+#[async_trait]
 impl GitPlatform for GiteeAdapter {
     fn name(&self) -> &'static str {
         "gitee"
@@ -950,6 +977,181 @@ impl GitPlatform for GiteeAdapter {
             milestone: Self::metadata_milestone(&json["milestone"]),
             metadata_permissions,
         })
+    }
+
+    async fn list_branches(&self, owner: &str, repo: &str) -> Result<PrBranchOptions, AppError> {
+        let endpoint = format!("{}/repos/{}/{}/branches", self.base_url, owner, repo);
+        let items = super::collect_json_pages(self, &endpoint).await?;
+        let branches = items.iter().filter_map(|branch| branch["name"].as_str().map(str::to_string)).collect();
+        let repository_url = format!("{}/repos/{}/{}", self.base_url, owner, repo);
+        let repository = self.get_json::<Value>(&repository_url).await?;
+        let default_branch = repository["default_branch"].as_str().map(str::to_string);
+        Ok(PrBranchOptions { branches, default_branch })
+    }
+
+    async fn list_labels(&self, owner: &str, repo: &str) -> Result<Vec<PrLabel>, AppError> {
+        let endpoint = format!("{}/repos/{}/{}/labels", self.base_url, owner, repo);
+        let items = super::collect_json_pages(self, &endpoint).await?;
+        Ok(items
+            .iter()
+            .filter_map(|label| {
+                label["name"].as_str().map(|name| PrLabel {
+                    name: name.to_string(),
+                    color: label["color"].as_str().map(str::to_string),
+                    description: label["description"].as_str().map(str::to_string),
+                })
+            })
+            .collect())
+    }
+
+    async fn list_pr_participant_suggestions(&self, owner: &str, repo: &str) -> Result<Vec<User>, AppError> {
+        let endpoint = format!("{}/repos/{}/{}/collaborators", self.base_url, owner, repo);
+        let items = super::collect_json_pages(self, &endpoint).await?;
+        Ok(items.iter().map(Self::map_user).filter(|user| !user.login.is_empty()).collect())
+    }
+
+    async fn create_pull_request(&self, owner: &str, repo: &str, request: &PrCreateRequest) -> Result<u64, AppError> {
+        let url = format!("{}/repos/{}/{}/pulls", self.base_url, owner, repo);
+        let head = if request.source_owner == owner && request.source_repo == repo {
+            request.source_branch.clone()
+        } else {
+            format!("{}:{}", request.source_owner, request.source_branch)
+        };
+        let json = self
+            .post_json(
+                &url,
+                &serde_json::json!({
+                    "title": request.title,
+                    "body": request.body,
+                    "head": head,
+                    "base": request.target_branch,
+                }),
+            )
+            .await?;
+        json["number"].as_u64().ok_or_else(|| AppError::Api("Gitee 创建 PR 后未返回编号".into()))
+    }
+
+    async fn preview_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        request: &PrCreatePreviewRequest,
+    ) -> Result<PrCreatePreviewData, AppError> {
+        if let Some(commit_sha) = request.commit_sha.as_deref() {
+            let source_owner = urlencoding::encode(&request.source_owner);
+            let source_repo = urlencoding::encode(&request.source_repo);
+            let sha = urlencoding::encode(commit_sha);
+            let url = format!("{}/repos/{}/{}/commits/{}", self.base_url, source_owner, source_repo, sha);
+            let json = self.get_json::<Value>(&url).await?;
+            let files_json = json["files"]
+                .as_array()
+                .or_else(|| json["changes"].as_array())
+                .ok_or_else(|| AppError::Api("Gitee 提交响应缺少 files/changes 字段".into()))?;
+            let files = files_json
+                .iter()
+                .map(|file| {
+                    let status = match file["status"].as_str().unwrap_or("") {
+                        "added" => FileStatus::Added,
+                        "removed" => FileStatus::Removed,
+                        "renamed" => FileStatus::Renamed,
+                        _ if file["new_file"].as_bool() == Some(true) => FileStatus::Added,
+                        _ if file["deleted_file"].as_bool() == Some(true) => FileStatus::Removed,
+                        _ if file["renamed_file"].as_bool() == Some(true) => FileStatus::Renamed,
+                        _ => FileStatus::Modified,
+                    };
+                    PrFile {
+                        filename: file["filename"]
+                            .as_str()
+                            .or_else(|| file["new_path"].as_str())
+                            .or_else(|| file["old_path"].as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        status,
+                        patch: Self::file_patch(file),
+                        additions: file["additions"].as_u64().unwrap_or(0) as u32,
+                        deletions: file["deletions"].as_u64().unwrap_or(0) as u32,
+                    }
+                })
+                .collect::<Vec<_>>();
+            let diff = files_json.iter().map(Self::unified_diff).filter(|patch| !patch.is_empty()).collect();
+            let commit = &json["commit"];
+            let summary = PrCommitSummary {
+                sha: json["sha"].as_str().or_else(|| json["id"].as_str()).unwrap_or(commit_sha).to_string(),
+                title: commit["message"].as_str().unwrap_or("").lines().next().unwrap_or("").to_string(),
+                author_name: commit["author"]["name"].as_str().unwrap_or("").to_string(),
+                authored_at: commit["author"]["date"].as_str().unwrap_or("").to_string(),
+            };
+            return Ok(PrCreatePreviewData { commits: vec![summary], diff, files, incomplete: false });
+        }
+        let base = urlencoding::encode(&request.target_branch);
+        let head_reference = if request.source_owner == owner && request.source_repo == repo {
+            request.source_branch.clone()
+        } else {
+            format!("{}:{}", request.source_owner, request.source_branch)
+        };
+        let head = urlencoding::encode(&head_reference);
+        let url = format!("{}/repos/{}/{}/compare/{}...{}?per_page=100", self.base_url, owner, repo, base, head);
+        let json = self.get_json::<Value>(&url).await?;
+        let files_json = json["files"]
+            .as_array()
+            .or_else(|| json["changes"].as_array())
+            .ok_or_else(|| AppError::Api("Gitee compare 响应缺少 files/changes 字段".into()))?;
+        let commits_json = json["commits"].as_array();
+        let incomplete = super::create_compare_is_incomplete(&json, commits_json.map_or(0, Vec::len), files_json.len());
+        let files = files_json
+            .iter()
+            .map(|file| {
+                let status = match file["status"].as_str().unwrap_or("") {
+                    "added" => FileStatus::Added,
+                    "removed" => FileStatus::Removed,
+                    "renamed" => FileStatus::Renamed,
+                    _ if file["new_file"].as_bool() == Some(true) => FileStatus::Added,
+                    _ if file["deleted_file"].as_bool() == Some(true) => FileStatus::Removed,
+                    _ if file["renamed_file"].as_bool() == Some(true) => FileStatus::Renamed,
+                    _ => FileStatus::Modified,
+                };
+                PrFile {
+                    filename: file["filename"]
+                        .as_str()
+                        .or_else(|| file["new_path"].as_str())
+                        .or_else(|| file["old_path"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    status,
+                    patch: Self::file_patch(file),
+                    additions: file["additions"].as_u64().unwrap_or(0) as u32,
+                    deletions: file["deletions"].as_u64().unwrap_or(0) as u32,
+                }
+            })
+            .collect::<Vec<_>>();
+        let diff = files_json.iter().map(Self::unified_diff).filter(|patch| !patch.is_empty()).collect();
+        let commits = commits_json
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|commit| {
+                        let sha = commit["sha"].as_str().or_else(|| commit["id"].as_str())?.to_string();
+                        let message =
+                            commit["commit"]["message"].as_str().or_else(|| commit["message"].as_str()).unwrap_or("");
+                        Some(PrCommitSummary {
+                            sha,
+                            title: message.lines().next().unwrap_or("").to_string(),
+                            author_name: commit["commit"]["author"]["name"]
+                                .as_str()
+                                .or_else(|| commit["author"]["name"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            authored_at: commit["commit"]["author"]["date"]
+                                .as_str()
+                                .or_else(|| commit["author"]["date"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(PrCreatePreviewData { commits, diff, files, incomplete })
     }
 
     async fn update_pull_request_metadata(

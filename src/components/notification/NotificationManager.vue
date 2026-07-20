@@ -36,8 +36,8 @@ const availablePlatforms = computed<Platform[]>(() =>
 async function openNotificationTarget(target: NotificationTarget): Promise<void> {
   if (!auth.platforms[target.platform].isLoggedIn) return;
   auth.setActivePlatform(target.platform);
-  repo.setActiveRepo(target.owner, target.repo);
-  repo.setForkContext(null);
+  repo.setActiveRepo(target.owner, target.repo, target.platform);
+  repo.setForkContext(null, target.platform);
   pr.clearContext();
   await router.push({
     name: "pr-detail",

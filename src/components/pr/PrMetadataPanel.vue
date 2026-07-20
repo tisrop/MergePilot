@@ -511,10 +511,13 @@ function submit(): void {
   line-height: 1.55;
 }
 
-.field input:focus,
-.field textarea:focus {
-  border-color: var(--color-primary-border);
-  box-shadow: 0 0 0 3px var(--color-primary-light);
+.field input:focus-visible,
+.field textarea:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 0;
+  border-color: var(--color-focus);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-control-focus);
 }
 
 .field input:disabled,

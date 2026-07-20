@@ -72,6 +72,7 @@ interface ContextProps {
   headSha?: string;
   locationRequest?: DiffLocationRequest | null;
   canSyncViewedFiles?: boolean;
+  readOnly?: boolean;
 }
 
 async function mountViewer(value = diff, extraProps: ContextProps = {}) {
@@ -207,6 +208,7 @@ const contextProps: Required<ContextProps> = {
   headSha: "head-sha",
   locationRequest: null,
   canSyncViewedFiles: false,
+  readOnly: false,
 };
 
 function fileContent(path: string, revision: string, content: string): PrFileContent {
@@ -1142,5 +1144,65 @@ index 1111111..2222222 100644
 
     await toggle.trigger("click");
     expect(wrapper.find(".file-navigator").exists()).toBe(true);
+  });
+
+  it("只读模式不接管右键操作或打开评论框", async () => {
+    const wrapper = await mountViewer(diff, { readOnly: true });
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+
+    wrapper.get(".diff-viewer-wrapper").element.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.querySelector(".quick-comment-popup")).toBeNull();
+  });
+
+  it("挂载后切换只读状态时同步更新右键监听器", async () => {
+    const wrapper = mount(DiffViewer, {
+      attachTo: document.body,
+      props: { diff, readOnly: true },
+    });
+    await flushPromises();
+    const target = wrapper.get(".diff2html-container");
+
+    const initialEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    target.element.dispatchEvent(initialEvent);
+    expect(initialEvent.defaultPrevented).toBe(false);
+
+    await wrapper.setProps({ readOnly: false });
+    await flushPromises();
+    const writableEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    wrapper.get(".diff2html-container").element.dispatchEvent(writableEvent);
+    expect(writableEvent.defaultPrevented).toBe(true);
+
+    await wrapper.setProps({ readOnly: true });
+    await flushPromises();
+    const readOnlyEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    wrapper.get(".diff2html-container").element.dispatchEvent(readOnlyEvent);
+    expect(readOnlyEvent.defaultPrevented).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it("卸载只读实例不会移除其他可写实例的右键监听器", async () => {
+    const writable = mount(DiffViewer, {
+      attachTo: document.body,
+      props: { diff, readOnly: false },
+    });
+    const readOnly = mount(DiffViewer, {
+      attachTo: document.body,
+      props: { diff, readOnly: true },
+    });
+    await flushPromises();
+
+    const beforeUnmount = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    writable.get(".diff2html-container").element.dispatchEvent(beforeUnmount);
+    expect(beforeUnmount.defaultPrevented).toBe(true);
+
+    readOnly.unmount();
+    const afterUnmount = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    writable.get(".diff2html-container").element.dispatchEvent(afterUnmount);
+    expect(afterUnmount.defaultPrevented).toBe(true);
+
+    writable.unmount();
   });
 });

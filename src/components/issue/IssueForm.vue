@@ -136,8 +136,8 @@ label {
 }
 
 .labels-input:focus-within {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px var(--color-primary-light);
+  border-color: var(--color-focus);
+  box-shadow: var(--shadow-control-focus);
 }
 
 .labels-list {

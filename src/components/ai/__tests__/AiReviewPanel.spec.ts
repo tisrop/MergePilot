@@ -1,12 +1,16 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AiSuggestion } from "@/types";
 import AiReviewPanel from "../AiReviewPanel.vue";
 import AiSuggestionCard from "../AiSuggestionCard.vue";
 import {
   aiReviewCancel,
+  aiGetConfig,
   aiReviewStream,
   prCompareDiff,
+  prDetail,
+  prDiff,
   reviewCommentAdd,
   reviewSubmit,
 } from "@/api";
@@ -27,8 +31,11 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@/api", () => ({
   aiReview: vi.fn(),
+  aiGetConfig: vi.fn(),
   aiReviewStream: vi.fn().mockResolvedValue(undefined),
   prCompareDiff: vi.fn(),
+  prDetail: vi.fn(),
+  prDiff: vi.fn(),
   aiReviewCancel: vi.fn().mockResolvedValue(undefined),
   reviewCommentAdd: vi.fn().mockResolvedValue(undefined),
   reviewSubmit: vi.fn().mockResolvedValue(undefined),
@@ -77,6 +84,30 @@ function mountPanel(overrides: Partial<AiReviewPanelProps> = {}) {
   });
 }
 
+function prDetailResult(headSha = "head-sha-1"): Awaited<ReturnType<typeof prDetail>> {
+  return {
+    summary: {} as Awaited<ReturnType<typeof prDetail>>["summary"],
+    body: "",
+    source_branch: "feature",
+    target_branch: "main",
+    mergeable: true,
+    head_sha: headSha,
+    base_sha: "base-sha",
+    draft: false,
+    reviewers: [],
+    assignees: [],
+    milestone: null,
+    metadata_permissions: {
+      can_edit_title_body: true,
+      can_toggle_draft: true,
+      can_manage_reviewers: true,
+      can_manage_assignees: true,
+      can_manage_labels: true,
+      can_manage_milestone: true,
+    },
+  };
+}
+
 describe("AiReviewPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,8 +120,50 @@ describe("AiReviewPanel", () => {
       removeItem: vi.fn((key: string) => storedReviews.delete(key)),
       clear: vi.fn(() => storedReviews.clear()),
     });
+    setActivePinia(createPinia());
     vi.mocked(aiReviewStream).mockResolvedValue(undefined);
     vi.mocked(aiReviewCancel).mockResolvedValue(undefined);
+    vi.mocked(aiGetConfig).mockResolvedValue({
+      endpoint: "https://api.example.com/v1",
+      model: "gpt-test",
+      api_key_configured: true,
+      system_prompt: null,
+      temperature: 0.3,
+      max_tokens: 8192,
+    });
+    vi.mocked(prDetail).mockResolvedValue(prDetailResult());
+    vi.mocked(prDiff).mockResolvedValue({
+      diff: "+changed",
+      files: [],
+      patch_schema_version: 1,
+      patches: ["src/main.ts", "src/a.ts", "src/b.ts"].map((path) => ({
+        filename: path,
+        old_path: path,
+        new_path: path,
+        status: "modified" as const,
+        additions: 12,
+        deletions: 0,
+        content_kind: "text" as const,
+        patch: "",
+        message: null,
+        hunks: [
+          {
+            header: "@@ -1,12 +1,12 @@",
+            old_start: 1,
+            old_count: 12,
+            new_start: 1,
+            new_count: 12,
+            section_header: null,
+            lines: Array.from({ length: 12 }, (_, index) => ({
+              kind: "context" as const,
+              content: "line",
+              old_line: index + 1,
+              new_line: index + 1,
+            })),
+          },
+        ],
+      })),
+    });
     vi.mocked(reviewCommentAdd).mockResolvedValue(
       {} as Awaited<ReturnType<typeof reviewCommentAdd>>,
     );
@@ -112,6 +185,45 @@ describe("AiReviewPanel", () => {
       "head-sha-1",
     );
     expect(wrapper.text()).toContain("评审版本：head-sha-1");
+    expect(wrapper.text()).toContain("模型：gpt-test");
+    expect(wrapper.text()).toContain("输入状态：完整 Diff");
+  });
+
+  it("保存仓库级规则并随评审请求发送，同时记录评审历史", async () => {
+    const wrapper = mountPanel({ context: { title: "PR", body: "描述" } });
+    await wrapper.get("textarea[aria-label='仓库级 AI 评审规则']").setValue("重点检查异步生命周期");
+    await wrapper.get(".rules-actions button").trigger("click");
+    await wrapper.get(".ai-toolbar button.btn-primary").trigger("click");
+    await flushPromises();
+
+    expect(aiReviewStream).toHaveBeenCalledWith(
+      "request-1",
+      expect.objectContaining({
+        context: expect.objectContaining({ repository_rules: "重点检查异步生命周期" }),
+      }),
+    );
+
+    finishReview([]);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain("评审历史（1）");
+    expect(wrapper.text()).toContain("gpt-test");
+    const history = JSON.parse(
+      localStorage.getItem("mergebeacon:ai-review-history:v1:github:octocat:hello-world:42") ??
+        "[]",
+    ) as Array<{ head_sha: string; model: string }>;
+    expect(history[0]).toMatchObject({ head_sha: "head-sha-1", model: "gpt-test" });
+  });
+
+  it("明确展示 AI 输入 Diff 的截断状态", async () => {
+    const wrapper = mountPanel({ diff: "a".repeat(65_537) });
+
+    await wrapper.get(".ai-toolbar button.btn-primary").trigger("click");
+    await flushPromises();
+    finishReview([]);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain("Diff 已截断至 64 KiB");
   });
 
   it("点击建议位置时向页面发出定位请求，并禁用旧版本建议", async () => {
@@ -419,6 +531,23 @@ describe("AiReviewPanel", () => {
     expect(wrapper.text()).toContain("已提交");
   });
 
+  it("清空 AI 草稿正文时重置建议的编辑状态", async () => {
+    const wrapper = mountPanel();
+    await wrapper.get(".ai-toolbar button.btn-primary").trigger("click");
+    await flushPromises();
+    finishReview();
+    await wrapper.vm.$nextTick();
+    wrapper.findComponent(AiSuggestionCard).vm.$emit("action", { edit: "" });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get(".action-status").text()).toContain("已编辑并加入草稿");
+
+    await wrapper.get("textarea[aria-label='评审草稿内容']").setValue("   ");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get(".action-status").text()).toContain("已加入草稿");
+    expect(wrapper.get(".action-status").text()).not.toContain("已编辑并加入草稿");
+  });
+
   it("无有效行号的建议作为整体评论提交", async () => {
     const wrapper = mountPanel();
     await wrapper.get("button.btn-primary").trigger("click");
@@ -463,8 +592,133 @@ describe("AiReviewPanel", () => {
     await wrapper.setProps({ headSha: "head-sha-2" });
 
     expect(wrapper.get(".draft-panel button.btn-primary").attributes("disabled")).toBeDefined();
-    expect(wrapper.get("textarea").element.value).toContain("这里可能产生竞态");
+    expect(
+      wrapper.get<HTMLTextAreaElement>("textarea[aria-label='评审草稿内容']").element.value,
+    ).toContain("这里可能产生竞态");
     expect(reviewCommentAdd).not.toHaveBeenCalled();
+  });
+
+  it("提交前重新读取远端版本并拒绝已变化的 SHA", async () => {
+    const wrapper = mountPanel();
+    await wrapper.get(".ai-toolbar button.btn-primary").trigger("click");
+    await flushPromises();
+    finishReview();
+    await wrapper.vm.$nextTick();
+    wrapper.findComponent(AiSuggestionCard).vm.$emit("action", "accept");
+    await wrapper.vm.$nextTick();
+    vi.mocked(prDetail).mockResolvedValueOnce(prDetailResult("remote-head-sha-2"));
+
+    await wrapper.get(".draft-panel button.btn-primary").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("草稿版本校验失败");
+    expect(reviewCommentAdd).not.toHaveBeenCalled();
+  });
+
+  it("提交前拒绝当前 Diff 中已不存在的评论位置", async () => {
+    const wrapper = mountPanel();
+    await wrapper.get(".ai-toolbar button.btn-primary").trigger("click");
+    await flushPromises();
+    finishReview();
+    await wrapper.vm.$nextTick();
+    wrapper.findComponent(AiSuggestionCard).vm.$emit("action", "accept");
+    await wrapper.vm.$nextTick();
+    vi.mocked(prDiff).mockResolvedValueOnce({
+      diff: "+changed",
+      files: [],
+      patch_schema_version: 1,
+      patches: [],
+    });
+
+    await wrapper.get(".draft-panel button.btn-primary").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("草稿位置已失效");
+    expect(reviewCommentAdd).not.toHaveBeenCalled();
+  });
+
+  it("允许提交跨越相邻 Diff hunk 的有效评论范围", async () => {
+    const wrapper = mountPanel();
+    await wrapper.get(".ai-toolbar button.btn-primary").trigger("click");
+    await flushPromises();
+    finishReview([
+      {
+        file: "src/main.ts",
+        line_start: 8,
+        line_end: 15,
+        severity: "major",
+        category: "逻辑",
+        description: "跨 hunk 的逻辑问题",
+        suggestion: null,
+      },
+    ]);
+    await wrapper.vm.$nextTick();
+    wrapper.findComponent(AiSuggestionCard).vm.$emit("action", "accept");
+    await wrapper.vm.$nextTick();
+    vi.mocked(prDiff).mockResolvedValueOnce({
+      diff: "+changed",
+      files: [],
+      patch_schema_version: 1,
+      patches: [
+        {
+          filename: "src/main.ts",
+          old_path: "src/main.ts",
+          new_path: "src/main.ts",
+          status: "modified",
+          additions: 20,
+          deletions: 0,
+          content_kind: "text",
+          patch: "",
+          message: null,
+          hunks: [
+            {
+              header: "@@ -1,10 +1,10 @@",
+              old_start: 1,
+              old_count: 10,
+              new_start: 1,
+              new_count: 10,
+              section_header: null,
+              lines: Array.from({ length: 10 }, (_, index) => ({
+                kind: "context" as const,
+                content: "line",
+                old_line: index + 1,
+                new_line: index + 1,
+              })),
+            },
+            {
+              header: "@@ -11,10 +11,10 @@",
+              old_start: 11,
+              old_count: 10,
+              new_start: 11,
+              new_count: 10,
+              section_header: null,
+              lines: Array.from({ length: 10 }, (_, index) => ({
+                kind: "context" as const,
+                content: "line",
+                old_line: index + 11,
+                new_line: index + 11,
+              })),
+            },
+          ],
+        },
+      ],
+    });
+
+    await wrapper.get(".draft-panel button.btn-primary").trigger("click");
+    await flushPromises();
+
+    expect(reviewCommentAdd).toHaveBeenCalledWith(
+      "github",
+      "octocat",
+      "hello-world",
+      42,
+      "head-sha-1",
+      "src/main.ts",
+      8,
+      15,
+      "right",
+      "跨 hunk 的逻辑问题",
+    );
   });
 
   it("部分成功时只保留失败草稿", async () => {
@@ -503,7 +757,9 @@ describe("AiReviewPanel", () => {
     await flushPromises();
 
     expect(wrapper.findAll(".draft-item")).toHaveLength(1);
-    expect(wrapper.get("textarea").element.value).toBe("第二条");
+    expect(
+      wrapper.get<HTMLTextAreaElement>("textarea[aria-label='评审草稿内容']").element.value,
+    ).toBe("第二条");
     expect(wrapper.text()).toContain("已提交 1 条，1 条失败：远端拒绝评论");
   });
 
@@ -525,6 +781,28 @@ describe("AiReviewPanel", () => {
     expect(wrapper.findAll(".draft-item")).toHaveLength(1);
   });
 
+  it("重新挂载后恢复统一草稿及其对应的历史评审", async () => {
+    const first = mountPanel();
+    await first.get(".ai-toolbar button.btn-primary").trigger("click");
+    await flushPromises();
+    finishReview();
+    await first.vm.$nextTick();
+    first.findComponent(AiSuggestionCard).vm.$emit("action", "accept");
+    await first.vm.$nextTick();
+    first.unmount();
+    await flushPromises();
+
+    setActivePinia(createPinia());
+    const restored = mountPanel();
+    await restored.vm.$nextTick();
+
+    expect(restored.findAll(".draft-item")).toHaveLength(1);
+    expect(
+      restored.get<HTMLTextAreaElement>("textarea[aria-label='评审草稿内容']").element.value,
+    ).toContain("这里可能产生竞态");
+    expect(restored.text()).toContain("评审版本：head-sha-1");
+  });
+
   it("拒绝提交空白草稿", async () => {
     const wrapper = mountPanel();
     await wrapper.get("button.btn-primary").trigger("click");
@@ -533,7 +811,7 @@ describe("AiReviewPanel", () => {
     await wrapper.vm.$nextTick();
     wrapper.findComponent(AiSuggestionCard).vm.$emit("action", "accept");
     await wrapper.vm.$nextTick();
-    await wrapper.get("textarea").setValue("   ");
+    await wrapper.get("textarea[aria-label='评审草稿内容']").setValue("   ");
     await wrapper.get(".draft-panel button.btn-primary").trigger("click");
 
     expect(wrapper.text()).toContain("评审草稿内容不能为空");

@@ -292,7 +292,7 @@ legend {
 }
 
 .toggle input:focus-visible + .toggle-slider {
-  box-shadow: 0 0 0 2px var(--color-focus);
+  box-shadow: var(--shadow-control-focus);
 }
 
 .toggle input:disabled + .toggle-slider {

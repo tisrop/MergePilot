@@ -3,6 +3,7 @@ import LoginPage from "@/pages/LoginPage.vue";
 import PrListPage from "@/pages/PrListPage.vue";
 import ReviewInboxPage from "@/pages/ReviewInboxPage.vue";
 import PrDetailPage from "@/pages/PrDetailPage.vue";
+import PrNewPage from "@/pages/PrNewPage.vue";
 import IssueListPage from "@/pages/IssueListPage.vue";
 import IssueNewPage from "@/pages/IssueNewPage.vue";
 import SettingsPage from "@/pages/SettingsPage.vue";
@@ -29,6 +30,19 @@ const routes = [
     path: "/pr",
     name: "pr-list",
     component: PrListPage,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/pr/new",
+    redirect: () => ({
+      name: "pr-new",
+      params: { platform: useAuthStore().activePlatform },
+    }),
+  },
+  {
+    path: "/pr/new/:platform",
+    name: "pr-new",
+    component: PrNewPage,
     meta: { requiresAuth: true },
   },
   {
@@ -70,11 +84,13 @@ router.beforeEach(async (to, _from, next) => {
   const store = useAuthStore();
   const routePlatform = parsePlatform(to.params.platform);
   const loginPlatform = to.path === "/login" ? parsePlatform(to.query.platform) : undefined;
-  const targetPlatform = routePlatform ?? loginPlatform;
+  const creationPlatform = to.name === "pr-new" ? parsePlatform(to.params.platform) : undefined;
+  const targetPlatform = routePlatform ?? loginPlatform ?? creationPlatform;
   const requiresAuthentication = Boolean(to.meta.requiresAuth);
 
-  if (loginPlatform) {
-    store.setActivePlatform(loginPlatform);
+  const explicitPlatform = routePlatform ?? loginPlatform ?? creationPlatform;
+  if (explicitPlatform) {
+    store.setActivePlatform(explicitPlatform);
   }
 
   let isLoggedIn = targetPlatform
@@ -84,7 +100,7 @@ router.beforeEach(async (to, _from, next) => {
   // 显式进入登录页时不再用持久化 Token 自动恢复，否则侧栏刚显示“未登录”时，
   // 路由守卫可能又把用户重定向回工作台，表现为登录链接无法打开。
   if (requiresAuthentication && !isLoggedIn) {
-    await store.restoreSession(routePlatform);
+    await store.restoreSession(targetPlatform);
     isLoggedIn = targetPlatform
       ? (store.platforms[targetPlatform]?.isLoggedIn ?? false)
       : store.isLoggedIn;

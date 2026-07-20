@@ -61,17 +61,20 @@ function selectPlatform(platform: Platform): void {
 function selectRepository(platform: Platform, repository: RepoSummary): void {
   auth.setActivePlatform(platform);
   const target = repositoryTarget(repository);
-  repo.setActiveRepo(target.owner, target.repo);
+  repo.setActiveRepo(target.owner, target.repo, platform);
   if (repository.fork) {
     const [forkOwner, ...forkRepoParts] = repository.full_name.split("/");
-    repo.setForkContext({
-      upstreamFullName: repository.parent_full_name,
-      upstreamOwner: repository.parent_owner,
-      forkOwner,
-      forkRepo: forkRepoParts.join("/"),
-    });
+    repo.setForkContext(
+      {
+        upstreamFullName: repository.parent_full_name,
+        upstreamOwner: repository.parent_owner,
+        forkOwner,
+        forkRepo: forkRepoParts.join("/"),
+      },
+      platform,
+    );
   } else {
-    repo.setForkContext(null);
+    repo.setForkContext(null, platform);
   }
   pr.clearContext();
   void router.push({ name: "pr-list", query: { _t: Date.now().toString() } });
@@ -84,8 +87,8 @@ function openPullRequest(
   number: number,
 ): void {
   auth.setActivePlatform(platform);
-  repo.setActiveRepo(owner, repository);
-  repo.setForkContext(null);
+  repo.setActiveRepo(owner, repository, platform);
+  repo.setForkContext(null, platform);
   pr.clearContext();
   void router.push({
     name: "pr-detail",
@@ -444,7 +447,13 @@ defineExpose({ open: openPalette, close: closePalette });
 }
 
 .command-search:focus-within {
-  box-shadow: inset 0 -2px var(--color-focus);
+  background: var(--color-control-highlight);
+  box-shadow: inset 0 -1px var(--color-focus);
+}
+
+.command-search input:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 0;
 }
 
 kbd {
