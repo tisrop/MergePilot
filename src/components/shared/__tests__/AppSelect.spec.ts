@@ -78,6 +78,29 @@ describe("AppSelect", () => {
     expect(wrapper.findAll(".dropdown-option")).toHaveLength(3);
   });
 
+  it("方向键在列表边界循环并跳过禁用项", async () => {
+    const wrapper = mount(AppSelect, {
+      props: {
+        modelValue: "release/1.0",
+        options: [options[0], { ...options[1], disabled: true }, options[2]],
+      },
+    });
+    const trigger = wrapper.get('[role="combobox"]');
+
+    await trigger.trigger("click");
+    expect(wrapper.get(".dropdown-option.highlighted").attributes("data-value")).toBe(
+      "release/1.0",
+    );
+
+    await trigger.trigger("keydown", { key: "ArrowDown" });
+    expect(wrapper.get(".dropdown-option.highlighted").attributes("data-value")).toBe("main");
+
+    await trigger.trigger("keydown", { key: "ArrowUp" });
+    expect(wrapper.get(".dropdown-option.highlighted").attributes("data-value")).toBe(
+      "release/1.0",
+    );
+  });
+
   it("有下一页时在下拉内触发加载更多并保持展开", async () => {
     const wrapper = mount(AppSelect, {
       props: {

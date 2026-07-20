@@ -48,10 +48,12 @@ export function useSelectDropdown<T extends DropdownOptionLike>(config: SelectDr
   }
 
   function findEnabledIndex(start: number, direction: 1 | -1): number {
-    let index = start;
-    while (index >= 0 && index < filteredOptions.value.length) {
+    const optionCount = filteredOptions.value.length;
+    if (optionCount === 0) return -1;
+    let index = ((start % optionCount) + optionCount) % optionCount;
+    for (let checked = 0; checked < optionCount; checked += 1) {
       if (!filteredOptions.value[index].disabled) return index;
-      index += direction;
+      index = (index + direction + optionCount) % optionCount;
     }
     return -1;
   }
