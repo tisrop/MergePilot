@@ -69,6 +69,67 @@ fn validate_metadata_update(mut update: PrMetadataUpdate) -> Result<PrMetadataUp
     Ok(update)
 }
 
+fn validate_create_reference(value: &str, label: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err(format!("{label}不能为空"));
+    }
+    if value.chars().count() > 512 || value.contains(['\0', '\n', '\r']) {
+        return Err(format!("{label}过长或包含非法字符"));
+    }
+    Ok(())
+}
+
+fn validate_create_preview_request(mut request: PrCreatePreviewRequest) -> Result<PrCreatePreviewRequest, String> {
+    request.source_owner = request.source_owner.trim().to_string();
+    request.source_repo = request.source_repo.trim().to_string();
+    request.source_branch = request.source_branch.trim().to_string();
+    request.target_branch = request.target_branch.trim().to_string();
+    request.commit_sha = request.commit_sha.and_then(|sha| {
+        let sha = sha.trim().to_string();
+        (!sha.is_empty()).then_some(sha)
+    });
+    for (value, label) in [
+        (&request.source_owner, "源仓库 owner"),
+        (&request.source_repo, "源仓库名称"),
+        (&request.source_branch, "源分支"),
+        (&request.target_branch, "目标分支"),
+    ] {
+        validate_create_reference(value, label)?;
+    }
+    if let Some(commit_sha) = request.commit_sha.as_deref() {
+        validate_create_reference(commit_sha, "提交 SHA")?;
+    }
+    Ok(request)
+}
+
+fn validate_create_request(mut request: PrCreateRequest) -> Result<PrCreateRequest, String> {
+    let references = validate_create_preview_request(PrCreatePreviewRequest {
+        source_owner: request.source_owner,
+        source_repo: request.source_repo,
+        source_branch: request.source_branch,
+        target_branch: request.target_branch,
+        commit_sha: None,
+    })?;
+    request.source_owner = references.source_owner;
+    request.source_repo = references.source_repo;
+    request.source_branch = references.source_branch;
+    request.target_branch = references.target_branch;
+    request.title = request.title.trim().to_string();
+    if request.title.is_empty() {
+        return Err("PR 标题不能为空".into());
+    }
+    if request.title.chars().count() > 1024 || request.title.contains(['\0', '\n', '\r']) {
+        return Err("PR 标题过长或包含非法字符".into());
+    }
+    if request.body.len() > 1_048_576 || request.body.contains('\0') {
+        return Err("PR 描述过长或包含非法字符".into());
+    }
+    request.reviewers = normalized_values(request.reviewers, "评审者")?;
+    request.assignees = normalized_values(request.assignees, "Assignee")?;
+    request.labels = normalized_values(request.labels, "标签")?;
+    Ok(request)
+}
+
 fn normalized_user_logins(users: &[User]) -> BTreeSet<String> {
     users.iter().map(|user| user.login.trim().to_lowercase()).filter(|login| !login.is_empty()).collect()
 }
@@ -186,6 +247,190 @@ pub async fn pr_detail(
 ) -> Result<PrDetail, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
     p.get_pull_request(&owner, &repo, number).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn pr_branches(
+    state: State<'_, AppState>,
+    platform: String,
+    owner: String,
+    repo: String,
+) -> Result<PrBranchOptions, String> {
+    let owner = owner.trim().to_string();
+    let repo = repo.trim().to_string();
+    if owner.is_empty() || repo.is_empty() {
+        return Err("仓库 owner 和名称不能为空".into());
+    }
+    let p = build_platform(&platform, &state).map_err(|error| error.to_string())?;
+    p.list_branches(&owner, &repo).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn pr_labels(
+    state: State<'_, AppState>,
+    platform: String,
+    owner: String,
+    repo: String,
+) -> Result<Vec<PrLabel>, String> {
+    let owner = owner.trim().to_string();
+    let repo = repo.trim().to_string();
+    if owner.is_empty() || repo.is_empty() {
+        return Err("仓库 owner 和名称不能为空".into());
+    }
+    let p = build_platform(&platform, &state).map_err(|error| error.to_string())?;
+    p.list_labels(&owner, &repo).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn pr_participant_suggestions(
+    state: State<'_, AppState>,
+    platform: String,
+    owner: String,
+    repo: String,
+) -> Result<Vec<User>, String> {
+    let owner = owner.trim().to_string();
+    let repo = repo.trim().to_string();
+    if owner.is_empty() || repo.is_empty() {
+        return Err("仓库 owner 和名称不能为空".into());
+    }
+    let p = build_platform(&platform, &state).map_err(|error| error.to_string())?;
+    p.list_pr_participant_suggestions(&owner, &repo).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn pr_create_preview(
+    state: State<'_, AppState>,
+    platform: String,
+    owner: String,
+    repo: String,
+    request: PrCreatePreviewRequest,
+) -> Result<PrCreatePreview, String> {
+    let owner = owner.trim().to_string();
+    let repo = repo.trim().to_string();
+    validate_create_reference(&owner, "目标仓库 owner")?;
+    validate_create_reference(&repo, "目标仓库名称")?;
+    let request = validate_create_preview_request(request)?;
+    if request.source_owner == owner && request.source_repo == repo && request.source_branch == request.target_branch {
+        return Err("同一仓库的源分支和目标分支不能相同".into());
+    }
+    let capabilities = capabilities_for(&platform).ok_or_else(|| format!("不支持的平台：{platform}"))?;
+    if !capabilities.supports_pr_creation {
+        return Err("当前平台不支持创建 PR / MR".into());
+    }
+
+    let p = build_platform(&platform, &state).map_err(|error| error.to_string())?;
+    let preview = p.preview_pull_request(&owner, &repo, &request).await.map_err(|error| error.to_string())?;
+    let patches = standardize_patches(&preview.diff, &preview.files);
+    Ok(PrCreatePreview {
+        commits: preview.commits,
+        incomplete: preview.incomplete,
+        diff: DiffResult {
+            diff: preview.diff,
+            files: preview.files,
+            patch_schema_version: PATCH_SCHEMA_VERSION,
+            patches,
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn pr_create(
+    state: State<'_, AppState>,
+    platform: String,
+    owner: String,
+    repo: String,
+    request: PrCreateRequest,
+) -> Result<PrCreateOutcome, String> {
+    let owner = owner.trim().to_string();
+    let repo = repo.trim().to_string();
+    if owner.is_empty() || repo.is_empty() {
+        return Err("目标仓库 owner 和名称不能为空".into());
+    }
+    let request = validate_create_request(request)?;
+    if request.source_owner == owner && request.source_repo == repo && request.source_branch == request.target_branch {
+        return Err("同一仓库的源分支和目标分支不能相同".into());
+    }
+    let capabilities = capabilities_for(&platform).ok_or_else(|| format!("不支持的平台：{platform}"))?;
+    if !capabilities.supports_pr_creation {
+        return Err("当前平台不支持创建 PR / MR".into());
+    }
+    if request.draft && !capabilities.supports_pr_draft_toggle {
+        return Err("当前平台不支持创建 Draft PR / MR".into());
+    }
+
+    let p = build_platform(&platform, &state).map_err(|error| error.to_string())?;
+    let number = p.create_pull_request(&owner, &repo, &request).await.map_err(|error| error.to_string())?;
+    let mut detail = match p.get_pull_request(&owner, &repo, number).await {
+        Ok(detail) => detail,
+        Err(error) => {
+            return Ok(PrCreateOutcome {
+                number,
+                detail: None,
+                updated_fields: Vec::new(),
+                failures: vec![PrMetadataUpdateFailure {
+                    field: PrMetadataField::Refresh,
+                    message: format!("PR / MR 已创建，但刷新详情失败：{error}"),
+                }],
+            });
+        }
+    };
+
+    let update = PrMetadataUpdate {
+        title: detail.summary.title.clone(),
+        body: detail.body.clone(),
+        draft: detail.draft,
+        reviewers: request.reviewers,
+        assignees: request.assignees,
+        labels: request.labels,
+        milestone: detail.milestone.as_ref().map(|milestone| milestone.title.clone()),
+        expected_updated_at: detail.summary.updated_at.clone(),
+    };
+    let changed_fields = metadata_changed_fields(&detail, &update);
+    let mut failures = Vec::new();
+    for field in &changed_fields {
+        if let Err(message) = ensure_metadata_field_available(*field, &capabilities, &detail.metadata_permissions) {
+            failures.push(PrMetadataUpdateFailure { field: *field, message });
+        }
+    }
+    let writable_fields = changed_fields
+        .iter()
+        .copied()
+        .filter(|field| !failures.iter().any(|failure| failure.field == *field))
+        .collect::<Vec<_>>();
+    let mut safe_update = update;
+    if !writable_fields.contains(&PrMetadataField::Reviewers) {
+        safe_update.reviewers = detail.reviewers.iter().map(|user| user.login.clone()).collect();
+    }
+    if !writable_fields.contains(&PrMetadataField::Assignees) {
+        safe_update.assignees = detail.assignees.iter().map(|user| user.login.clone()).collect();
+    }
+    if !writable_fields.contains(&PrMetadataField::Labels) {
+        safe_update.labels = detail.summary.labels.clone();
+    }
+
+    let mut updated_fields = Vec::new();
+    if !writable_fields.is_empty() {
+        match p.update_pull_request_metadata(&owner, &repo, number, &detail, &safe_update).await {
+            Ok(mutation) => {
+                updated_fields = mutation.updated_fields;
+                failures.extend(mutation.failures);
+                match p.get_pull_request(&owner, &repo, number).await {
+                    Ok(refreshed) => detail = refreshed,
+                    Err(error) => failures.push(PrMetadataUpdateFailure {
+                        field: PrMetadataField::Refresh,
+                        message: format!("参与者或标签写入后刷新详情失败：{error}"),
+                    }),
+                }
+            }
+            Err(error) => {
+                for field in writable_fields {
+                    failures.push(PrMetadataUpdateFailure { field, message: error.to_string() });
+                }
+            }
+        }
+    }
+
+    Ok(PrCreateOutcome { number, detail: Some(detail), updated_fields, failures })
 }
 
 #[tauri::command]
@@ -368,10 +613,12 @@ pub async fn pr_reopen(
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_metadata_field_available, metadata_changed_fields, validate_compare_request, validate_metadata_update,
+        ensure_metadata_field_available, metadata_changed_fields, validate_compare_request,
+        validate_create_preview_request, validate_create_request, validate_metadata_update,
     };
     use crate::models::{
-        PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate, PrMilestone, PrState, PrSummary, User,
+        PrCreatePreviewRequest, PrCreateRequest, PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate,
+        PrMilestone, PrState, PrSummary, User,
     };
     use crate::platform::capabilities_for;
 
@@ -424,6 +671,21 @@ mod tests {
         }
     }
 
+    fn create_request() -> PrCreateRequest {
+        PrCreateRequest {
+            source_owner: " contributor ".into(),
+            source_repo: " repo ".into(),
+            source_branch: " feature ".into(),
+            target_branch: " main ".into(),
+            title: " Add feature ".into(),
+            body: "Description".into(),
+            draft: true,
+            reviewers: vec![" Alice ".into(), "alice".into()],
+            assignees: vec![],
+            labels: vec!["feature".into(), "FEATURE".into()],
+        }
+    }
+
     #[test]
     fn compare_request_accepts_distinct_commit_versions() {
         assert!(validate_compare_request("owner", "repo", "abc123", "def456").is_ok());
@@ -457,6 +719,52 @@ mod tests {
         assert_eq!(normalized.reviewers, vec!["Alice", "Bob"]);
         assert_eq!(normalized.labels, vec!["bug"]);
         assert_eq!(normalized.milestone, None);
+    }
+
+    #[test]
+    fn create_request_normalizes_core_fields_and_lists() {
+        let normalized = validate_create_request(create_request()).expect("create request should be valid");
+        assert_eq!(normalized.source_owner, "contributor");
+        assert_eq!(normalized.source_branch, "feature");
+        assert_eq!(normalized.target_branch, "main");
+        assert_eq!(normalized.title, "Add feature");
+        assert_eq!(normalized.reviewers, vec!["Alice"]);
+        assert_eq!(normalized.labels, vec!["feature"]);
+    }
+
+    #[test]
+    fn create_request_rejects_missing_and_unsafe_fields() {
+        let mut candidate = create_request();
+        candidate.source_branch = " ".into();
+        assert!(validate_create_request(candidate).unwrap_err().contains("分支"));
+
+        let mut candidate = create_request();
+        candidate.title = "bad\ntitle".into();
+        assert!(validate_create_request(candidate).unwrap_err().contains("标题"));
+    }
+
+    #[test]
+    fn create_preview_request_normalizes_and_validates_references() {
+        let normalized = validate_create_preview_request(PrCreatePreviewRequest {
+            source_owner: " contributor ".into(),
+            source_repo: " repo ".into(),
+            source_branch: " feature ".into(),
+            target_branch: " main ".into(),
+            commit_sha: None,
+        })
+        .expect("preview references should be valid");
+        assert_eq!(normalized.source_owner, "contributor");
+        assert_eq!(normalized.target_branch, "main");
+
+        let error = validate_create_preview_request(PrCreatePreviewRequest {
+            source_owner: "contributor".into(),
+            source_repo: "repo".into(),
+            source_branch: "bad\nbranch".into(),
+            target_branch: "main".into(),
+            commit_sha: None,
+        })
+        .unwrap_err();
+        assert!(error.contains("源分支"));
     }
 
     #[test]

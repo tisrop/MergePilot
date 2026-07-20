@@ -35,6 +35,7 @@ const props = defineProps<{
   locationRequest?: DiffLocationRequest | null;
   threadSummary?: ReviewThreadSummary | null;
   canSyncViewedFiles?: boolean;
+  readOnly?: boolean;
 }>();
 
 const uiSettings = useUiSettingsStore();
@@ -1332,6 +1333,7 @@ function getSelectionRange(): {
 }
 
 function handleContextMenu(event: MouseEvent) {
+  if (props.readOnly) return;
   const target = event.target as HTMLElement;
   if (!containerRef.value?.contains(target)) return;
 
@@ -1350,6 +1352,22 @@ function handleContextMenu(event: MouseEvent) {
     selectedText: window.getSelection()?.toString().trim() || "",
   };
   quickBody.value = "";
+}
+
+let contextMenuListenerAttached = false;
+
+function syncContextMenuListener(readOnly = props.readOnly): void {
+  if (readOnly) {
+    if (contextMenuListenerAttached) {
+      document.removeEventListener("contextmenu", handleContextMenu, true);
+      contextMenuListenerAttached = false;
+    }
+    return;
+  }
+  if (!contextMenuListenerAttached) {
+    document.addEventListener("contextmenu", handleContextMenu, true);
+    contextMenuListenerAttached = true;
+  }
 }
 
 function handleDocClick() {
@@ -1424,11 +1442,16 @@ watch([quickCategory, quickSubCategory], async () => {
   }
 });
 
+watch(
+  () => props.readOnly,
+  (readOnly) => syncContextMenuListener(readOnly),
+);
+
 onMounted(() => {
   updateTopScrollbar();
   observeDiffSize();
   bindSideDiffScrollers();
-  document.addEventListener("contextmenu", handleContextMenu, true);
+  syncContextMenuListener();
   document.addEventListener("click", handleDocClick);
 });
 
@@ -1438,7 +1461,10 @@ onUnmounted(() => {
   for (const scroller of visibleSideDiffScrollers()) {
     scroller.removeEventListener("scroll", handleSideDiffScroll);
   }
-  document.removeEventListener("contextmenu", handleContextMenu, true);
+  if (contextMenuListenerAttached) {
+    document.removeEventListener("contextmenu", handleContextMenu, true);
+    contextMenuListenerAttached = false;
+  }
   document.removeEventListener("click", handleDocClick);
 });
 </script>

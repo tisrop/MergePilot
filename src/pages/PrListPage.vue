@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useRepoStore } from "@/stores/useRepoStore";
@@ -14,6 +14,7 @@ const route = useRoute();
 const auth = useAuthStore();
 const repo = useRepoStore();
 const pr = usePrStore();
+const createLabel = computed(() => (auth.activePlatform === "gitlab" ? "创建 MR" : "创建 PR"));
 
 async function fetchPrs() {
   if (!auth.isLoggedIn || !repo.activeRepo) return;
@@ -24,7 +25,7 @@ async function fetchPrs() {
 }
 
 function switchToFork() {
-  repo.switchForkView();
+  repo.switchForkView(auth.activePlatform);
 }
 
 onMounted(() => {
@@ -84,7 +85,20 @@ function onSelectPr(prNumber: number) {
           <p v-if="repo.activeFullName" class="repo-name">{{ repo.activeFullName }}</p>
           <p v-else class="repo-name">选择仓库后查看合并请求</p>
         </div>
-        <span v-if="pr.list.length" class="result-count">{{ pr.list.length }} 条结果</span>
+        <div class="header-actions">
+          <span v-if="pr.list.length" class="result-count">{{ pr.list.length }} 条结果</span>
+          <RouterLink
+            v-if="auth.isLoggedIn"
+            class="btn btn-sm btn-primary"
+            :to="{
+              name: 'pr-new',
+              params: { platform: auth.activePlatform },
+              query: { target: repo.activeFullName ?? undefined },
+            }"
+          >
+            {{ createLabel }}
+          </RouterLink>
+        </div>
       </div>
       <div v-if="repo.forkContext" class="fork-banner">
         <svg
@@ -267,6 +281,12 @@ function onSelectPr(prNumber: number) {
   background: var(--color-bg);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .fork-banner {

@@ -48,4 +48,28 @@ describe("登录路由守卫", () => {
 
     expect(router.currentRoute.value.path).toBe("/pr");
   });
+
+  it("进入创建页时使用路由中的平台上下文", async () => {
+    const store = useAuthStore();
+    store.setActivePlatform("github");
+    store.platforms.gitee = {
+      user: { id: 2, login: "gitee-user", name: "", avatar_url: "" },
+      isLoggedIn: true,
+    };
+
+    await router.push({ name: "pr-new", params: { platform: "gitee" } });
+
+    expect(router.currentRoute.value.name).toBe("pr-new");
+    expect(store.activePlatform).toBe("gitee");
+  });
+
+  it("旧创建页地址会规范化到当前平台路径", async () => {
+    const store = useAuthStore();
+    store.setActivePlatform("gitee");
+    store.platforms.gitee.isLoggedIn = true;
+
+    await router.push("/pr/new");
+
+    expect(router.currentRoute.value.fullPath).toBe("/pr/new/gitee");
+  });
 });

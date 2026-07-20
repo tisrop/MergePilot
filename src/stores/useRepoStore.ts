@@ -30,6 +30,8 @@ export const useRepoStore = defineStore("repo", () => {
   const errors = ref<Record<Platform, string | null>>(platformRecord(() => null));
   const failedPages = ref<Record<Platform, number | null>>(platformRecord(() => null));
   const requestSequences: Record<Platform, number> = platformRecord(() => 0);
+  const pendingFetches: Record<Platform, { sequence: number; promise: Promise<void> } | null> =
+    platformRecord(() => null);
 
   const activePlatform = computed(() => useAuthStore().activePlatform);
   const repos = computed(() => reposCache.value[activePlatform.value] ?? []);
@@ -74,33 +76,45 @@ export const useRepoStore = defineStore("repo", () => {
     });
   }
 
-  async function fetchRepos(platform: Platform, requestedPage: number = 1) {
+  function fetchRepos(platform: Platform, requestedPage: number = 1): Promise<void> {
     const sequence = ++requestSequences[platform];
     const loadingMoreRequest = requestedPage > 1;
     loadingByPlatform.value[platform] = !loadingMoreRequest;
     loadingMoreByPlatform.value[platform] = loadingMoreRequest;
     errors.value[platform] = null;
     failedPages.value[platform] = null;
-    try {
-      const result: Paginated<RepoSummary> = await repoList(platform, requestedPage);
-      if (sequence !== requestSequences[platform]) return;
-      reposCache.value[platform] =
-        requestedPage === 1
-          ? dedupeRepos(result.items)
-          : dedupeRepos([...reposCache.value[platform], ...result.items]);
-      pages.value[platform] = result.page;
-      totalPagesByPlatform.value[platform] = Math.max(result.total_pages, result.page);
-    } catch (cause) {
-      if (sequence === requestSequences[platform]) {
-        errors.value[platform] = typeof cause === "string" ? cause : String(cause);
-        failedPages.value[platform] = requestedPage;
+    const promise = (async () => {
+      try {
+        const result: Paginated<RepoSummary> = await repoList(platform, requestedPage);
+        if (sequence !== requestSequences[platform]) return;
+        reposCache.value[platform] =
+          requestedPage === 1
+            ? dedupeRepos(result.items)
+            : dedupeRepos([...reposCache.value[platform], ...result.items]);
+        pages.value[platform] = result.page;
+        totalPagesByPlatform.value[platform] = Math.max(result.total_pages, result.page);
+      } catch (cause) {
+        if (sequence === requestSequences[platform]) {
+          errors.value[platform] = typeof cause === "string" ? cause : String(cause);
+          failedPages.value[platform] = requestedPage;
+        }
+      } finally {
+        if (sequence === requestSequences[platform]) {
+          loadingByPlatform.value[platform] = false;
+          loadingMoreByPlatform.value[platform] = false;
+        }
+        if (pendingFetches[platform]?.sequence === sequence) {
+          pendingFetches[platform] = null;
+        }
       }
-    } finally {
-      if (sequence === requestSequences[platform]) {
-        loadingByPlatform.value[platform] = false;
-        loadingMoreByPlatform.value[platform] = false;
-      }
-    }
+    })();
+    pendingFetches[platform] = { sequence, promise };
+    return promise;
+  }
+
+  function ensureRepos(platform: Platform): Promise<void> {
+    if (reposCache.value[platform].length > 0) return Promise.resolve();
+    return pendingFetches[platform]?.promise ?? fetchRepos(platform);
   }
 
   function refreshRepos(platform: Platform) {
@@ -117,19 +131,20 @@ export const useRepoStore = defineStore("repo", () => {
     return fetchRepos(platform, failedPages.value[platform] ?? Math.max(pages.value[platform], 1));
   }
 
-  function setActiveRepo(owner: string, repo: string) {
-    activeRepos.value[activePlatform.value] = { owner, repo };
+  function setActiveRepo(owner: string, repo: string, platform: Platform = activePlatform.value) {
+    activeRepos.value[platform] = { owner, repo };
   }
-  function setForkContext(ctx: ForkContext | null) {
-    forkContexts.value[activePlatform.value] = ctx;
+  function setForkContext(ctx: ForkContext | null, platform: Platform = activePlatform.value) {
+    forkContexts.value[platform] = ctx;
   }
-  function switchForkView() {
-    const context = forkContext.value;
+  function switchForkView(platform: Platform = activePlatform.value) {
+    const context = forkContexts.value[platform];
+    const active = activeRepos.value[platform];
     if (!context) return;
-    if (viewingUpstream.value) {
-      activeRepo.value = { owner: context.forkOwner, repo: context.forkRepo };
+    if (active && context.upstreamOwner && active.owner === context.upstreamOwner) {
+      activeRepos.value[platform] = { owner: context.forkOwner, repo: context.forkRepo };
     } else if (context.upstreamFullName && context.upstreamOwner) {
-      activeRepo.value = {
+      activeRepos.value[platform] = {
         owner: context.upstreamOwner,
         repo: context.upstreamFullName.split("/").slice(1).join("/"),
       };
@@ -158,6 +173,7 @@ export const useRepoStore = defineStore("repo", () => {
     error,
     errors,
     fetchRepos,
+    ensureRepos,
     refreshRepos,
     loadMore,
     retry,

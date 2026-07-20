@@ -3,10 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PrDetailPage from "@/pages/PrDetailPage.vue";
 import type { PrDetail, PrMergeReadiness, User } from "@/types";
 import { APP_COMMAND_EVENT } from "@/types/commands";
+import {
+  persistPrCreateWarnings,
+  PR_CREATE_WARNING_QUERY,
+  readPrCreateWarnings,
+} from "@/utils/prCreateWarnings";
 
 const mocks = vi.hoisted(() => ({
   router: {
     push: vi.fn(),
+    replace: vi.fn().mockResolvedValue(undefined),
+  },
+  route: {
+    params: { platform: "github", owner: "owner", repo: "repo", number: "42" },
+    query: {} as Record<string, string | undefined>,
   },
   authStore: {
     platforms: {
@@ -58,9 +68,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("vue-router", () => ({
-  useRoute: () => ({
-    params: { platform: "github", owner: "owner", repo: "repo", number: "42" },
-  }),
+  useRoute: () => mocks.route,
   useRouter: () => mocks.router,
 }));
 vi.mock("@/stores/useAuthStore", () => ({ useAuthStore: () => mocks.authStore }));
@@ -151,6 +159,9 @@ function mountPage(stubs: Record<string, unknown> = {}) {
 describe("PrDetailPage 关闭权限", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.router.replace.mockResolvedValue(undefined);
+    mocks.route.query = {};
+    window.sessionStorage.clear();
     mocks.authStore.platforms.github.user = {
       id: 99,
       login: "reviewer",
@@ -413,6 +424,30 @@ describe("PrDetailPage 关闭权限", () => {
 
     expect(wrapper.text()).toContain("部分元数据已更新，请检查失败项。");
     expect(wrapper.text()).toContain("部分评审者不存在");
+  });
+
+  it("从会话暂存恢复创建后的部分成功警告", async () => {
+    persistPrCreateWarnings("github", "owner", "repo", 42, ["部分标签不存在"]);
+    mocks.route.query = { [PR_CREATE_WARNING_QUERY]: "1" };
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("PR / MR 已创建，但部分后续操作失败。");
+    expect(wrapper.text()).toContain("部分标签不存在");
+    expect(mocks.router.replace).toHaveBeenCalledWith({ query: {} });
+    expect(readPrCreateWarnings("github", "owner", "repo", 42)).toEqual([]);
+  });
+
+  it("会话暂存缺失时仍根据 query 展示部分成功警告", async () => {
+    mocks.route.query = { [PR_CREATE_WARNING_QUERY]: "1" };
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("PR / MR 已创建，但部分后续操作失败。");
+    expect(wrapper.text()).toContain("部分参与者或标签可能未能写入");
+    expect(mocks.router.replace).toHaveBeenCalledWith({ query: {} });
   });
 
   it("响应命令面板的 AI 评审和提交评审入口", async () => {

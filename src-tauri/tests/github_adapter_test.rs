@@ -1,7 +1,7 @@
 use mergebeacon_lib::http_client::HttpClient;
 use mergebeacon_lib::models::{
-    PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate, PrMilestone, PrState, PrSummary,
-    ReadinessState, ReviewInboxCategory, ReviewInboxRelationship, User,
+    PrCreatePreviewRequest, PrCreateRequest, PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate,
+    PrMilestone, PrState, PrSummary, ReadinessState, ReviewInboxCategory, ReviewInboxRelationship, User,
 };
 use mergebeacon_lib::platform::{github::GitHubAdapter, GitPlatform};
 use wiremock::matchers::{body_json, body_string_contains, header, method, path, query_param};
@@ -67,6 +67,300 @@ async fn test_github_current_user() {
     let user = adapter.current_user().await.expect("should fetch user");
     assert_eq!(user.login, "testuser");
     assert_eq!(user.name, "Test User");
+}
+
+#[tokio::test]
+async fn test_github_lists_branches_and_creates_draft_from_fork() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/branches"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "name": "main" },
+            { "name": "feature" }
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "default_branch": "feature"
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/repos/octocat/hello-world/pulls"))
+        .and(body_json(serde_json::json!({
+            "title": "Add feature",
+            "body": "Description",
+            "head": "contributor:feature",
+            "base": "main",
+            "draft": true
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({ "number": 51 })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/compare/main...contributor%3Afeature"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "commits": [{
+                "sha": "abc123",
+                "commit": {
+                    "message": "Add feature\n\nDetails",
+                    "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
+                }
+            }],
+            "files": [{
+                "filename": "src/main.rs",
+                "status": "modified",
+                "patch": "@@ -1 +1 @@\n-old\n+new",
+                "additions": 1,
+                "deletions": 1
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GitHubAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let branch_options = adapter.list_branches("octocat", "hello-world").await.unwrap();
+    assert_eq!(branch_options.branches, vec!["main", "feature"]);
+    assert_eq!(branch_options.default_branch.as_deref(), Some("feature"));
+    let preview = adapter
+        .preview_pull_request(
+            "octocat",
+            "hello-world",
+            &PrCreatePreviewRequest {
+                source_owner: "contributor".into(),
+                source_repo: "hello-world".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(preview.commits[0].title, "Add feature");
+    assert_eq!(preview.files[0].filename, "src/main.rs");
+    assert!(!preview.incomplete);
+    let number = adapter
+        .create_pull_request(
+            "octocat",
+            "hello-world",
+            &PrCreateRequest {
+                source_owner: "contributor".into(),
+                source_repo: "hello-world".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                title: "Add feature".into(),
+                body: "Description".into(),
+                draft: true,
+                reviewers: vec![],
+                assignees: vec![],
+                labels: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(number, 51);
+}
+
+#[tokio::test]
+async fn test_github_create_compare_marks_an_incomplete_preview() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/compare/main...feature"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_commits": 2,
+            "commits": [{
+                "sha": "abc123",
+                "commit": {
+                    "message": "First commit",
+                    "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
+                }
+            }],
+            "files": [{
+                "filename": "src/main.rs",
+                "status": "modified",
+                "patch": "@@ -1 +1 @@\n-old\n+new"
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GitHubAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let preview = adapter
+        .preview_pull_request(
+            "octocat",
+            "hello-world",
+            &PrCreatePreviewRequest {
+                source_owner: "octocat".into(),
+                source_repo: "hello-world".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(preview.incomplete);
+    assert_eq!(preview.commits.len(), 1);
+    assert_eq!(preview.files.len(), 1);
+}
+
+#[tokio::test]
+async fn test_github_lists_all_branch_pages() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/branches"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header(
+                    "link",
+                    "<https://api.github.test/repos/octocat/hello-world/branches?per_page=100&page=2>; rel=\"next\", <https://api.github.test/repos/octocat/hello-world/branches?per_page=100&page=2>; rel=\"last\"",
+                )
+                .set_body_json(serde_json::json!([{ "name": "main" }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/branches"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "name": "feature-101" }])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "default_branch": "main"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let branches = adapter.list_branches("octocat", "hello-world").await.unwrap();
+
+    assert_eq!(branches.branches, vec!["main", "feature-101"]);
+}
+
+#[tokio::test]
+async fn test_github_lists_repository_labels() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/labels"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header(
+                    "link",
+                    "<https://api.github.test/repos/octocat/hello-world/labels?per_page=100&page=2>; rel=\"next\", <https://api.github.test/repos/octocat/hello-world/labels?per_page=100&page=2>; rel=\"last\"",
+                )
+                .set_body_json(serde_json::json!([{ "name": "bug", "color": "d73a4a", "description": "Needs fixing" }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/labels"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "name": "feature" }])))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let labels = adapter.list_labels("octocat", "hello-world").await.unwrap();
+
+    assert_eq!(labels.iter().map(|label| label.name.as_str()).collect::<Vec<_>>(), vec!["bug", "feature"]);
+    assert_eq!(labels[0].color.as_deref(), Some("d73a4a"));
+    assert_eq!(labels[0].description.as_deref(), Some("Needs fixing"));
+}
+
+#[tokio::test]
+async fn test_github_lists_pr_participant_suggestions() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/assignees"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .and(header("Authorization", "Bearer token"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header(
+                    "link",
+                    "<https://api.github.test/repos/octocat/hello-world/assignees?per_page=100&page=2>; rel=\"next\", <https://api.github.test/repos/octocat/hello-world/assignees?per_page=100&page=2>; rel=\"last\"",
+                )
+                .set_body_json(serde_json::json!([{
+                    "id": 1,
+                    "login": "alice",
+                    "avatar_url": "https://example.com/alice.png"
+                }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/assignees"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+            "id": 2,
+            "login": "bob",
+            "avatar_url": ""
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let users = adapter.list_pr_participant_suggestions("octocat", "hello-world").await.unwrap();
+
+    assert_eq!(users.iter().map(|user| user.login.as_str()).collect::<Vec<_>>(), vec!["alice", "bob"]);
+    assert_eq!(users[0].avatar_url, "https://example.com/alice.png");
+}
+
+#[tokio::test]
+async fn test_github_previews_a_single_commit() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/contributor/hello-world/commits/abc123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "sha": "abc123",
+            "commit": {
+                "message": "Only this commit\n\nDetails",
+                "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
+            },
+            "files": [{
+                "filename": "src/commit.rs",
+                "status": "modified",
+                "patch": "@@ -1 +1 @@\n-old\n+new",
+                "additions": 1,
+                "deletions": 1
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GitHubAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let preview = adapter
+        .preview_pull_request(
+            "octocat",
+            "hello-world",
+            &PrCreatePreviewRequest {
+                source_owner: "contributor".into(),
+                source_repo: "hello-world".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                commit_sha: Some("abc123".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(preview.commits[0].title, "Only this commit");
+    assert_eq!(preview.files[0].filename, "src/commit.rs");
 }
 
 #[tokio::test]

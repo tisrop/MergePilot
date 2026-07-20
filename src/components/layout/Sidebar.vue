@@ -8,22 +8,32 @@ import { useUiSettingsStore } from "@/stores/useUiSettingsStore";
 import type { Platform, RepoSummary } from "@/types";
 import BrandMark from "@/components/shared/BrandMark.vue";
 
-const props = withDefaults(defineProps<{ isDiffFocusMode?: boolean }>(), {
-  isDiffFocusMode: false,
-});
+const props = withDefaults(
+  defineProps<{
+    isDiffFocusMode?: boolean;
+    compactSidebar?: boolean;
+  }>(),
+  {
+    isDiffFocusMode: false,
+    compactSidebar: false,
+  },
+);
 
 interface OwnerGroup {
+  platform: Platform;
   owner: string;
   isOrganization: boolean;
   repos: RepoSummary[];
 }
 
 const repoGroups = computed(() => {
+  const platform = auth.activePlatform;
   const groups = new Map<string, OwnerGroup>();
   for (const r of repo.repos) {
     const key = r.owner;
     if (!groups.has(key)) {
       groups.set(key, {
+        platform,
         owner: r.owner_display_name || r.owner,
         isOrganization:
           r.owner_type === "organization" ||
@@ -64,8 +74,9 @@ const activePlatformShortLabel = computed(() => {
   const labels: Record<Platform, string> = { github: "GH", gitlab: "GL", gitee: "GE" };
   return labels[auth.activePlatform];
 });
+const createLabel = computed(() => (auth.activePlatform === "gitlab" ? "创建 MR" : "创建 PR"));
 const isSidebarCollapsed = computed(
-  () => props.isDiffFocusMode && !uiSettings.isDiffSidebarExpanded,
+  () => props.compactSidebar || (props.isDiffFocusMode && !uiSettings.isDiffSidebarExpanded),
 );
 const compactRepoFullName = computed(() => {
   if (repo.activeFullName) return repo.activeFullName;
@@ -108,14 +119,17 @@ function selectPlatform(p: Platform) {
   pr.clearContext();
   if (route.name === "pr-detail") {
     void router.push({ name: "pr-list" });
+  } else if (route.name === "pr-new") {
+    void router.push({ name: "pr-new", params: { platform: p } });
   }
   if (auth.platforms[p].isLoggedIn && repo.reposCache[p].length === 0) {
     void repo.fetchRepos(p);
   }
 }
 
-function selectRepo(r: { owner: string; repo: string }) {
-  repo.setActiveRepo(r.owner, r.repo);
+function selectRepo(r: { owner: string; repo: string }, platform: Platform) {
+  auth.setActivePlatform(platform);
+  repo.setActiveRepo(r.owner, r.repo, platform);
   router.push({ path: "/pr", query: { _t: Date.now().toString() } });
 }
 
@@ -135,19 +149,22 @@ function effectiveRepo(r: RepoSummary): { owner: string; repo: string } {
   return getRepoOwner(r.full_name);
 }
 
-function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
+function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform) {
   const target = useUpstream ? effectiveRepo(r) : getRepoOwner(r.full_name);
-  selectRepo(target);
+  selectRepo(target, platform);
   const forkInfo = getRepoOwner(r.full_name);
   if (r.fork) {
-    repo.setForkContext({
-      upstreamFullName: r.parent_full_name ?? null,
-      upstreamOwner: r.parent_owner ?? null,
-      forkOwner: forkInfo.owner,
-      forkRepo: forkInfo.repo,
-    });
+    repo.setForkContext(
+      {
+        upstreamFullName: r.parent_full_name ?? null,
+        upstreamOwner: r.parent_owner ?? null,
+        forkOwner: forkInfo.owner,
+        forkRepo: forkInfo.repo,
+      },
+      platform,
+    );
   } else {
-    repo.setForkContext(null);
+    repo.setForkContext(null, platform);
   }
 }
 </script>
@@ -156,7 +173,10 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
   <aside
     id="app-sidebar"
     class="sidebar"
-    :class="{ 'is-collapsed': isSidebarCollapsed, 'is-focus-mode': isDiffFocusMode }"
+    :class="{
+      'is-collapsed': isSidebarCollapsed,
+      'is-focus-mode': isDiffFocusMode || compactSidebar,
+    }"
   >
     <div class="sidebar-header">
       <div class="sidebar-header-row">
@@ -264,7 +284,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
       </router-link>
       <router-link
         to="/pr"
-        :class="{ active: isActive('pr') }"
+        :class="{ active: route.name === 'pr-list' || route.name === 'pr-detail' }"
         aria-label="拉取请求（PR）"
         :title="isSidebarCollapsed ? '拉取请求（PR）' : undefined"
       >
@@ -285,6 +305,27 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
           <path d="M13 6h3a2 2 0 0 1 2 2v3" />
         </svg>
         <span class="nav-label">Pull Requests</span>
+      </router-link>
+      <router-link
+        :to="`/pr/new/${auth.activePlatform}`"
+        :class="{ active: route.name === 'pr-new' }"
+        :aria-label="createLabel"
+        :title="isSidebarCollapsed ? createLabel : undefined"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        <span class="nav-label">{{ createLabel }}</span>
       </router-link>
       <router-link
         to="/issue"
@@ -412,8 +453,9 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
             :title="r.fork && r.parent_full_name ? 'Fork from ' + r.parent_full_name : r.full_name"
             @click="
               r.fork
-                ? selectForkRepo(r, true)
-                : (selectRepo(getRepoOwner(r.full_name)), repo.setForkContext(null))
+                ? selectForkRepo(r, true, group.platform)
+                : (selectRepo(getRepoOwner(r.full_name), group.platform),
+                  repo.setForkContext(null, group.platform))
             "
           >
             <svg
@@ -477,7 +519,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean) {
         <span class="nav-label">设置</span>
       </router-link>
       <button
-        v-if="isSidebarCollapsed"
+        v-if="isSidebarCollapsed && !compactSidebar"
         class="sidebar-toggle"
         type="button"
         title="展开侧栏"

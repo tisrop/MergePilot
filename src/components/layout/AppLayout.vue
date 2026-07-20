@@ -4,9 +4,16 @@ import Sidebar from "./Sidebar.vue";
 import { useNotificationStore } from "@/stores/useNotificationStore";
 import type { Platform } from "@/types";
 
-withDefaults(defineProps<{ isDiffFocusMode?: boolean }>(), {
-  isDiffFocusMode: false,
-});
+withDefaults(
+  defineProps<{
+    isDiffFocusMode?: boolean;
+    compactSidebar?: boolean;
+  }>(),
+  {
+    isDiffFocusMode: false,
+    compactSidebar: false,
+  },
+);
 
 const notifications = useNotificationStore();
 const platformLabels: Record<Platform, string> = {
@@ -30,7 +37,7 @@ function formatCountdown(seconds: number): string {
 <template>
   <div class="app-layout">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
-    <Sidebar :is-diff-focus-mode="isDiffFocusMode" />
+    <Sidebar :is-diff-focus-mode="isDiffFocusMode" :compact-sidebar="compactSidebar" />
     <main id="main-content" class="main-content" tabindex="-1">
       <section
         v-if="notifications.showNotificationError"

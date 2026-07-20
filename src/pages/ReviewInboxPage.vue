@@ -125,8 +125,8 @@ function refresh(): void {
 function openItem(item: ReviewInboxItem): void {
   inbox.markRead(item);
   auth.setActivePlatform(item.platform);
-  repo.setActiveRepo(item.owner, item.repo);
-  repo.setForkContext(null);
+  repo.setActiveRepo(item.owner, item.repo, item.platform);
+  repo.setForkContext(null, item.platform);
   pr.clearContext();
   void router.push({
     name: "pr-detail",

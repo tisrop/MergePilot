@@ -41,6 +41,65 @@ impl GitLabAdapter {
         Ok(resp.json().await?)
     }
 
+    async fn list_commit_diffs(&self, project: &str, sha: &str) -> Result<(Vec<Value>, bool), AppError> {
+        const PAGE_SIZE: usize = 100;
+
+        let mut changes = Vec::new();
+        let mut incomplete = false;
+        let mut page = 1_u32;
+        loop {
+            let url = format!(
+                "{}/projects/{}/repository/commits/{}/diff?per_page={}&page={}",
+                self.base_url, project, sha, PAGE_SIZE, page
+            );
+            let response = self
+                .client
+                .get(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .header("User-Agent", "mergebeacon")
+                .send()
+                .await?;
+            let status = response.status();
+            let next_page_header = response.headers().get("x-next-page");
+            let next_page = next_page_header
+                .and_then(|value| value.to_str().ok())
+                .filter(|value| !value.is_empty())
+                .and_then(|value| value.parse::<u32>().ok())
+                .filter(|next| *next > page);
+            let total_pages = response
+                .headers()
+                .get("x-total-pages")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u32>().ok());
+            let pagination_known = next_page_header.is_some() || total_pages.is_some();
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(AppError::Api(format!("GitLab API {} ({}): {}", status, url, body)));
+            }
+            let page_changes: Vec<Value> = response.json().await?;
+            let page_size = page_changes.len();
+            incomplete |= page_changes.iter().any(|change| {
+                change["collapsed"].as_bool() == Some(true) || change["too_large"].as_bool() == Some(true)
+            });
+            changes.extend(page_changes);
+
+            if let Some(next) = next_page {
+                page = next;
+                continue;
+            }
+            if total_pages.is_some_and(|total| page < total) {
+                page = page.saturating_add(1);
+                continue;
+            }
+            if !pagination_known && page_size >= PAGE_SIZE {
+                incomplete = true;
+            }
+            break;
+        }
+
+        Ok((changes, incomplete))
+    }
+
     async fn post_json(&self, url: &str, body: &Value) -> Result<Value, AppError> {
         let resp = self
             .client
@@ -461,6 +520,43 @@ impl GitLabAdapter {
     }
 }
 #[async_trait]
+impl super::JsonPageSource for GitLabAdapter {
+    async fn fetch_json_page(&self, endpoint: &str, page: u32) -> Result<super::JsonPage, AppError> {
+        let url = format!("{endpoint}?per_page={}&page={page}", super::JSON_PAGE_SIZE);
+        let response = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .header("User-Agent", "mergebeacon")
+            .send()
+            .await?;
+        let status = response.status();
+        let next_page_header = response.headers().get("x-next-page");
+        let next_page = next_page_header
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.is_empty())
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|next| *next > page);
+        let total_pages = response
+            .headers()
+            .get("x-total-pages")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u32>().ok());
+        let pagination_known = next_page_header.is_some() || total_pages.is_some();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Api(format!("GitLab API {status} ({url}): {body}")));
+        }
+        let items = response.json().await?;
+        Ok(super::JsonPage {
+            items,
+            next_page: next_page.or_else(|| total_pages.filter(|total| page < *total).map(|_| page.saturating_add(1))),
+            pagination_known,
+        })
+    }
+}
+
+#[async_trait]
 impl GitPlatform for GitLabAdapter {
     fn name(&self) -> &'static str {
         "gitlab"
@@ -730,6 +826,188 @@ impl GitPlatform for GitLabAdapter {
             milestone: Self::metadata_milestone(&json["milestone"]),
             metadata_permissions,
         })
+    }
+
+    async fn list_branches(&self, owner: &str, repo: &str) -> Result<PrBranchOptions, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let endpoint = format!("{}/projects/{}/repository/branches", self.base_url, project_id);
+        let items = super::collect_json_pages(self, &endpoint).await?;
+        let branches = items.iter().filter_map(|branch| branch["name"].as_str().map(str::to_string)).collect();
+        let project_url = format!("{}/projects/{}", self.base_url, project_id);
+        let project = self.get_json::<Value>(&project_url).await?;
+        let default_branch = project["default_branch"].as_str().map(str::to_string);
+        Ok(PrBranchOptions { branches, default_branch })
+    }
+
+    async fn list_labels(&self, owner: &str, repo: &str) -> Result<Vec<PrLabel>, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let endpoint = format!("{}/projects/{}/labels", self.base_url, project_id);
+        let items = super::collect_json_pages(self, &endpoint).await?;
+        Ok(items
+            .iter()
+            .filter_map(|label| {
+                label["name"].as_str().map(|name| PrLabel {
+                    name: name.to_string(),
+                    color: label["color"].as_str().map(str::to_string),
+                    description: label["description"].as_str().map(str::to_string),
+                })
+            })
+            .collect())
+    }
+
+    async fn list_pr_participant_suggestions(&self, owner: &str, repo: &str) -> Result<Vec<User>, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let endpoint = format!("{}/projects/{}/members/all", self.base_url, project_id);
+        let items = super::collect_json_pages(self, &endpoint).await?;
+        Ok(items.iter().map(Self::map_user).filter(|user| !user.login.is_empty()).collect())
+    }
+
+    async fn create_pull_request(&self, owner: &str, repo: &str, request: &PrCreateRequest) -> Result<u64, AppError> {
+        let target_project_path = urlencoding(owner, repo);
+        let source_is_target = request.source_owner == owner && request.source_repo == repo;
+        let endpoint_project_path = if source_is_target {
+            target_project_path.clone()
+        } else {
+            urlencoding(&request.source_owner, &request.source_repo)
+        };
+        let url = format!("{}/projects/{}/merge_requests", self.base_url, endpoint_project_path);
+        let mut payload = serde_json::json!({
+            "source_branch": request.source_branch,
+            "target_branch": request.target_branch,
+            "title": Self::title_for_draft(&request.title, Some(request.draft)),
+            "description": request.body,
+        });
+        if !source_is_target {
+            let target_url = format!("{}/projects/{}", self.base_url, target_project_path);
+            let target_project = self.get_json::<Value>(&target_url).await?;
+            let target_id =
+                target_project["id"].as_u64().ok_or_else(|| AppError::Api("GitLab Fork 目标项目缺少项目 ID".into()))?;
+            payload["target_project_id"] = serde_json::json!(target_id);
+        }
+        let json = self.post_json(&url, &payload).await?;
+        json["iid"].as_u64().ok_or_else(|| AppError::Api("GitLab 创建 MR 后未返回编号".into()))
+    }
+
+    async fn preview_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        request: &PrCreatePreviewRequest,
+    ) -> Result<PrCreatePreviewData, AppError> {
+        let source_project = urlencoding(&request.source_owner, &request.source_repo);
+        if let Some(commit_sha) = request.commit_sha.as_deref() {
+            let sha = urlencoding::encode(commit_sha);
+            let commit_url = format!("{}/projects/{}/repository/commits/{}", self.base_url, source_project, sha);
+            let (commit, (changes, incomplete)) =
+                tokio::try_join!(self.get_json::<Value>(&commit_url), self.list_commit_diffs(&source_project, &sha))?;
+            let files = changes
+                .iter()
+                .map(|change| PrFile {
+                    filename: change["new_path"]
+                        .as_str()
+                        .or_else(|| change["old_path"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    status: if change["new_file"].as_bool() == Some(true) {
+                        FileStatus::Added
+                    } else if change["deleted_file"].as_bool() == Some(true) {
+                        FileStatus::Removed
+                    } else if change["renamed_file"].as_bool() == Some(true) {
+                        FileStatus::Renamed
+                    } else {
+                        FileStatus::Modified
+                    },
+                    patch: change["diff"].as_str().unwrap_or("").to_string(),
+                    additions: change["additions"].as_u64().unwrap_or(0) as u32,
+                    deletions: change["deletions"].as_u64().unwrap_or(0) as u32,
+                })
+                .collect::<Vec<_>>();
+            let diff = changes.iter().map(Self::unified_diff).filter(|patch| !patch.is_empty()).collect();
+            let summary = PrCommitSummary {
+                sha: commit["id"].as_str().unwrap_or(commit_sha).to_string(),
+                title: commit["title"]
+                    .as_str()
+                    .or_else(|| commit["message"].as_str().and_then(|message| message.lines().next()))
+                    .unwrap_or("")
+                    .to_string(),
+                author_name: commit["author_name"].as_str().unwrap_or("").to_string(),
+                authored_at: commit["authored_date"]
+                    .as_str()
+                    .or_else(|| commit["created_at"].as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            };
+            return Ok(PrCreatePreviewData { commits: vec![summary], diff, files, incomplete });
+        }
+        let from = urlencoding::encode(&request.target_branch);
+        let to = urlencoding::encode(&request.source_branch);
+        let mut url = format!(
+            "{}/projects/{}/repository/compare?from={}&to={}&straight=true",
+            self.base_url, source_project, from, to
+        );
+        if request.source_owner != owner || request.source_repo != repo {
+            let target_project = urlencoding(owner, repo);
+            let target_url = format!("{}/projects/{}", self.base_url, target_project);
+            let target = self.get_json::<Value>(&target_url).await?;
+            let target_id =
+                target["id"].as_u64().ok_or_else(|| AppError::Api("GitLab Fork 目标项目缺少项目 ID".into()))?;
+            url.push_str(&format!("&from_project_id={target_id}"));
+        }
+        let json = self.get_json::<Value>(&url).await?;
+        if json["compare_same_ref"].as_bool() == Some(true) {
+            return Err(AppError::Api("GitLab compare 返回相同分支，无法生成创建预览".into()));
+        }
+        let changes =
+            json["diffs"].as_array().ok_or_else(|| AppError::Api("GitLab compare 响应缺少 diffs 字段".into()))?;
+        let commits_json = json["commits"].as_array();
+        let incomplete = json["compare_timeout"].as_bool() == Some(true)
+            || changes.iter().any(|change| {
+                change["collapsed"].as_bool() == Some(true) || change["too_large"].as_bool() == Some(true)
+            })
+            || super::create_compare_is_incomplete(&json, commits_json.map_or(0, Vec::len), changes.len());
+        let files = changes
+            .iter()
+            .map(|change| PrFile {
+                filename: change["new_path"].as_str().or_else(|| change["old_path"].as_str()).unwrap_or("").to_string(),
+                status: if change["new_file"].as_bool() == Some(true) {
+                    FileStatus::Added
+                } else if change["deleted_file"].as_bool() == Some(true) {
+                    FileStatus::Removed
+                } else if change["renamed_file"].as_bool() == Some(true) {
+                    FileStatus::Renamed
+                } else {
+                    FileStatus::Modified
+                },
+                patch: change["diff"].as_str().unwrap_or("").to_string(),
+                additions: change["additions"].as_u64().unwrap_or(0) as u32,
+                deletions: change["deletions"].as_u64().unwrap_or(0) as u32,
+            })
+            .collect::<Vec<_>>();
+        let diff = changes.iter().map(Self::unified_diff).filter(|patch| !patch.is_empty()).collect();
+        let commits = commits_json
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|commit| {
+                        Some(PrCommitSummary {
+                            sha: commit["id"].as_str()?.to_string(),
+                            title: commit["title"]
+                                .as_str()
+                                .or_else(|| commit["message"].as_str().and_then(|message| message.lines().next()))
+                                .unwrap_or("")
+                                .to_string(),
+                            author_name: commit["author_name"].as_str().unwrap_or("").to_string(),
+                            authored_at: commit["authored_date"]
+                                .as_str()
+                                .or_else(|| commit["created_at"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(PrCreatePreviewData { commits, diff, files, incomplete })
     }
 
     async fn update_pull_request_metadata(

@@ -62,6 +62,7 @@ describe("Sidebar", () => {
     expect(wrapper.find(".repo-section").exists()).toBe(true);
     expect(wrapper.get('[aria-label="PR 收件箱"]').attributes("title")).toBe("PR 收件箱");
     expect(wrapper.get('[aria-label="拉取请求（PR）"]').attributes("title")).toBe("拉取请求（PR）");
+    expect(wrapper.get('[aria-label="创建 PR"]').attributes("title")).toBe("创建 PR");
     expect(wrapper.get('[aria-label="Issues"]').attributes("title")).toBe("Issues");
     expect(wrapper.get('[aria-label="设置"]').attributes("title")).toBe("设置");
     expect(wrapper.get(".compact-platform").attributes("aria-label")).toBe("当前平台：GitHub");
@@ -137,6 +138,31 @@ describe("Sidebar", () => {
     expect(wrapper.find('[aria-label="折叠侧栏"]').exists()).toBe(false);
   });
 
+  it("紧凑模式固定收起侧栏且不修改 Diff 展开偏好", async () => {
+    localStorage.setItem("mergebeacon:diff-sidebar-expanded", "true");
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/pr/new/github", name: "pr-new", component: { template: "<div />" } }],
+    });
+    await router.push("/pr/new/github");
+    await router.isReady();
+
+    const auth = useAuthStore();
+    auth.platforms.github.isLoggedIn = true;
+    auth.platforms.gitlab.isLoggedIn = true;
+    auth.platforms.gitee.isLoggedIn = true;
+    const wrapper = mount(Sidebar, {
+      props: { compactSidebar: true },
+      global: { plugins: [router] },
+    });
+
+    expect(wrapper.get(".sidebar").classes()).toContain("is-collapsed");
+    expect(wrapper.find(".repo-section").exists()).toBe(true);
+    expect(wrapper.find('[aria-label="展开侧栏"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="折叠侧栏"]').exists()).toBe(false);
+    expect(localStorage.getItem("mergebeacon:diff-sidebar-expanded")).toBe("true");
+  });
+
   it("从 PR 详情切换平台时清空旧上下文并返回 PR 列表", async () => {
     const router = createRouter({
       history: createMemoryHistory(),
@@ -199,5 +225,42 @@ describe("Sidebar", () => {
     expect(auth.activePlatform).toBe("gitlab");
     expect(pr.currentPr).toBeNull();
     expect(router.currentRoute.value.name).toBe("pr-list");
+  });
+
+  it("从创建页切换平台时同步路由并清除旧目标仓库", async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        {
+          path: "/pr/new/:platform",
+          name: "pr-new",
+          component: { template: "<div />" },
+        },
+      ],
+    });
+    await router.push({
+      name: "pr-new",
+      params: { platform: "github" },
+      query: { target: "octocat/hello-world" },
+    });
+    await router.isReady();
+
+    const auth = useAuthStore();
+    auth.platforms.github.isLoggedIn = true;
+    auth.platforms.gitlab.isLoggedIn = true;
+    auth.platforms.gitee.isLoggedIn = true;
+    const wrapper = mount(Sidebar, { global: { plugins: [router] } });
+    const gitlabButton = wrapper
+      .findAll<HTMLButtonElement>(".platform-selector button")
+      .find((button) => button.text() === "GitLab");
+    expect(gitlabButton).toBeDefined();
+
+    await gitlabButton!.trigger("click");
+    await flushPromises();
+
+    expect(auth.activePlatform).toBe("gitlab");
+    expect(router.currentRoute.value.name).toBe("pr-new");
+    expect(router.currentRoute.value.params.platform).toBe("gitlab");
+    expect(router.currentRoute.value.query.target).toBeUndefined();
   });
 });

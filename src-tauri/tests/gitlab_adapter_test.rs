@@ -1,12 +1,370 @@
 use mergebeacon_lib::error::AppError;
 use mergebeacon_lib::http_client::HttpClient;
 use mergebeacon_lib::models::{
-    PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate, PrMilestone, PrState, PrSummary,
-    ReadinessState, ReviewEvent, ReviewInboxCategory, ReviewInboxRelationship, User,
+    PrCreatePreviewRequest, PrCreateRequest, PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate,
+    PrMilestone, PrState, PrSummary, ReadinessState, ReviewEvent, ReviewInboxCategory, ReviewInboxRelationship, User,
 };
 use mergebeacon_lib::platform::{gitlab::GitLabAdapter, GitPlatform};
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+#[tokio::test]
+async fn test_gitlab_lists_branches_and_creates_draft_from_fork() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/repository/branches"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "name": "main" },
+            { "name": "feature" }
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 77,
+            "default_branch": "feature"
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v4/projects/contributor%2Frepo/merge_requests"))
+        .and(body_json(serde_json::json!({
+            "source_branch": "feature",
+            "target_branch": "main",
+            "title": "Draft: Add feature",
+            "description": "Description",
+            "target_project_id": 77
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({ "iid": 12 })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/contributor%2Frepo/repository/compare"))
+        .and(query_param("from", "main"))
+        .and(query_param("to", "feature"))
+        .and(query_param("straight", "true"))
+        .and(query_param("from_project_id", "77"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "compare_timeout": false,
+            "compare_same_ref": false,
+            "commits": [{
+                "id": "abc123",
+                "title": "Add feature",
+                "author_name": "Alice",
+                "authored_date": "2026-07-19T10:00:00Z"
+            }],
+            "diffs": [{
+                "old_path": "src/main.rs",
+                "new_path": "src/main.rs",
+                "diff": "@@ -1 +1 @@\n-old\n+new",
+                "new_file": false,
+                "deleted_file": false,
+                "renamed_file": false
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let branch_options = adapter.list_branches("group", "repo").await.unwrap();
+    assert_eq!(branch_options.branches, vec!["main", "feature"]);
+    assert_eq!(branch_options.default_branch.as_deref(), Some("feature"));
+    let preview = adapter
+        .preview_pull_request(
+            "group",
+            "repo",
+            &PrCreatePreviewRequest {
+                source_owner: "contributor".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(preview.commits[0].title, "Add feature");
+    assert_eq!(preview.files[0].filename, "src/main.rs");
+    assert!(!preview.incomplete);
+    let number = adapter
+        .create_pull_request(
+            "group",
+            "repo",
+            &PrCreateRequest {
+                source_owner: "contributor".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                title: "Add feature".into(),
+                body: "Description".into(),
+                draft: true,
+                reviewers: vec![],
+                assignees: vec![],
+                labels: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(number, 12);
+}
+
+#[tokio::test]
+async fn test_gitlab_create_compare_marks_a_timed_out_preview_incomplete() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/repository/compare"))
+        .and(query_param("from", "main"))
+        .and(query_param("to", "feature"))
+        .and(query_param("straight", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "compare_timeout": true,
+            "compare_same_ref": false,
+            "commits": [],
+            "diffs": []
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let preview = adapter
+        .preview_pull_request(
+            "group",
+            "repo",
+            &PrCreatePreviewRequest {
+                source_owner: "group".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(preview.incomplete);
+    assert!(preview.commits.is_empty());
+    assert!(preview.files.is_empty());
+}
+
+#[tokio::test]
+async fn test_gitlab_lists_all_branch_pages() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/repository/branches"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-next-page", "2")
+                .set_body_json(serde_json::json!([{ "name": "main" }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/repository/branches"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "name": "feature-101" }])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "default_branch": "main"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let branches = adapter.list_branches("group", "repo").await.unwrap();
+
+    assert_eq!(branches.branches, vec!["main", "feature-101"]);
+}
+
+#[tokio::test]
+async fn test_gitlab_lists_repository_labels() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/labels"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200).insert_header("x-next-page", "2").set_body_json(
+                serde_json::json!([{ "name": "bug", "color": "#d73a4a", "description": "Needs fixing" }]),
+            ),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/labels"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{ "name": "feature" }])))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let labels = adapter.list_labels("group", "repo").await.unwrap();
+
+    assert_eq!(labels.iter().map(|label| label.name.as_str()).collect::<Vec<_>>(), vec!["bug", "feature"]);
+    assert_eq!(labels[0].color.as_deref(), Some("#d73a4a"));
+    assert_eq!(labels[0].description.as_deref(), Some("Needs fixing"));
+}
+
+#[tokio::test]
+async fn test_gitlab_lists_pr_participant_suggestions() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/members/all"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).insert_header("x-next-page", "2").set_body_json(serde_json::json!([{
+            "id": 1,
+            "username": "alice",
+            "name": "Alice Zhang",
+            "avatar_url": "https://example.com/alice.png"
+        }])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/members/all"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+            "id": 2,
+            "username": "bob",
+            "name": "Bob",
+            "avatar_url": ""
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let users = adapter.list_pr_participant_suggestions("group", "repo").await.unwrap();
+
+    assert_eq!(users.iter().map(|user| user.login.as_str()).collect::<Vec<_>>(), vec!["alice", "bob"]);
+    assert_eq!(users[0].name, "Alice Zhang");
+}
+
+#[tokio::test]
+async fn test_gitlab_previews_a_single_commit() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/contributor%2Frepo/repository/commits/abc123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "abc123",
+            "title": "Only this commit",
+            "author_name": "Alice",
+            "authored_date": "2026-07-19T10:00:00Z"
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/contributor%2Frepo/repository/commits/abc123/diff"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+            "old_path": "src/commit.rs",
+            "new_path": "src/commit.rs",
+            "diff": "@@ -1 +1 @@\n-old\n+new",
+            "new_file": false,
+            "deleted_file": false,
+            "renamed_file": false
+        }])))
+        .mount(&mock_server)
+        .await;
+    let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let preview = adapter
+        .preview_pull_request(
+            "group",
+            "repo",
+            &PrCreatePreviewRequest {
+                source_owner: "contributor".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                commit_sha: Some("abc123".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(preview.commits[0].title, "Only this commit");
+    assert_eq!(preview.files[0].filename, "src/commit.rs");
+}
+
+#[tokio::test]
+async fn test_gitlab_single_commit_preview_paginates_diffs() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/repository/commits/abc123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "abc123",
+            "title": "Large commit",
+            "author_name": "Alice",
+            "authored_date": "2026-07-19T10:00:00Z"
+        })))
+        .mount(&mock_server)
+        .await;
+    let first_page = (0..100)
+        .map(|index| {
+            serde_json::json!({
+                "old_path": format!("src/file-{index}.rs"),
+                "new_path": format!("src/file-{index}.rs"),
+                "diff": "@@ -1 +1 @@\n-old\n+new"
+            })
+        })
+        .collect::<Vec<_>>();
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/repository/commits/abc123/diff"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-next-page", "2")
+                .insert_header("x-total-pages", "2")
+                .set_body_json(first_page),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/repository/commits/abc123/diff"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-next-page", "")
+                .insert_header("x-total-pages", "2")
+                .set_body_json(serde_json::json!([{
+                    "old_path": "src/final.rs",
+                    "new_path": "src/final.rs",
+                    "diff": "@@ -1 +1 @@\n-old\n+new"
+                }])),
+        )
+        .mount(&mock_server)
+        .await;
+    let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let preview = adapter
+        .preview_pull_request(
+            "group",
+            "repo",
+            &PrCreatePreviewRequest {
+                source_owner: "group".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                commit_sha: Some("abc123".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(preview.files.len(), 101);
+    assert_eq!(preview.files.last().map(|file| file.filename.as_str()), Some("src/final.rs"));
+    assert!(!preview.incomplete);
+}
 
 #[tokio::test]
 async fn test_gitlab_list_repos_parses_pagination_headers() {

@@ -123,6 +123,33 @@ describe("useRepoStore", () => {
     expect(store.reposCache.github.map((item) => item.full_name)).toEqual(["a/new"]);
   });
 
+  it("缓存为空时复用同平台正在进行的仓库请求", async () => {
+    const request = deferred<{
+      items: RepoSummary[];
+      page: number;
+      total_pages: number;
+      total_count: number;
+    }>();
+    vi.mocked(repoList).mockReturnValueOnce(request.promise);
+    const store = useRepoStore();
+
+    const sidebarLoad = store.fetchRepos("github");
+    const createPageLoad = store.ensureRepos("github");
+
+    expect(repoList).toHaveBeenCalledTimes(1);
+    request.resolve({
+      items: [repo(1, "a/one")],
+      page: 1,
+      total_pages: 3,
+      total_count: 3,
+    });
+    await Promise.all([sidebarLoad, createPageLoad]);
+
+    expect(store.reposCache.github.map((item) => item.full_name)).toEqual(["a/one"]);
+    expect(store.pages.github).toBe(1);
+    expect(store.totalPagesByPlatform.github).toBe(3);
+  });
+
   it("平台切换后旧平台的迟到成功结果不会覆盖当前列表", async () => {
     const githubRequest = deferred<{
       items: RepoSummary[];
@@ -178,5 +205,27 @@ describe("useRepoStore", () => {
     expect(store.repos.map((item) => item.full_name)).toEqual(["gitlab/current"]);
     expect(store.error).toBeNull();
     expect(store.errors.github).toContain("github late error");
+  });
+
+  it("显式平台写入仓库选择时不会污染当前平台", () => {
+    const auth = useAuthStore();
+    const store = useRepoStore();
+    auth.setActivePlatform("github");
+
+    store.setActiveRepo("gitee-owner", "gitee-repo", "gitee");
+    store.setForkContext(
+      {
+        upstreamFullName: "upstream/repo",
+        upstreamOwner: "upstream",
+        forkOwner: "gitee-owner",
+        forkRepo: "gitee-repo",
+      },
+      "gitee",
+    );
+
+    expect(store.activeRepos.github).toBeNull();
+    expect(store.activeRepos.gitee).toEqual({ owner: "gitee-owner", repo: "gitee-repo" });
+    expect(store.forkContexts.github).toBeNull();
+    expect(store.forkContexts.gitee?.forkOwner).toBe("gitee-owner");
   });
 });

@@ -53,6 +53,7 @@ function capabilities(overrides: Partial<PlatformCapabilities> = {}): PlatformCa
     supports_pr_assignee_management: true,
     supports_pr_label_management: true,
     supports_pr_milestone_management: true,
+    supports_pr_creation: true,
     ...overrides,
   };
 }

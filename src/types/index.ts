@@ -36,6 +36,7 @@ export interface PlatformCapabilities {
   supports_pr_assignee_management: boolean;
   supports_pr_label_management: boolean;
   supports_pr_milestone_management: boolean;
+  supports_pr_creation: boolean;
 }
 
 export interface UpdateProgressEvent {
@@ -178,6 +179,52 @@ export interface PrMetadataUpdateOutcome {
   failures: PrMetadataUpdateFailure[];
 }
 
+export interface PrCreateRequest {
+  source_owner: string;
+  source_repo: string;
+  source_branch: string;
+  target_branch: string;
+  title: string;
+  body: string;
+  draft: boolean;
+  reviewers: string[];
+  assignees: string[];
+  labels: string[];
+}
+
+export interface PrCreatePreviewRequest {
+  source_owner: string;
+  source_repo: string;
+  source_branch: string;
+  target_branch: string;
+  commit_sha?: string | null;
+}
+
+export interface PrCommitSummary {
+  sha: string;
+  title: string;
+  author_name: string;
+  authored_at: string;
+}
+
+export interface PrBranchOptions {
+  branches: string[];
+  default_branch: string | null;
+}
+
+export interface PrLabel {
+  name: string;
+  color: string | null;
+  description: string | null;
+}
+
+export interface PrCreateOutcome {
+  number: number;
+  detail: PrDetail | null;
+  updated_fields: PrMetadataField[];
+  failures: PrMetadataUpdateFailure[];
+}
+
 export interface PrFileContent {
   path: string;
   revision: string;
@@ -289,6 +336,12 @@ export interface DiffResult {
   files: PrFile[];
   patch_schema_version: number;
   patches: StandardPatchFile[];
+}
+
+export interface PrCreatePreview {
+  commits: PrCommitSummary[];
+  diff: DiffResult;
+  incomplete: boolean;
 }
 
 export interface DiffLocationRequest {

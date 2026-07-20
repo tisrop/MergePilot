@@ -18,8 +18,14 @@ import type {
   ReviewInboxCategory,
   ReviewInboxItem,
   PrDetail,
+  PrBranchOptions,
+  PrLabel,
+  PrCreatePreview,
+  PrCreatePreviewRequest,
   PrMetadataUpdate,
   PrMetadataUpdateOutcome,
+  PrCreateRequest,
+  PrCreateOutcome,
   PrMergeReadiness,
   DiffResult,
   PrFileContent,
@@ -200,6 +206,48 @@ export async function prDetail(
   number: number,
 ): Promise<PrDetail> {
   return invoke("pr_detail", { platform, owner, repo, number });
+}
+
+export async function prBranches(
+  platform: Platform,
+  owner: string,
+  repo: string,
+): Promise<PrBranchOptions> {
+  return invoke("pr_branches", { platform, owner, repo });
+}
+
+export async function prLabels(
+  platform: Platform,
+  owner: string,
+  repo: string,
+): Promise<PrLabel[]> {
+  return invoke("pr_labels", { platform, owner, repo });
+}
+
+export async function prParticipantSuggestions(
+  platform: Platform,
+  owner: string,
+  repo: string,
+): Promise<User[]> {
+  return invoke("pr_participant_suggestions", { platform, owner, repo });
+}
+
+export async function prCreate(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  request: PrCreateRequest,
+): Promise<PrCreateOutcome> {
+  return invoke("pr_create", { platform, owner, repo, request });
+}
+
+export async function prCreatePreview(
+  platform: Platform,
+  owner: string,
+  repo: string,
+  request: PrCreatePreviewRequest,
+): Promise<PrCreatePreview> {
+  return invoke("pr_create_preview", { platform, owner, repo, request });
 }
 
 export async function prMetadataUpdate(

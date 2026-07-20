@@ -1,11 +1,305 @@
 use mergebeacon_lib::http_client::HttpClient;
 use mergebeacon_lib::models::{
-    PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate, PrMilestone, PrState, PrSummary,
-    ReadinessState, ReviewInboxCategory, ReviewInboxRelationship, User,
+    PrCreatePreviewRequest, PrCreateRequest, PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate,
+    PrMilestone, PrState, PrSummary, ReadinessState, ReviewInboxCategory, ReviewInboxRelationship, User,
 };
 use mergebeacon_lib::platform::{gitee::GiteeAdapter, GitPlatform};
 use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+#[tokio::test]
+async fn test_gitee_lists_branches_and_creates_from_fork() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/branches"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "name": "master" },
+            { "name": "feature" }
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "default_branch": "feature"
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v5/repos/team/repo/pulls"))
+        .and(body_json(serde_json::json!({
+            "title": "Add feature",
+            "body": "Description",
+            "head": "contributor:feature",
+            "base": "master"
+        })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({ "number": 8 })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/compare/master...contributor%3Afeature"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "commits": [{
+                "sha": "abc123",
+                "commit": {
+                    "message": "Add feature\n\nDetails",
+                    "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
+                }
+            }],
+            "files": [{
+                "filename": "src/main.rs",
+                "status": "modified",
+                "patch": "@@ -1 +1 @@\n-old\n+new",
+                "additions": 1,
+                "deletions": 1
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GiteeAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let branch_options = adapter.list_branches("team", "repo").await.unwrap();
+    assert_eq!(branch_options.branches, vec!["master", "feature"]);
+    assert_eq!(branch_options.default_branch.as_deref(), Some("feature"));
+    let preview = adapter
+        .preview_pull_request(
+            "team",
+            "repo",
+            &PrCreatePreviewRequest {
+                source_owner: "contributor".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "master".into(),
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(preview.commits[0].title, "Add feature");
+    assert_eq!(preview.files[0].filename, "src/main.rs");
+    assert!(!preview.incomplete);
+    let number = adapter
+        .create_pull_request(
+            "team",
+            "repo",
+            &PrCreateRequest {
+                source_owner: "contributor".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "master".into(),
+                title: "Add feature".into(),
+                body: "Description".into(),
+                draft: false,
+                reviewers: vec![],
+                assignees: vec![],
+                labels: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(number, 8);
+}
+
+#[tokio::test]
+async fn test_gitee_create_compare_marks_an_incomplete_preview() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/compare/master...feature"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ahead_by": 2,
+            "commits": [{
+                "sha": "abc123",
+                "commit": {
+                    "message": "First commit",
+                    "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
+                }
+            }],
+            "files": [{
+                "filename": "src/main.rs",
+                "status": "modified",
+                "patch": "@@ -1 +1 @@\n-old\n+new"
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GiteeAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let preview = adapter
+        .preview_pull_request(
+            "team",
+            "repo",
+            &PrCreatePreviewRequest {
+                source_owner: "team".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "master".into(),
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(preview.incomplete);
+    assert_eq!(preview.commits.len(), 1);
+    assert_eq!(preview.files.len(), 1);
+}
+
+#[tokio::test]
+async fn test_gitee_lists_all_branch_pages() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/branches"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-total-pages", "2")
+                .set_body_json(serde_json::json!([{ "name": "master" }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/branches"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-total-pages", "2")
+                .set_body_json(serde_json::json!([{ "name": "feature-101" }])),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "default_branch": "master"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let branches = adapter.list_branches("team", "repo").await.unwrap();
+
+    assert_eq!(branches.branches, vec!["master", "feature-101"]);
+}
+
+#[tokio::test]
+async fn test_gitee_lists_repository_labels() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/labels"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200).insert_header("x-total-pages", "2").set_body_json(
+                serde_json::json!([{ "name": "bug", "color": "d73a4a", "description": "Needs fixing" }]),
+            ),
+        )
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/labels"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-total-pages", "2")
+                .set_body_json(serde_json::json!([{ "name": "feature" }])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let labels = adapter.list_labels("team", "repo").await.unwrap();
+
+    assert_eq!(labels.iter().map(|label| label.name.as_str()).collect::<Vec<_>>(), vec!["bug", "feature"]);
+    assert_eq!(labels[0].color.as_deref(), Some("d73a4a"));
+    assert_eq!(labels[0].description.as_deref(), Some("Needs fixing"));
+}
+
+#[tokio::test]
+async fn test_gitee_lists_pr_participant_suggestions() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/collaborators"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .and(query_param("access_token", "token"))
+        .respond_with(ResponseTemplate::new(200).insert_header("x-total-pages", "2").set_body_json(
+            serde_json::json!([{
+                "id": 1,
+                "login": "alice",
+                "name": "Alice Zhang",
+                "avatar_url": "https://example.com/alice.png"
+            }]),
+        ))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/collaborators"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).insert_header("x-total-pages", "2").set_body_json(
+            serde_json::json!([{
+                "id": 2,
+                "login": "bob",
+                "name": "Bob",
+                "avatar_url": ""
+            }]),
+        ))
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GiteeAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+    let users = adapter.list_pr_participant_suggestions("team", "repo").await.unwrap();
+
+    assert_eq!(users.iter().map(|user| user.login.as_str()).collect::<Vec<_>>(), vec!["alice", "bob"]);
+    assert_eq!(users[0].name, "Alice Zhang");
+}
+
+#[tokio::test]
+async fn test_gitee_previews_a_single_commit() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/contributor/repo/commits/abc123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "sha": "abc123",
+            "commit": {
+                "message": "Only this commit\n\nDetails",
+                "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
+            },
+            "files": [{
+                "filename": "src/commit.rs",
+                "status": "modified",
+                "patch": "@@ -1 +1 @@\n-old\n+new",
+                "additions": 1,
+                "deletions": 1
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GiteeAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let preview = adapter
+        .preview_pull_request(
+            "team",
+            "repo",
+            &PrCreatePreviewRequest {
+                source_owner: "contributor".into(),
+                source_repo: "repo".into(),
+                source_branch: "feature".into(),
+                target_branch: "master".into(),
+                commit_sha: Some("abc123".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(preview.commits[0].title, "Only this commit");
+    assert_eq!(preview.files[0].filename, "src/commit.rs");
+}
 
 #[tokio::test]
 async fn test_gitee_current_user() {

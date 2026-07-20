@@ -27,6 +27,7 @@ pub struct PlatformCapabilities {
     pub supports_pr_assignee_management: bool,
     pub supports_pr_label_management: bool,
     pub supports_pr_milestone_management: bool,
+    pub supports_pr_creation: bool,
 }
 
 /// 平台协议能力的唯一静态定义入口。
@@ -50,6 +51,7 @@ pub fn capabilities_for(platform: &str) -> Option<PlatformCapabilities> {
             supports_pr_assignee_management: true,
             supports_pr_label_management: true,
             supports_pr_milestone_management: true,
+            supports_pr_creation: true,
         },
         "gitlab" => PlatformCapabilities {
             platform: "gitlab",
@@ -66,6 +68,7 @@ pub fn capabilities_for(platform: &str) -> Option<PlatformCapabilities> {
             supports_pr_assignee_management: true,
             supports_pr_label_management: true,
             supports_pr_milestone_management: true,
+            supports_pr_creation: true,
         },
         "gitee" => PlatformCapabilities {
             platform: "gitee",
@@ -82,6 +85,7 @@ pub fn capabilities_for(platform: &str) -> Option<PlatformCapabilities> {
             supports_pr_assignee_management: true,
             supports_pr_label_management: true,
             supports_pr_milestone_management: true,
+            supports_pr_creation: true,
         },
         _ => return None,
     };
@@ -101,6 +105,77 @@ pub fn normalize_api_base(platform: &str, url: &str) -> String {
     } else {
         format!("{trimmed}{suffix}")
     }
+}
+
+const CREATE_COMPARE_COMMIT_PAGE_SIZE: usize = 100;
+const CREATE_COMPARE_FILE_LIMIT: usize = 300;
+
+pub(crate) fn create_compare_is_incomplete(json: &serde_json::Value, commit_count: usize, file_count: usize) -> bool {
+    let reported_commit_count = json["total_commits"].as_u64().into_iter().chain(json["ahead_by"].as_u64()).max();
+    let commits_incomplete = reported_commit_count
+        .map(|total| total > commit_count as u64)
+        .unwrap_or(commit_count >= CREATE_COMPARE_COMMIT_PAGE_SIZE);
+
+    // Compare APIs cap the returned files without exposing a reliable file total.
+    commits_incomplete || file_count >= CREATE_COMPARE_FILE_LIMIT
+}
+
+pub(crate) const JSON_PAGE_SIZE: usize = 100;
+const MAX_JSON_PAGES: u32 = 1_000;
+
+pub(crate) struct JsonPage {
+    pub items: Vec<serde_json::Value>,
+    pub next_page: Option<u32>,
+    pub pagination_known: bool,
+}
+
+#[async_trait]
+pub(crate) trait JsonPageSource {
+    async fn fetch_json_page(&self, endpoint: &str, page: u32) -> Result<JsonPage, AppError>;
+}
+
+pub(crate) async fn collect_json_pages<S>(source: &S, endpoint: &str) -> Result<Vec<serde_json::Value>, AppError>
+where
+    S: JsonPageSource + Sync,
+{
+    let mut items = Vec::new();
+    let mut page = 1_u32;
+    loop {
+        let result = source.fetch_json_page(endpoint, page).await?;
+        let item_count = result.items.len();
+        items.extend(result.items);
+        let next_page = result
+            .next_page
+            .or_else(|| (!result.pagination_known && item_count == JSON_PAGE_SIZE).then(|| page.saturating_add(1)));
+        let Some(next_page) = next_page else {
+            break;
+        };
+        if next_page <= page {
+            return Err(AppError::Api("远端分页游标未向前推进".into()));
+        }
+        if next_page > MAX_JSON_PAGES {
+            return Err(AppError::Api(format!("远端分页超过安全上限（{MAX_JSON_PAGES} 页）")));
+        }
+        page = next_page;
+    }
+    Ok(items)
+}
+
+pub(crate) fn next_page_from_link(link: Option<&str>) -> Option<u32> {
+    let header = link?;
+    header.split(',').find_map(|part| {
+        let part = part.trim();
+        if !part.contains(r#"rel="next""#) && !part.contains("rel='next'") {
+            return None;
+        }
+        let start = part.find('<')? + 1;
+        let end = part[start..].find('>')? + start;
+        part[start..end]
+            .split('?')
+            .nth(1)?
+            .split('&')
+            .find_map(|segment| segment.strip_prefix("page=").and_then(|value| value.parse::<u32>().ok()))
+    })
 }
 
 fn readiness_rank(state: ReadinessState) -> u8 {
@@ -203,6 +278,21 @@ pub trait GitPlatform: Send + Sync {
     ) -> Result<Paginated<ReviewInboxItem>, AppError>;
 
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError>;
+
+    async fn list_branches(&self, owner: &str, repo: &str) -> Result<PrBranchOptions, AppError>;
+
+    async fn list_labels(&self, owner: &str, repo: &str) -> Result<Vec<PrLabel>, AppError>;
+
+    async fn list_pr_participant_suggestions(&self, owner: &str, repo: &str) -> Result<Vec<User>, AppError>;
+
+    async fn create_pull_request(&self, owner: &str, repo: &str, request: &PrCreateRequest) -> Result<u64, AppError>;
+
+    async fn preview_pull_request(
+        &self,
+        owner: &str,
+        repo: &str,
+        request: &PrCreatePreviewRequest,
+    ) -> Result<PrCreatePreviewData, AppError>;
 
     async fn update_pull_request_metadata(
         &self,
@@ -362,7 +452,40 @@ pub trait GitPlatform: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{capabilities_for, normalize_api_base};
+    use std::{collections::VecDeque, sync::Mutex};
+
+    use super::{
+        capabilities_for, collect_json_pages, create_compare_is_incomplete, next_page_from_link, normalize_api_base,
+        AppError, JsonPage, JsonPageSource, JSON_PAGE_SIZE,
+    };
+
+    struct MockPageSource {
+        pages: Mutex<VecDeque<JsonPage>>,
+        requested_pages: Mutex<Vec<u32>>,
+    }
+
+    impl MockPageSource {
+        fn new(pages: Vec<JsonPage>) -> Self {
+            Self { pages: Mutex::new(pages.into()), requested_pages: Mutex::new(Vec::new()) }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl JsonPageSource for MockPageSource {
+        async fn fetch_json_page(&self, _endpoint: &str, page: u32) -> Result<JsonPage, AppError> {
+            self.requested_pages.lock().unwrap().push(page);
+            self.pages.lock().unwrap().pop_front().ok_or_else(|| AppError::Api("测试分页响应不足".into()))
+        }
+    }
+
+    struct UnboundedPageSource;
+
+    #[async_trait::async_trait]
+    impl JsonPageSource for UnboundedPageSource {
+        async fn fetch_json_page(&self, _endpoint: &str, page: u32) -> Result<JsonPage, AppError> {
+            Ok(JsonPage { items: Vec::new(), next_page: Some(page + 1), pagination_known: true })
+        }
+    }
 
     #[test]
     fn exposes_the_platform_capability_matrix() {
@@ -384,6 +507,9 @@ mod tests {
         assert_eq!(github["supports_remote_file_viewed_state"], serde_json::json!(true));
         assert_eq!(gitlab["supports_remote_file_viewed_state"], serde_json::json!(false));
         assert_eq!(gitee["supports_remote_file_viewed_state"], serde_json::json!(false));
+        assert_eq!(github["supports_pr_creation"], serde_json::json!(true));
+        assert_eq!(gitlab["supports_pr_creation"], serde_json::json!(true));
+        assert_eq!(gitee["supports_pr_creation"], serde_json::json!(true));
         assert!(capabilities_for("unknown").is_none());
     }
 
@@ -399,5 +525,87 @@ mod tests {
             "https://git.example.com/proxy/api/v4"
         );
         assert_eq!(normalize_api_base("gitee", "http://gitee.internal/base"), "http://gitee.internal/base/api/v5");
+    }
+
+    #[test]
+    fn marks_create_compare_incomplete_when_reported_commits_exceed_the_response() {
+        for json in [serde_json::json!({ "total_commits": 101 }), serde_json::json!({ "ahead_by": 101 })] {
+            assert!(create_compare_is_incomplete(&json, 100, 1));
+        }
+    }
+
+    #[test]
+    fn marks_create_compare_incomplete_when_an_unreported_limit_is_reached() {
+        assert!(create_compare_is_incomplete(&serde_json::json!({}), 100, 1));
+        assert!(create_compare_is_incomplete(&serde_json::json!({ "total_commits": 1 }), 1, 300));
+    }
+
+    #[test]
+    fn leaves_create_compare_complete_when_the_response_is_below_the_limits() {
+        assert!(!create_compare_is_incomplete(&serde_json::json!({ "total_commits": 100 }), 100, 299));
+        assert!(!create_compare_is_incomplete(&serde_json::json!({}), 2, 3));
+    }
+
+    #[tokio::test]
+    async fn collects_pages_using_the_explicit_next_cursor() {
+        let source = MockPageSource::new(vec![
+            JsonPage { items: vec![serde_json::json!({ "id": 1 })], next_page: Some(3), pagination_known: true },
+            JsonPage { items: vec![serde_json::json!({ "id": 2 })], next_page: None, pagination_known: true },
+        ]);
+
+        let items = collect_json_pages(&source, "https://example.test/items").await.unwrap();
+
+        assert_eq!(items, vec![serde_json::json!({ "id": 1 }), serde_json::json!({ "id": 2 })]);
+        assert_eq!(*source.requested_pages.lock().unwrap(), vec![1, 3]);
+    }
+
+    #[tokio::test]
+    async fn requests_another_page_for_a_full_page_without_pagination_headers() {
+        let source = MockPageSource::new(vec![
+            JsonPage {
+                items: (0..JSON_PAGE_SIZE).map(|id| serde_json::json!({ "id": id })).collect(),
+                next_page: None,
+                pagination_known: false,
+            },
+            JsonPage {
+                items: vec![serde_json::json!({ "id": JSON_PAGE_SIZE })],
+                next_page: None,
+                pagination_known: false,
+            },
+        ]);
+
+        let items = collect_json_pages(&source, "https://example.test/items").await.unwrap();
+
+        assert_eq!(items.len(), JSON_PAGE_SIZE + 1);
+        assert_eq!(*source.requested_pages.lock().unwrap(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn rejects_a_pagination_cursor_that_does_not_advance() {
+        let source =
+            MockPageSource::new(vec![JsonPage { items: Vec::new(), next_page: Some(1), pagination_known: true }]);
+
+        let error = collect_json_pages(&source, "https://example.test/items").await.unwrap_err();
+
+        assert!(matches!(error, AppError::Api(message) if message.contains("未向前推进")));
+    }
+
+    #[tokio::test]
+    async fn rejects_pagination_beyond_the_safety_limit() {
+        let error = collect_json_pages(&UnboundedPageSource, "https://example.test/items").await.unwrap_err();
+
+        assert!(matches!(error, AppError::Api(message) if message.contains("1000 页")));
+    }
+
+    #[test]
+    fn reads_the_next_page_from_a_link_header() {
+        let link = concat!(
+            "<https://example.test/items?per_page=100&page=2>; rel=\"next\", ",
+            "<https://example.test/items?per_page=100&page=5>; rel=\"last\"",
+        );
+
+        assert_eq!(next_page_from_link(Some(link)), Some(2));
+        assert_eq!(next_page_from_link(Some("<https://example.test/items?page=5>; rel=\"last\"")), None);
+        assert_eq!(next_page_from_link(None), None);
     }
 }

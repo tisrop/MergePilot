@@ -25,6 +25,7 @@ function capabilities(platform: Platform): PlatformCapabilities {
     supports_pr_assignee_management: true,
     supports_pr_label_management: true,
     supports_pr_milestone_management: true,
+    supports_pr_creation: true,
   };
 }
 

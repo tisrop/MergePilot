@@ -7,6 +7,11 @@ import { useReviewInboxStore } from "@/stores/useReviewInboxStore";
 import { reviewCommentAdd } from "@/api";
 import { useCapabilityStore } from "@/stores/useCapabilityStore";
 import { getErrorMessage } from "@/utils/error";
+import {
+  clearPrCreateWarnings,
+  PR_CREATE_WARNING_QUERY,
+  readPrCreateWarnings,
+} from "@/utils/prCreateWarnings";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import DiffViewer from "@/components/diff/DiffViewer.vue";
 import ReviewForm from "@/components/review/ReviewForm.vue";
@@ -406,6 +411,19 @@ function handleAppCommand(event: Event): void {
 
 onMounted(async () => {
   window.addEventListener(APP_COMMAND_EVENT, handleAppCommand);
+  if (route.query[PR_CREATE_WARNING_QUERY] === "1") {
+    const createWarnings = readPrCreateWarnings(platform, owner, repo, number);
+    metadataStatus.value = "PR / MR 已创建，但部分后续操作失败。";
+    metadataError.value =
+      createWarnings.length > 0
+        ? createWarnings.join("；")
+        : "部分参与者或标签可能未能写入，请检查当前元数据后重试。";
+    const nextQuery = { ...route.query };
+    delete nextQuery[PR_CREATE_WARNING_QUERY];
+    void Promise.resolve(router.replace({ query: nextQuery })).then(() => {
+      clearPrCreateWarnings(platform, owner, repo, number);
+    });
+  }
   await Promise.all([
     pr.fetchPrDetail(platform, owner, repo, number),
     pr.fetchPrDiff(platform, owner, repo, number),
