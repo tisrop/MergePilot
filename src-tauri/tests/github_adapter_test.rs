@@ -536,6 +536,7 @@ async fn test_github_list_pr_comments_uses_review_threads_with_resolution_state(
                                             "path": "src/lib.rs",
                                             "line": 8,
                                             "startLine": null,
+                                            "diffSide": "RIGHT",
                                             "author": {
                                                 "id": "U_reviewer",
                                                 "login": "reviewer",
@@ -557,6 +558,7 @@ async fn test_github_list_pr_comments_uses_review_threads_with_resolution_state(
                                             "path": "src/lib.rs",
                                             "line": 8,
                                             "startLine": null,
+                                            "diffSide": "RIGHT",
                                             "author": {
                                                 "id": "U_author",
                                                 "login": "author",
@@ -594,6 +596,7 @@ async fn test_github_list_pr_comments_uses_review_threads_with_resolution_state(
     assert_eq!(comments.len(), 2);
     assert_eq!(comments[0].id, serde_json::json!(100));
     assert_eq!(comments[0].thread_id, "PRRT_thread_1");
+    assert_eq!(comments[0].side.as_deref(), Some("right"));
     assert_eq!(comments[0].resolved, Some(false));
     assert!(comments[0].resolvable);
     assert_eq!(comments[1].thread_id, "PRRT_thread_1");
@@ -603,6 +606,7 @@ async fn test_github_list_pr_comments_uses_review_threads_with_resolution_state(
     let requests = mock_server.received_requests().await.expect("requests");
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body).expect("GraphQL JSON body");
     assert!(body["query"].as_str().unwrap_or_default().contains("reviewThreads"));
+    assert!(body["query"].as_str().unwrap_or_default().contains("diffSide"));
     assert_eq!(body["variables"]["owner"], "octocat");
     assert_eq!(body["variables"]["repo"], "hello-world");
     assert_eq!(body["variables"]["number"], 42);

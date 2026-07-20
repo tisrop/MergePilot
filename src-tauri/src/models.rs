@@ -442,6 +442,8 @@ pub struct PrComment {
     pub path: String,
     pub line: Option<u32>,
     pub start_line: Option<u32>,
+    #[serde(default)]
+    pub side: Option<String>,
     pub author: User,
     pub created_at: String,
     pub commit_id: Option<String>,

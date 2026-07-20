@@ -386,6 +386,15 @@ describe("DiffViewer 受控标准 patch", () => {
 
     expect(wrapper.get(".selected-file-name").text()).toBe("src/new-name.ts");
     expect(
+      wrapper.get(".controlled-side-left .diff-location-highlight").attributes("data-line"),
+    ).toBe("2");
+
+    await wrapper.setProps({
+      locationRequest: { id: 5, path: "src/new-name.ts", line: 2 },
+    });
+    await flushPromises();
+
+    expect(
       wrapper.get(".controlled-side-right .diff-location-highlight").attributes("data-line"),
     ).toBe("2");
   });

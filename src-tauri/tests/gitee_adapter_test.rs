@@ -518,11 +518,12 @@ async fn test_gitee_create_pr_comment() {
     let adapter =
         GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
-    let result = adapter
+    let comment = adapter
         .create_pr_comment("octocat", "hello-world", 42, "abc123", "src/main.rs", None, 10, "right", "Good catch!")
-        .await;
+        .await
+        .expect("should create PR comment");
 
-    assert!(result.is_ok(), "should create PR comment");
+    assert_eq!(comment.side.as_deref(), Some("right"));
 }
 
 #[tokio::test]
@@ -572,7 +573,7 @@ async fn test_gitee_list_pr_comments() {
                 "body": "Please add tests",
                 "path": "src/lib.rs",
                 "position": 42,
-                "new_line": 42,
+                "old_line": 42,
                 "commit_id": "def456",
                 "user": { "id": 2, "login": "dev2", "name": "Dev Two", "avatar_url": "" },
                 "created_at": "2025-01-04T01:00:00Z"
@@ -620,6 +621,7 @@ async fn test_gitee_list_pr_comments() {
     assert_eq!(comments[0].body, "Nice fix!");
     assert_eq!(comments[0].path, "src/main.rs");
     assert_eq!(comments[0].line, Some(15));
+    assert_eq!(comments[0].side.as_deref(), Some("right"));
     assert_eq!(comments[0].start_line, None);
     assert_eq!(comments[0].thread_id, "100");
     assert_eq!(comments[0].reply_to_id, None);
@@ -628,6 +630,7 @@ async fn test_gitee_list_pr_comments() {
     assert_eq!(comments[1].body, "Please add tests");
     assert_eq!(comments[1].path, "src/lib.rs");
     assert_eq!(comments[1].line, Some(42));
+    assert_eq!(comments[1].side.as_deref(), Some("left"));
     assert_eq!(comments[1].start_line, None);
     assert_eq!(comments[2].body, "Multi-line review");
     assert_eq!(comments[2].path, "src/main.rs");
@@ -1064,11 +1067,12 @@ async fn test_gitee_create_pr_comment_left_side() {
     let adapter =
         GiteeAdapter::new(client, "test-token".to_string()).with_base_url(format!("{}/api/v5", mock_server.uri()));
 
-    let result = adapter
+    let comment = adapter
         .create_pr_comment("octocat", "hello-world", 42, "abc123", "src/main.rs", None, 5, "left", "Old code issue")
-        .await;
+        .await
+        .expect("should create left-side PR comment");
 
-    assert!(result.is_ok(), "should create left-side PR comment");
+    assert_eq!(comment.side.as_deref(), Some("left"));
 }
 
 #[tokio::test]

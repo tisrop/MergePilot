@@ -676,6 +676,11 @@ impl GitHubAdapter {
             path: comment["path"].as_str().unwrap_or("").to_string(),
             line: comment["line"].as_u64().map(|line| line as u32),
             start_line: comment["startLine"].as_u64().map(|line| line as u32),
+            side: match comment["diffSide"].as_str() {
+                Some("LEFT") => Some("left".into()),
+                Some("RIGHT") => Some("right".into()),
+                _ => None,
+            },
             author: Self::map_graphql_user(&comment["author"]),
             created_at: comment["createdAt"].as_str().unwrap_or("").to_string(),
             commit_id: comment["commit"]["oid"].as_str().map(str::to_string),
@@ -707,6 +712,7 @@ impl GitHubAdapter {
                                     path
                                     line
                                     startLine
+                                    diffSide
                                     author {
                                         login
                                         avatarUrl
@@ -1780,6 +1786,7 @@ impl GitPlatform for GitHubAdapter {
             path: c["path"].as_str().unwrap_or("").to_string(),
             line: c["line"].as_u64().map(|n| n as u32),
             start_line: c["start_line"].as_u64().map(|n| n as u32),
+            side: Some(if gh_side == "LEFT" { "left" } else { "right" }.into()),
             author: Self::map_user(&c["user"]),
             created_at: c["created_at"].as_str().unwrap_or("").to_string(),
             commit_id: c["commit_id"].as_str().map(|s| s.to_string()),
@@ -1822,6 +1829,7 @@ impl GitPlatform for GitHubAdapter {
                                                 path
                                                 line
                                                 startLine
+                                                diffSide
                                                 author {
                                                     login
                                                     avatarUrl

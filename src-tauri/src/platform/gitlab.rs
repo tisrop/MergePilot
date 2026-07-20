@@ -482,14 +482,40 @@ impl GitLabAdapter {
         let position =
             note.get("position").filter(|position| position.is_object()).unwrap_or(fallback_position).as_object()?;
         let position = Value::Object(position.clone());
-        let path = position["new_path"].as_str().or_else(|| position["old_path"].as_str())?.to_string();
-        let line = position["new_line"].as_u64().or_else(|| position["old_line"].as_u64()).map(|line| line as u32);
-        let start_line = position["line_range"]["start"]["new_line"]
-            .as_u64()
-            .or_else(|| position["line_range"]["start"]["old_line"].as_u64())
-            .map(|line| line as u32)
-            .filter(|start| Some(*start) != line);
+        let new_line = position["new_line"].as_u64();
+        let old_line = position["old_line"].as_u64();
+        let side = if new_line.is_some() {
+            Some("right")
+        } else if old_line.is_some() {
+            Some("left")
+        } else {
+            None
+        };
+        let path = match side {
+            Some("left") => position["old_path"].as_str().or_else(|| position["new_path"].as_str()),
+            _ => position["new_path"].as_str().or_else(|| position["old_path"].as_str()),
+        }?
+        .to_string();
+        let line = new_line.or(old_line).map(|line| line as u32);
+        let start_position = &position["line_range"]["start"];
+        let start_line = match side {
+            Some("left") => start_position["old_line"].as_u64().or_else(|| start_position["new_line"].as_u64()),
+            _ => start_position["new_line"].as_u64().or_else(|| start_position["old_line"].as_u64()),
+        }
+        .map(|line| line as u32)
+        .filter(|start| Some(*start) != line);
         let original = note.get("original_position").filter(|original| original.is_object()).unwrap_or(&position);
+        let original_line = match side {
+            Some("left") => original["old_line"].as_u64().or_else(|| original["new_line"].as_u64()),
+            _ => original["new_line"].as_u64().or_else(|| original["old_line"].as_u64()),
+        }
+        .map(|line| line as u32);
+        let original_start = &original["line_range"]["start"];
+        let original_start_line = match side {
+            Some("left") => original_start["old_line"].as_u64().or_else(|| original_start["new_line"].as_u64()),
+            _ => original_start["new_line"].as_u64().or_else(|| original_start["old_line"].as_u64()),
+        }
+        .map(|line| line as u32);
 
         Some(PrComment {
             id: note["id"].clone(),
@@ -497,18 +523,13 @@ impl GitLabAdapter {
             path,
             line,
             start_line,
+            side: side.map(str::to_string),
             author: Self::map_user(&note["author"]),
             created_at: note["created_at"].as_str().unwrap_or("").to_string(),
             commit_id: position["head_sha"].as_str().map(str::to_string),
             original_commit_id: original["head_sha"].as_str().map(str::to_string),
-            original_line: original["new_line"]
-                .as_u64()
-                .or_else(|| original["old_line"].as_u64())
-                .map(|line| line as u32),
-            original_start_line: original["line_range"]["start"]["new_line"]
-                .as_u64()
-                .or_else(|| original["line_range"]["start"]["old_line"].as_u64())
-                .map(|line| line as u32),
+            original_line,
+            original_start_line,
             diff_hunk: None,
             thread_id: thread_id.to_string(),
             reply_to_id,

@@ -1594,7 +1594,7 @@ impl GitPlatform for GiteeAdapter {
         path: &str,
         start_line: Option<u32>,
         line: u32,
-        _side: &str,
+        side: &str,
         body: &str,
     ) -> Result<PrComment, AppError> {
         let url = format!("{}/repos/{}/{}/pulls/{}/comments", self.base_url, owner, repo, pr_number);
@@ -1616,6 +1616,7 @@ impl GitPlatform for GiteeAdapter {
             path: c["path"].as_str().unwrap_or("").to_string(),
             line: c["line"].as_u64().map(|n| n as u32).or_else(|| c["position"].as_u64().map(|n| n as u32)),
             start_line: c["start_line"].as_u64().map(|n| n as u32),
+            side: Some(if side == "left" { "left" } else { "right" }.into()),
             author: Self::map_user(&c["user"]),
             created_at: c["created_at"].as_str().unwrap_or("").to_string(),
             commit_id: c["commit_id"].as_str().map(|s| s.to_string()),
@@ -1646,7 +1647,16 @@ impl GitPlatform for GiteeAdapter {
             .iter()
             .filter(|c| c["path"].is_string() && !c["path"].as_str().unwrap_or("").is_empty())
             .map(|c| {
-                let line = c["new_line"].as_u64().or_else(|| c["position"].as_u64()).map(|n| n as u32);
+                let (line, side) = if let Some(line) = c["new_line"].as_u64() {
+                    (Some(line as u32), Some("right".to_string()))
+                } else if let Some(line) = c["old_line"].as_u64() {
+                    (Some(line as u32), Some("left".to_string()))
+                } else {
+                    (
+                        c["position"].as_u64().map(|line| line as u32),
+                        c["position"].as_u64().map(|_| "right".to_string()),
+                    )
+                };
                 let comment_id = c["id"].as_str().map(str::to_string).unwrap_or_else(|| c["id"].to_string());
                 let reply_to_id = c["in_reply_to_id"]
                     .as_str()
@@ -1658,6 +1668,7 @@ impl GitPlatform for GiteeAdapter {
                     path: c["path"].as_str().unwrap_or("").to_string(),
                     line,
                     start_line: c["start_line"].as_u64().map(|n| n as u32),
+                    side,
                     author: Self::map_user(&c["user"]),
                     created_at: c["created_at"].as_str().unwrap_or("").to_string(),
                     commit_id: c["commit_id"].as_str().map(|s| s.to_string()),

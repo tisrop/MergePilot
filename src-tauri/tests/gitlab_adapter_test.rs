@@ -801,6 +801,7 @@ async fn test_gitlab_create_single_line_comment() {
     assert_eq!(comment.id, serde_json::json!(42));
     assert_eq!(comment.path, "src/lib.rs");
     assert_eq!(comment.line, Some(12));
+    assert_eq!(comment.side.as_deref(), Some("right"));
     assert_eq!(comment.commit_id.as_deref(), Some("head-sha"));
 }
 
@@ -870,6 +871,7 @@ async fn test_gitlab_create_multiline_old_side_comment() {
 
     assert_eq!(comment.line, Some(9));
     assert_eq!(comment.start_line, Some(7));
+    assert_eq!(comment.side.as_deref(), Some("left"));
 }
 
 #[tokio::test]
@@ -961,6 +963,7 @@ async fn test_gitlab_list_inline_comments_filters_regular_and_system_notes() {
     assert_eq!(comments.len(), 2);
     assert_eq!(comments[0].id, serde_json::json!(50));
     assert_eq!(comments[0].line, Some(12));
+    assert_eq!(comments[0].side.as_deref(), Some("right"));
     assert_eq!(comments[0].original_line, Some(10));
     assert_eq!(comments[0].thread_id, "inline");
     assert_eq!(comments[0].resolved, Some(false));

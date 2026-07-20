@@ -386,6 +386,7 @@ export interface PrComment {
   path: string;
   line: number | null;
   start_line: number | null;
+  side: "left" | "right" | null;
   author: User;
   created_at: string;
   commit_id: string | null;

@@ -28,6 +28,7 @@ function comment(overrides: Partial<PrComment>): PrComment {
     path: "src/main.ts",
     line: 12,
     start_line: null,
+    side: null,
     author,
     created_at: "2026-07-16T10:00:00Z",
     commit_id: "head-1",
@@ -257,7 +258,7 @@ describe("ReviewList", () => {
     );
   });
 
-  it("重命名文件使用新路径跳转，并在 Diff 无法定位时保留原始上下文提示", async () => {
+  it("重命名文件显示新路径并使用评论原路径定位", async () => {
     mocks.reviewCommentsList.mockResolvedValueOnce([
       comment({ path: "src/old.ts", original_commit_id: "old-head" }),
     ]);
@@ -301,7 +302,162 @@ describe("ReviewList", () => {
     });
 
     expect(wrapper.find(".path-button").text()).toContain("src/new.ts");
+    expect(wrapper.get(".review-thread").classes()).not.toContain("outdated");
     await wrapper.get(".path-button").trigger("click");
-    expect(wrapper.emitted("locateComment")?.at(-1)).toEqual(["src/new.ts", 12]);
+    expect(wrapper.emitted("locateComment")?.at(-1)).toEqual(["src/old.ts", 12]);
+  });
+
+  it("Diff 刷新后重新判断评论位置并自动展示原始 hunk", async () => {
+    mocks.reviewCommentsList.mockResolvedValueOnce([
+      comment({ path: "src/main.ts", original_commit_id: "old-head" }),
+    ]);
+    const diffFiles = [
+      {
+        filename: "src/main.ts",
+        status: "modified" as const,
+        patch: "@@ -12 +12 @@\n-old\n+new",
+        additions: 1,
+        deletions: 1,
+      },
+    ];
+    const currentPatch = {
+      filename: "src/main.ts",
+      old_path: "src/main.ts",
+      new_path: "src/main.ts",
+      status: "modified" as const,
+      additions: 1,
+      deletions: 1,
+      content_kind: "text" as const,
+      patch: "@@ -12 +12 @@\n-old\n+new",
+      hunks: [
+        {
+          header: "@@ -12 +12 @@",
+          old_start: 12,
+          old_count: 1,
+          new_start: 12,
+          new_count: 1,
+          section_header: null,
+          lines: [
+            { kind: "deletion" as const, content: "old", old_line: 12, new_line: null },
+            { kind: "addition" as const, content: "new", old_line: null, new_line: 12 },
+          ],
+        },
+      ],
+      message: null,
+    };
+    const wrapper = await mountList({ diffFiles, diffPatches: [currentPatch] });
+
+    expect(wrapper.get(".review-thread").classes()).not.toContain("outdated");
+    expect(wrapper.get(".path-button").attributes("disabled")).toBeUndefined();
+
+    await wrapper.setProps({
+      diffPatches: [
+        {
+          ...currentPatch,
+          hunks: [
+            {
+              ...currentPatch.hunks[0],
+              old_start: 30,
+              new_start: 30,
+              lines: [
+                { kind: "deletion", content: "other", old_line: 30, new_line: null },
+                { kind: "addition", content: "other", old_line: null, new_line: 30 },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    await flushPromises();
+
+    expect(wrapper.get(".review-thread").classes()).toContain("outdated");
+    expect(wrapper.get(".path-button").attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".original-code-hint").text()).toContain("当前 Diff 无法定位");
+    expect(wrapper.get(".mini-diff-view").text()).toContain("当时代码");
+  });
+
+  it("按评论侧提取 hunk，避免旧侧同号行抢先命中", async () => {
+    const patch =
+      "@@ -1,15 +1,0 @@\n-old1\n-old2\n-old3\n-old4\n-old5\n-old6\n-old7\n-old8\n-old9\n-old10\n-old11\n-old12\n-old13\n-old14\n-old15\n@@ -20,0 +10 @@\n+newcode";
+    mocks.reviewCommentsList.mockResolvedValueOnce([
+      comment({
+        line: 10,
+        original_line: 10,
+        side: "right",
+        diff_hunk: null,
+      }),
+    ]);
+    const wrapper = await mountList({
+      diffFiles: [
+        {
+          filename: "src/main.ts",
+          status: "modified",
+          patch,
+          additions: 1,
+          deletions: 15,
+        },
+      ],
+    });
+
+    await wrapper.get(".code-hint").trigger("click");
+
+    expect(wrapper.get(".mini-diff-view").text()).toContain("newcode");
+    expect(wrapper.get(".mini-diff-view").text()).not.toContain("old10");
+  });
+
+  it("缺少历史 hunk 时不使用 original_line 匹配当前 Patch", async () => {
+    mocks.reviewCommentsList.mockResolvedValueOnce([
+      comment({
+        path: "src/removed.ts",
+        line: null,
+        original_line: 27,
+        original_commit_id: "old-head",
+        diff_hunk: null,
+      }),
+    ]);
+    const wrapper = await mountList({
+      diffFiles: [
+        {
+          filename: "src/removed.ts",
+          status: "modified",
+          patch: "@@ -27 +27 @@\n-current old\n+current new",
+          additions: 1,
+          deletions: 1,
+        },
+      ],
+      diffPatches: [
+        {
+          filename: "src/removed.ts",
+          old_path: "src/removed.ts",
+          new_path: "src/removed.ts",
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          content_kind: "text",
+          patch: "@@ -27 +27 @@\n-current old\n+current new",
+          hunks: [
+            {
+              header: "@@ -27 +27 @@",
+              old_start: 27,
+              old_count: 1,
+              new_start: 27,
+              new_count: 1,
+              section_header: null,
+              lines: [
+                { kind: "deletion", content: "current old", old_line: 27, new_line: null },
+                { kind: "addition", content: "current new", old_line: null, new_line: 27 },
+              ],
+            },
+          ],
+          message: null,
+        },
+      ],
+    });
+
+    expect(wrapper.get(".path-button").attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".mini-diff-view").exists()).toBe(false);
+    expect(wrapper.get(".original-context-fallback").text()).toContain("src/removed.ts :27");
+    expect(wrapper.get(".original-context-fallback").text()).toContain("old-head");
+    expect(wrapper.get(".original-context-fallback").text()).toContain("评论正文仍保留");
   });
 });

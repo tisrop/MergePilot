@@ -41,34 +41,32 @@ async fn ensure_owned_comment(
 }
 
 /// Parse the new-file start line from a unified-diff hunk header like `@@ -1,3 +10,4 @@`.
-fn parse_hunk_new_start(line: &str) -> Option<i64> {
+fn parse_hunk_starts(line: &str) -> Option<(i64, i64)> {
     let mut parts = line.split_whitespace();
     if parts.next()? != "@@" {
         return None;
     }
-    let _old = parts.next()?;
+    let old_part = parts.next()?.strip_prefix('-')?;
     let new_part = parts.next()?;
     let new_part = new_part.strip_prefix('+')?;
-    let num_str = new_part.split(',').next()?;
-    num_str.parse::<i64>().ok()
+    let old_start = old_part.split(',').next()?.parse::<i64>().ok()?;
+    let new_start = new_part.split(',').next()?.parse::<i64>().ok()?;
+    Some((old_start, new_start))
 }
 
-/// Extract the diff hunk containing `line` from a unified-diff patch.
-/// Mirrors the frontend `extractHunkFromPatch` logic in ReviewList.vue, so that
-/// platforms whose API does not return `diff_hunk` (e.g. Gitee) can still show
-/// the commented code context.
-fn extract_hunk_from_patch(patch: &str, line: u32) -> Option<String> {
+fn extract_hunk_from_patch_side(patch: &str, line: u32, side: &str) -> Option<String> {
     let mut current_line: i64 = 0;
     let mut result: Vec<&str> = Vec::new();
     let mut in_range = false;
+    let mut trailing_lines = 0;
     let target = line as i64;
 
     for pl in patch.lines() {
-        if let Some(new_start) = parse_hunk_new_start(pl) {
+        if let Some((old_start, new_start)) = parse_hunk_starts(pl) {
             if in_range {
                 break;
             }
-            current_line = new_start - 1;
+            current_line = if side == "left" { old_start } else { new_start } - 1;
             result.clear();
             result.push(pl);
             continue;
@@ -77,20 +75,39 @@ fn extract_hunk_from_patch(patch: &str, line: u32) -> Option<String> {
             continue;
         }
         result.push(pl);
-        if !pl.starts_with('-') {
+        if pl.starts_with('\\') {
+            continue;
+        }
+        let advances_line = if side == "left" { !pl.starts_with('+') } else { !pl.starts_with('-') };
+        if advances_line {
             current_line += 1;
         }
-        if current_line >= target && !in_range {
+        let matches_target = advances_line && current_line == target;
+        if matches_target && !in_range {
             in_range = true;
+        } else if in_range {
+            trailing_lines += 1;
         }
-        if in_range && current_line > target + 8 {
+        if trailing_lines >= 8 {
             break;
         }
     }
-    if result.is_empty() {
+    if !in_range || result.is_empty() {
         None
     } else {
         Some(result.join("\n"))
+    }
+}
+
+/// Extract the diff hunk containing `line` from a unified-diff patch.
+/// When the API omits the side, prefer the new-file side after scanning the
+/// entire patch, then fall back to the old-file side.
+fn extract_hunk_from_patch(patch: &str, line: u32, side: Option<&str>) -> Option<String> {
+    match side {
+        Some("left") => extract_hunk_from_patch_side(patch, line, "left"),
+        Some("right") => extract_hunk_from_patch_side(patch, line, "right"),
+        _ => extract_hunk_from_patch_side(patch, line, "right")
+            .or_else(|| extract_hunk_from_patch_side(patch, line, "left")),
     }
 }
 
@@ -184,12 +201,12 @@ pub async fn review_comments_list(
     if !missing_indices.is_empty() {
         if let Ok((_, files)) = p.get_pr_diff(&owner, &repo, pr_number).await {
             for i in missing_indices {
-                let (cid, path, line) = {
+                let (cid, path, line, side) = {
                     let c = &comments[i];
-                    (value_id(&c.id), c.path.clone(), c.line.unwrap())
+                    (value_id(&c.id), c.path.clone(), c.line.unwrap(), c.side.clone())
                 };
                 if let Some(file) = files.iter().find(|f| patch_matches_path(f, &path)) {
-                    if let Some(hunk) = extract_hunk_from_patch(&file.patch, line) {
+                    if let Some(hunk) = extract_hunk_from_patch(&file.patch, line, side.as_deref()) {
                         let snapshot = CommentSnapshot {
                             comment_id: cid,
                             platform: platform.clone(),
@@ -407,6 +424,30 @@ mod tests {
         };
         assert!(patch_matches_path(&file, "src/old.rs"));
         assert!(patch_matches_path(&file, "src/new.rs"));
-        assert!(extract_hunk_from_patch(&file.patch, 4).is_some());
+        assert!(extract_hunk_from_patch(&file.patch, 4, None).is_some());
+        assert!(extract_hunk_from_patch(&file.patch, 99, None).is_none());
+
+        let deleted_line_patch = "@@ -7,2 +7 @@\n-removed\n kept";
+        assert!(
+            extract_hunk_from_patch(deleted_line_patch, 7, Some("left")).is_some_and(|hunk| hunk.contains("-removed"))
+        );
+    }
+
+    #[test]
+    fn extracts_hunk_from_requested_side_without_early_cross_side_match() {
+        let patch = "@@ -1,15 +1,0 @@\n-old1\n-old2\n-old3\n-old4\n-old5\n-old6\n-old7\n-old8\n-old9\n-old10\n-old11\n-old12\n-old13\n-old14\n-old15\n@@ -20,0 +10 @@\n+newcode";
+
+        let right = extract_hunk_from_patch(patch, 10, Some("right")).unwrap();
+        assert!(right.contains("@@ -20,0 +10 @@"));
+        assert!(right.contains("+newcode"));
+        assert!(!right.contains("-old10"));
+
+        let left = extract_hunk_from_patch(patch, 10, Some("left")).unwrap();
+        assert!(left.contains("@@ -1,15 +1,0 @@"));
+        assert!(left.contains("-old10"));
+        assert!(!left.contains("+newcode"));
+
+        assert_eq!(extract_hunk_from_patch(patch, 10, None), Some(right));
+        assert!(extract_hunk_from_patch(patch, 99, None).is_none());
     }
 }

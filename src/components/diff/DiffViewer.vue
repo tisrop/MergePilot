@@ -304,16 +304,26 @@ function resolveLocationFile(
 function findPatchLocation(
   patch: StandardPatchFile,
   line: number,
+  requestedPath: string,
 ): { side: DiffSide; line: number } | null {
-  for (const hunk of patch.hunks) {
-    if (hunk.lines.some((candidate) => candidate.new_line === line)) {
-      return { side: "right", line };
-    }
-  }
-  for (const hunk of patch.hunks) {
-    if (hunk.lines.some((candidate) => candidate.old_line === line)) {
-      return { side: "left", line };
-    }
+  const hasLine = (side: DiffSide): boolean =>
+    patch.hunks.some((hunk) =>
+      hunk.lines.some((candidate) =>
+        side === "right" ? candidate.new_line === line : candidate.old_line === line,
+      ),
+    );
+  const isRenamed = patch.old_path !== patch.new_path;
+  const preferredSide: DiffSide | null =
+    isRenamed && requestedPath === patch.old_path
+      ? "left"
+      : requestedPath === patch.new_path || requestedPath === patch.filename
+        ? "right"
+        : null;
+  const sides: DiffSide[] = preferredSide
+    ? [preferredSide, preferredSide === "left" ? "right" : "left"]
+    : ["right", "left"];
+  for (const side of sides) {
+    if (hasLine(side)) return { side, line };
   }
   return null;
 }
@@ -411,7 +421,7 @@ async function locateDiffRequest(request: DiffLocationRequest): Promise<void> {
     return;
   }
 
-  const target = findPatchLocation(resolved.patch, request.line);
+  const target = findPatchLocation(resolved.patch, request.line, path);
   if (!target) {
     emitLocationFailure(
       request,
