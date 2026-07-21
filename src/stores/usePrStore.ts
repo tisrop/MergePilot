@@ -92,7 +92,12 @@ export const usePrStore = defineStore("pr", () => {
 
   async function fetchPrList(platform: Platform, owner: string, repo: string) {
     const sequence = ++listRequestSequence;
-    listContextKey = `${platform}:${owner}/${repo}`;
+    const contextKey = `${platform}:${owner}/${repo}`;
+    if (listContextKey !== contextKey) {
+      list.value = [];
+      totalPages.value = 1;
+    }
+    listContextKey = contextKey;
     loading.value = true;
     error.value = null;
     try {
@@ -117,13 +122,36 @@ export const usePrStore = defineStore("pr", () => {
     }
   }
 
-  async function fetchPrDetail(platform: Platform, owner: string, repo: string, number: number) {
+  async function fetchPrDetail(
+    platform: Platform,
+    owner: string,
+    repo: string,
+    number: number,
+  ): Promise<boolean> {
     const sequence = ++detailRequestSequence;
-    detailContextKey = `${platform}:${owner}/${repo}:${number}`;
+    const contextKey = `${platform}:${owner}/${repo}:${number}`;
+    if (detailContextKey !== contextKey) {
+      currentPr.value = null;
+      diff.value = null;
+      mergeReadiness.value = null;
+      readinessError.value = null;
+    }
+    detailContextKey = contextKey;
     loading.value = true;
+    error.value = null;
     try {
       const result = await prDetail(platform, owner, repo, number);
-      if (sequence === detailRequestSequence) currentPr.value = result;
+      if (sequence !== detailRequestSequence || detailContextKey !== contextKey) return false;
+      currentPr.value = result;
+      return true;
+    } catch (requestError) {
+      if (sequence !== detailRequestSequence || detailContextKey !== contextKey) return false;
+      currentPr.value = null;
+      const message = typeof requestError === "string" ? requestError : String(requestError);
+      error.value = /\b404\b|not found/i.test(message)
+        ? `找不到 ${owner}/${repo} #${number}，该 PR / MR 可能不存在，或当前 Token 无权访问。`
+        : message;
+      return false;
     } finally {
       if (sequence === detailRequestSequence) loading.value = false;
     }

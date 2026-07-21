@@ -7,6 +7,14 @@ import { useUpdateStore } from "@/stores/useUpdateStore";
 import App from "../App.vue";
 
 const storage = new Map<string, string>();
+const noUpdate = {
+  current_version: "0.7.0",
+  available: false,
+  version: null,
+  notes: null,
+  published_at: null,
+  update_mode: "installer" as const,
+};
 
 vi.stubGlobal("localStorage", {
   getItem: (key: string) => storage.get(key) ?? null,
@@ -59,5 +67,67 @@ describe("App", () => {
     wrapper.unmount();
     expect(window.__goToSettings).toBeUndefined();
     expect(window.__openCommandPalette).toBeUndefined();
+  });
+
+  it("普通参数路由变化时复用页面组件", async () => {
+    vi.mocked(checkForUpdates).mockResolvedValue(noUpdate);
+    const mounted = vi.fn();
+    const page = {
+      data: () => ({ marker: "" }),
+      mounted,
+      template: '<input data-testid="route-marker" v-model="marker" />',
+    };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/workspace/:section", name: "workspace", component: page }],
+    });
+    await router.push("/workspace/first");
+    await router.isReady();
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), router],
+        stubs: { CommandPalette: true, NotificationManager: true },
+      },
+    });
+    await wrapper.get<HTMLInputElement>('[data-testid="route-marker"]').setValue("保留状态");
+
+    await router.push("/workspace/second");
+    await flushPromises();
+
+    expect(mounted).toHaveBeenCalledOnce();
+    expect(wrapper.get<HTMLInputElement>('[data-testid="route-marker"]').element.value).toBe(
+      "保留状态",
+    );
+    wrapper.unmount();
+  });
+
+  it("切换 PR 详情编号时重新挂载详情组件", async () => {
+    vi.mocked(checkForUpdates).mockResolvedValue(noUpdate);
+    const mounted = vi.fn();
+    const detailPage = { mounted, template: "<div>PR 详情</div>" };
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        {
+          path: "/pr/:platform/:owner/:repo/:number",
+          name: "pr-detail",
+          component: detailPage,
+        },
+      ],
+    });
+    await router.push("/pr/github/team/repo/1");
+    await router.isReady();
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), router],
+        stubs: { CommandPalette: true, NotificationManager: true },
+      },
+    });
+
+    await router.push("/pr/github/team/repo/2");
+    await flushPromises();
+
+    expect(mounted).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
   });
 });

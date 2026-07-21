@@ -116,6 +116,48 @@ async fn test_gitee_lists_branches_and_creates_from_fork() {
 }
 
 #[tokio::test]
+async fn test_gitee_lists_pr_dependency_candidates() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v5/repos/team/repo/pulls/8"))
+        .and(query_param("access_token", "token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "number": 8,
+            "title": "Stack child",
+            "state": "open",
+            "merged_at": null,
+            "head": { "ref": "feature-b", "repo": { "full_name": "team/repo" } },
+            "base": { "ref": "feature-a", "repo": { "full_name": "team/repo" } }
+        })))
+        .mount(&mock_server)
+        .await;
+    for (filter, value) in [("base", "feature-b"), ("head", "team:feature-a")] {
+        Mock::given(method("GET"))
+            .and(path("/api/v5/repos/team/repo/pulls"))
+            .and(query_param("state", "all"))
+            .and(query_param(filter, value))
+            .and(query_param("per_page", "100"))
+            .and(query_param("page", "1"))
+            .and(query_param("access_token", "token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock_server)
+            .await;
+    }
+    let adapter =
+        GiteeAdapter::new(HttpClient::new(), "token".into()).with_base_url(format!("{}/api/v5", mock_server.uri()));
+
+    let result = adapter.list_pr_dependency_candidates("team", "repo", 8).await.expect("dependency candidates");
+
+    assert!(!result.truncated);
+    assert_eq!(result.current.number, 8);
+    let candidates = result.items;
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].number, 8);
+    assert_eq!(candidates[0].source_branch, "feature-b");
+    assert_eq!(candidates[0].target_branch, "feature-a");
+}
+
+#[tokio::test]
 async fn test_gitee_create_compare_marks_an_incomplete_preview() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))

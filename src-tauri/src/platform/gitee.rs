@@ -680,7 +680,7 @@ impl GiteeAdapter {
 #[async_trait]
 impl super::JsonPageSource for GiteeAdapter {
     async fn fetch_json_page(&self, endpoint: &str, page: u32) -> Result<super::JsonPage, AppError> {
-        let url = format!("{endpoint}?per_page={}&page={page}", super::JSON_PAGE_SIZE);
+        let url = super::json_page_url(endpoint, page);
         let authenticated_url = format!("{}&{}", url, self.auth_query());
         let response = self.client.get(&authenticated_url).header("User-Agent", "mergebeacon").send().await?;
         let status = response.status();
@@ -977,6 +977,62 @@ impl GitPlatform for GiteeAdapter {
             milestone: Self::metadata_milestone(&json["milestone"]),
             metadata_permissions,
         })
+    }
+
+    async fn list_pr_dependency_candidates(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrDependencyCandidates, AppError> {
+        let repository = format!("{owner}/{repo}");
+        let map_candidate = |pr: &Value| {
+            let number = pr["number"].as_u64()?;
+            let source_branch = pr["head"]["ref"].as_str()?.trim().to_string();
+            let target_branch = pr["base"]["ref"].as_str()?.trim().to_string();
+            if source_branch.is_empty() || target_branch.is_empty() {
+                return None;
+            }
+            let state = match (pr["state"].as_str().unwrap_or(""), pr["merged_at"].is_null()) {
+                ("merged", _) | (_, false) => PrState::Merged,
+                ("closed", _) => PrState::Closed,
+                _ => PrState::Open,
+            };
+            Some(PrDependencyCandidate {
+                number,
+                title: pr["title"].as_str().unwrap_or("").to_string(),
+                state,
+                source_branch,
+                target_branch,
+                source_repository: pr["head"]["repo"]["full_name"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("gitee-unknown-source:{number}")),
+                target_repository: pr["base"]["repo"]["full_name"].as_str().unwrap_or(&repository).to_string(),
+            })
+        };
+
+        let current_url = format!("{}/repos/{owner}/{repo}/pulls/{pr_number}", self.base_url);
+        let current_json = self.get_json::<Value>(&current_url).await?;
+        let current =
+            map_candidate(&current_json).ok_or_else(|| AppError::Api("当前 PR 缺少依赖分析所需的分支信息".into()))?;
+        super::walk_pr_dependency_candidates(self, current, map_candidate, |candidate| {
+            let target_owner = candidate.target_repository.split('/').next().unwrap_or(owner);
+            let parent_head = format!("{target_owner}:{}", candidate.target_branch);
+            [
+                format!(
+                    "{}/repos/{owner}/{repo}/pulls?state=all&base={}",
+                    self.base_url,
+                    urlencoding::encode(&candidate.source_branch)
+                ),
+                format!(
+                    "{}/repos/{owner}/{repo}/pulls?state=all&head={}",
+                    self.base_url,
+                    urlencoding::encode(&parent_head)
+                ),
+            ]
+        })
+        .await
     }
 
     async fn list_branches(&self, owner: &str, repo: &str) -> Result<PrBranchOptions, AppError> {

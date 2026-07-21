@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => ({
     readinessLoading: false,
     readinessError: null as string | null,
     error: null as string | null,
-    fetchPrDetail: vi.fn().mockResolvedValue(undefined),
+    fetchPrDetail: vi.fn().mockResolvedValue(true),
     fetchPrDiff: vi.fn().mockResolvedValue(undefined),
     fetchMergeReadiness: vi.fn().mockResolvedValue(undefined),
     mergePr: vi.fn(),
@@ -150,6 +150,7 @@ function mountPage(stubs: Record<string, unknown> = {}) {
         ReviewForm: true,
         ReviewList: true,
         AiReviewPanel: true,
+        PrDependenciesPanel: true,
         MergeReadinessPanel: true,
         ...stubs,
       },
@@ -192,6 +193,29 @@ describe("PrDetailPage 关闭权限", () => {
     await button.trigger("click");
 
     expect(mocks.router.push).toHaveBeenCalledWith({ name: "pr-list" });
+  });
+
+  it("详情不存在时不再请求 Diff 和合并状态", async () => {
+    mocks.prStore.currentPr = null;
+    mocks.prStore.fetchPrDetail.mockResolvedValueOnce(false);
+
+    mountPage();
+    await flushPromises();
+
+    expect(mocks.prStore.fetchPrDetail).toHaveBeenCalledWith("github", "owner", "repo", 42);
+    expect(mocks.prStore.fetchPrDiff).not.toHaveBeenCalled();
+    expect(mocks.prStore.fetchMergeReadiness).not.toHaveBeenCalled();
+  });
+
+  it("详情 Action 没有返回值但已写入当前详情时仍加载 Diff", async () => {
+    mocks.prStore.currentPr = detail;
+    mocks.prStore.fetchPrDetail.mockResolvedValueOnce(undefined);
+
+    mountPage();
+    await flushPromises();
+
+    expect(mocks.prStore.fetchPrDiff).toHaveBeenCalledWith("github", "owner", "repo", 42);
+    expect(mocks.prStore.fetchMergeReadiness).toHaveBeenCalledWith("github", "owner", "repo", 42);
   });
 
   it("非作者且没有仓库写入权限时禁用关闭按钮", async () => {
@@ -279,6 +303,41 @@ describe("PrDetailPage 关闭权限", () => {
     expect(mounted).toHaveBeenCalledOnce();
     expect(wrapper.get<HTMLInputElement>('[data-testid="ai-review-result"]').element.value).toBe(
       "已完成评审",
+    );
+  });
+
+  it("按 Diff、依赖关系、评审意见和 AI 评审排列页签", () => {
+    const wrapper = mountPage();
+
+    expect(wrapper.findAll(".tabs button").map((button) => button.text())).toEqual([
+      "Diff",
+      "依赖关系",
+      "评审意见",
+      "AI 评审",
+    ]);
+  });
+
+  it("依赖关系页签按需挂载且切换后保留状态", async () => {
+    const mounted = vi.fn();
+    const wrapper = mountPage({
+      PrDependenciesPanel: {
+        data: () => ({ marker: "" }),
+        mounted,
+        template: `<input data-testid="dependency-marker" v-model="marker" />`,
+      },
+    });
+    const tab = (label: string) =>
+      wrapper.findAll(".tabs button").find((button) => button.text() === label)!;
+
+    expect(wrapper.find('[data-testid="dependency-marker"]').exists()).toBe(false);
+    await tab("依赖关系").trigger("click");
+    await wrapper.get<HTMLInputElement>('[data-testid="dependency-marker"]').setValue("已加载");
+    await tab("Diff").trigger("click");
+    await tab("依赖关系").trigger("click");
+
+    expect(mounted).toHaveBeenCalledOnce();
+    expect(wrapper.get<HTMLInputElement>('[data-testid="dependency-marker"]').element.value).toBe(
+      "已加载",
     );
   });
 

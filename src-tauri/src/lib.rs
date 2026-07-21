@@ -141,6 +141,7 @@ pub fn run() {
             inbox::review_inbox_list,
             pr::pr_list,
             pr::pr_detail,
+            pr::pr_dependencies,
             pr::pr_branches,
             pr::pr_labels,
             pr::pr_participant_suggestions,

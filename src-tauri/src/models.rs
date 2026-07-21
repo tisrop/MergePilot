@@ -158,6 +158,50 @@ pub struct PrDetail {
     pub metadata_permissions: PrMetadataPermissions,
 }
 
+#[derive(Debug, Clone)]
+pub struct PrDependencyCandidate {
+    pub number: u64,
+    pub title: String,
+    pub state: PrState,
+    pub source_branch: String,
+    pub target_branch: String,
+    pub source_repository: String,
+    pub target_repository: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PrDependencyCandidates {
+    pub current: PrDependencyCandidate,
+    pub items: Vec<PrDependencyCandidate>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrDependencyNode {
+    pub number: u64,
+    pub title: String,
+    pub state: PrState,
+    pub source_branch: String,
+    pub target_branch: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrDependencyEdge {
+    pub parent_number: u64,
+    pub child_number: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrDependencyGraph {
+    pub current_number: u64,
+    pub nodes: Vec<PrDependencyNode>,
+    pub edges: Vec<PrDependencyEdge>,
+    pub suggested_merge_order: Vec<u64>,
+    pub blocking_parent_numbers: Vec<u64>,
+    pub has_cycle: bool,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrMetadataUpdate {
     pub title: String,

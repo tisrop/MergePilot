@@ -444,6 +444,57 @@ async fn test_github_list_prs() {
 }
 
 #[tokio::test]
+async fn test_github_lists_pr_dependency_candidates() {
+    let mock_server = MockServer::start().await;
+    let pull = |number: u64, source: &str, target: &str| {
+        serde_json::json!({
+            "number": number,
+            "title": format!("Stack PR {number}"),
+            "state": "open",
+            "merged_at": null,
+            "head": { "ref": source, "repo": { "full_name": "octocat/hello-world" } },
+            "base": { "ref": target, "repo": { "full_name": "octocat/hello-world" } }
+        })
+    };
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/pulls/2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pull(2, "feature-b", "feature-a")))
+        .mount(&mock_server)
+        .await;
+    let neighbors = [
+        ("base", "feature-b", vec![pull(3, "feature-c", "feature-b")]),
+        ("head", "octocat:feature-a", vec![pull(1, "feature-a", "main")]),
+        ("base", "feature-c", vec![pull(4, "feature-d", "feature-c")]),
+        ("head", "octocat:feature-b", vec![pull(2, "feature-b", "feature-a")]),
+        ("base", "feature-a", vec![pull(2, "feature-b", "feature-a")]),
+        ("head", "octocat:main", Vec::new()),
+        ("base", "feature-d", Vec::new()),
+        ("head", "octocat:feature-c", vec![pull(3, "feature-c", "feature-b")]),
+    ];
+    for (filter, value, response) in neighbors {
+        Mock::given(method("GET"))
+            .and(path("/repos/octocat/hello-world/pulls"))
+            .and(query_param("state", "all"))
+            .and(query_param(filter, value))
+            .and(query_param("per_page", "100"))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response))
+            .mount(&mock_server)
+            .await;
+    }
+    let adapter = GitHubAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let result =
+        adapter.list_pr_dependency_candidates("octocat", "hello-world", 2).await.expect("dependency candidates");
+    assert!(!result.truncated);
+    assert_eq!(result.current.number, 2);
+    let candidates = result.items;
+    assert_eq!(candidates.iter().map(|candidate| candidate.number).collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+    assert_eq!(candidates[3].source_branch, "feature-d");
+    assert_eq!(candidates[3].target_branch, "feature-c");
+}
+
+#[tokio::test]
 async fn test_github_list_prs_keeps_open_items_when_status_batch_fails() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))

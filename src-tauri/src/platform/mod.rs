@@ -122,6 +122,9 @@ pub(crate) fn create_compare_is_incomplete(json: &serde_json::Value, commit_coun
 
 pub(crate) const JSON_PAGE_SIZE: usize = 100;
 const MAX_JSON_PAGES: u32 = 1_000;
+const MAX_DEPENDENCY_QUERY_PAGES: u32 = 2;
+const MAX_DEPENDENCY_BRANCH_QUERIES: usize = 40;
+const MAX_DEPENDENCY_CANDIDATES: usize = 200;
 
 pub(crate) struct JsonPage {
     pub items: Vec<serde_json::Value>,
@@ -159,6 +162,95 @@ where
         page = next_page;
     }
     Ok(items)
+}
+
+pub(crate) async fn collect_json_pages_limited<S>(
+    source: &S,
+    endpoint: &str,
+    max_pages: u32,
+) -> Result<(Vec<serde_json::Value>, bool), AppError>
+where
+    S: JsonPageSource + Sync,
+{
+    if max_pages == 0 {
+        return Err(AppError::Api("分页上限必须大于 0".into()));
+    }
+    let mut items = Vec::new();
+    let mut page = 1_u32;
+    let mut pages_fetched = 0_u32;
+    let max_pages = max_pages.min(MAX_JSON_PAGES);
+    loop {
+        let result = source.fetch_json_page(endpoint, page).await?;
+        pages_fetched = pages_fetched.saturating_add(1);
+        let item_count = result.items.len();
+        items.extend(result.items);
+        let next_page = result
+            .next_page
+            .or_else(|| (!result.pagination_known && item_count == JSON_PAGE_SIZE).then(|| page.saturating_add(1)));
+        let Some(next_page) = next_page else {
+            return Ok((items, false));
+        };
+        if next_page <= page {
+            return Err(AppError::Api("远端分页游标未向前推进".into()));
+        }
+        if pages_fetched >= max_pages {
+            return Ok((items, true));
+        }
+        page = next_page;
+    }
+}
+
+pub(crate) async fn walk_pr_dependency_candidates<S, MapCandidate, NeighborEndpoints>(
+    source: &S,
+    current: PrDependencyCandidate,
+    map_candidate: MapCandidate,
+    neighbor_endpoints: NeighborEndpoints,
+) -> Result<PrDependencyCandidates, AppError>
+where
+    S: JsonPageSource + Sync,
+    MapCandidate: Fn(&serde_json::Value) -> Option<PrDependencyCandidate> + Sync,
+    NeighborEndpoints: Fn(&PrDependencyCandidate) -> [String; 2] + Sync,
+{
+    let mut candidates = std::collections::BTreeMap::from([(current.number, current.clone())]);
+    let mut queue = std::collections::VecDeque::from([current.clone()]);
+    let mut queried = std::collections::BTreeSet::new();
+    let mut truncated = false;
+
+    'walk: while let Some(candidate) = queue.pop_front() {
+        for endpoint in neighbor_endpoints(&candidate) {
+            if !queried.insert(endpoint.clone()) {
+                continue;
+            }
+            if queried.len() > MAX_DEPENDENCY_BRANCH_QUERIES {
+                truncated = true;
+                break 'walk;
+            }
+            let (items, page_limit_reached) =
+                collect_json_pages_limited(source, &endpoint, MAX_DEPENDENCY_QUERY_PAGES).await?;
+            truncated |= page_limit_reached;
+            for item in items {
+                let Some(candidate) = map_candidate(&item) else {
+                    continue;
+                };
+                if candidates.contains_key(&candidate.number) {
+                    continue;
+                }
+                if candidates.len() >= MAX_DEPENDENCY_CANDIDATES {
+                    truncated = true;
+                    break 'walk;
+                }
+                queue.push_back(candidate.clone());
+                candidates.insert(candidate.number, candidate);
+            }
+        }
+    }
+
+    Ok(PrDependencyCandidates { current, items: candidates.into_values().collect(), truncated })
+}
+
+pub(crate) fn json_page_url(endpoint: &str, page: u32) -> String {
+    let separator = if endpoint.contains('?') { '&' } else { '?' };
+    format!("{endpoint}{separator}per_page={JSON_PAGE_SIZE}&page={page}")
 }
 
 pub(crate) fn next_page_from_link(link: Option<&str>) -> Option<u32> {
@@ -278,6 +370,13 @@ pub trait GitPlatform: Send + Sync {
     ) -> Result<Paginated<ReviewInboxItem>, AppError>;
 
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError>;
+
+    async fn list_pr_dependency_candidates(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrDependencyCandidates, AppError>;
 
     async fn list_branches(&self, owner: &str, repo: &str) -> Result<PrBranchOptions, AppError>;
 
@@ -455,25 +554,33 @@ mod tests {
     use std::{collections::VecDeque, sync::Mutex};
 
     use super::{
-        capabilities_for, collect_json_pages, create_compare_is_incomplete, next_page_from_link, normalize_api_base,
-        AppError, JsonPage, JsonPageSource, JSON_PAGE_SIZE,
+        capabilities_for, collect_json_pages, collect_json_pages_limited, create_compare_is_incomplete, json_page_url,
+        next_page_from_link, normalize_api_base, walk_pr_dependency_candidates, AppError, JsonPage, JsonPageSource,
+        JSON_PAGE_SIZE,
     };
+    use crate::models::{PrDependencyCandidate, PrState};
 
     struct MockPageSource {
         pages: Mutex<VecDeque<JsonPage>>,
         requested_pages: Mutex<Vec<u32>>,
+        requested_endpoints: Mutex<Vec<String>>,
     }
 
     impl MockPageSource {
         fn new(pages: Vec<JsonPage>) -> Self {
-            Self { pages: Mutex::new(pages.into()), requested_pages: Mutex::new(Vec::new()) }
+            Self {
+                pages: Mutex::new(pages.into()),
+                requested_pages: Mutex::new(Vec::new()),
+                requested_endpoints: Mutex::new(Vec::new()),
+            }
         }
     }
 
     #[async_trait::async_trait]
     impl JsonPageSource for MockPageSource {
-        async fn fetch_json_page(&self, _endpoint: &str, page: u32) -> Result<JsonPage, AppError> {
+        async fn fetch_json_page(&self, endpoint: &str, page: u32) -> Result<JsonPage, AppError> {
             self.requested_pages.lock().unwrap().push(page);
+            self.requested_endpoints.lock().unwrap().push(endpoint.to_string());
             self.pages.lock().unwrap().pop_front().ok_or_else(|| AppError::Api("测试分页响应不足".into()))
         }
     }
@@ -485,6 +592,31 @@ mod tests {
         async fn fetch_json_page(&self, _endpoint: &str, page: u32) -> Result<JsonPage, AppError> {
             Ok(JsonPage { items: Vec::new(), next_page: Some(page + 1), pagination_known: true })
         }
+    }
+
+    fn dependency_candidate_json(number: u64, source: &str, target: &str) -> serde_json::Value {
+        serde_json::json!({
+            "number": number,
+            "title": format!("PR {number}"),
+            "source": source,
+            "target": target,
+        })
+    }
+
+    fn map_dependency_candidate(json: &serde_json::Value) -> Option<PrDependencyCandidate> {
+        Some(PrDependencyCandidate {
+            number: json["number"].as_u64()?,
+            title: json["title"].as_str()?.to_string(),
+            state: PrState::Open,
+            source_branch: json["source"].as_str()?.to_string(),
+            target_branch: json["target"].as_str()?.to_string(),
+            source_repository: "team/repo".into(),
+            target_repository: "team/repo".into(),
+        })
+    }
+
+    fn dependency_endpoints(candidate: &PrDependencyCandidate) -> [String; 2] {
+        [format!("children:{}", candidate.source_branch), format!("parents:{}", candidate.target_branch)]
     }
 
     #[test]
@@ -525,6 +657,15 @@ mod tests {
             "https://git.example.com/proxy/api/v4"
         );
         assert_eq!(normalize_api_base("gitee", "http://gitee.internal/base"), "http://gitee.internal/base/api/v5");
+    }
+
+    #[test]
+    fn appends_pagination_to_endpoints_with_existing_queries() {
+        assert_eq!(
+            json_page_url("https://example.test/items?state=all", 2),
+            "https://example.test/items?state=all&per_page=100&page=2"
+        );
+        assert_eq!(json_page_url("https://example.test/items", 1), "https://example.test/items?per_page=100&page=1");
     }
 
     #[test]
@@ -578,6 +719,108 @@ mod tests {
 
         assert_eq!(items.len(), JSON_PAGE_SIZE + 1);
         assert_eq!(*source.requested_pages.lock().unwrap(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn limited_collection_stops_at_the_requested_page_count() {
+        let source = MockPageSource::new(vec![
+            JsonPage { items: vec![serde_json::json!({ "id": 1 })], next_page: Some(3), pagination_known: true },
+            JsonPage { items: vec![serde_json::json!({ "id": 2 })], next_page: Some(4), pagination_known: true },
+        ]);
+
+        let (items, truncated) = collect_json_pages_limited(&source, "https://example.test/items", 2).await.unwrap();
+
+        assert_eq!(items.len(), 2);
+        assert!(truncated);
+        assert_eq!(*source.requested_pages.lock().unwrap(), vec![1, 3]);
+    }
+
+    #[tokio::test]
+    async fn dependency_walker_discovers_neighbors_and_deduplicates_candidates() {
+        let source = MockPageSource::new(vec![
+            JsonPage {
+                items: vec![dependency_candidate_json(3, "feature-c", "feature-b")],
+                next_page: None,
+                pagination_known: true,
+            },
+            JsonPage { items: Vec::new(), next_page: None, pagination_known: true },
+            JsonPage { items: Vec::new(), next_page: None, pagination_known: true },
+            JsonPage {
+                items: vec![dependency_candidate_json(2, "feature-b", "feature-a")],
+                next_page: None,
+                pagination_known: true,
+            },
+        ]);
+        let current = map_dependency_candidate(&dependency_candidate_json(2, "feature-b", "feature-a")).unwrap();
+
+        let result = walk_pr_dependency_candidates(&source, current, map_dependency_candidate, dependency_endpoints)
+            .await
+            .unwrap();
+
+        assert_eq!(result.items.iter().map(|candidate| candidate.number).collect::<Vec<_>>(), vec![2, 3]);
+        assert!(!result.truncated);
+        assert_eq!(
+            *source.requested_endpoints.lock().unwrap(),
+            vec!["children:feature-b", "parents:feature-a", "children:feature-c", "parents:feature-b"]
+        );
+    }
+
+    #[tokio::test]
+    async fn dependency_walker_marks_page_limit_truncation() {
+        let source = MockPageSource::new(vec![
+            JsonPage { items: Vec::new(), next_page: Some(2), pagination_known: true },
+            JsonPage { items: Vec::new(), next_page: Some(3), pagination_known: true },
+            JsonPage { items: Vec::new(), next_page: None, pagination_known: true },
+        ]);
+        let current = map_dependency_candidate(&dependency_candidate_json(1, "feature-a", "main")).unwrap();
+
+        let result = walk_pr_dependency_candidates(&source, current, map_dependency_candidate, dependency_endpoints)
+            .await
+            .unwrap();
+
+        assert!(result.truncated);
+        assert_eq!(*source.requested_pages.lock().unwrap(), vec![1, 2, 1]);
+    }
+
+    #[tokio::test]
+    async fn dependency_walker_marks_query_limit_truncation() {
+        let pages = (0..super::MAX_DEPENDENCY_BRANCH_QUERIES)
+            .map(|index| {
+                let items = if index % 2 == 0 {
+                    let number = index as u64 / 2 + 2;
+                    vec![dependency_candidate_json(number, &format!("feature-{number}"), &format!("base-{number}"))]
+                } else {
+                    Vec::new()
+                };
+                JsonPage { items, next_page: None, pagination_known: true }
+            })
+            .collect();
+        let source = MockPageSource::new(pages);
+        let current = map_dependency_candidate(&dependency_candidate_json(1, "feature-1", "base-1")).unwrap();
+
+        let result = walk_pr_dependency_candidates(&source, current, map_dependency_candidate, dependency_endpoints)
+            .await
+            .unwrap();
+
+        assert!(result.truncated);
+        assert_eq!(source.requested_endpoints.lock().unwrap().len(), super::MAX_DEPENDENCY_BRANCH_QUERIES);
+    }
+
+    #[tokio::test]
+    async fn dependency_walker_marks_candidate_limit_truncation() {
+        let items = (2..=super::MAX_DEPENDENCY_CANDIDATES as u64 + 1)
+            .map(|number| dependency_candidate_json(number, &format!("feature-{number}"), &format!("base-{number}")))
+            .collect();
+        let source = MockPageSource::new(vec![JsonPage { items, next_page: None, pagination_known: true }]);
+        let current = map_dependency_candidate(&dependency_candidate_json(1, "feature-1", "base-1")).unwrap();
+
+        let result = walk_pr_dependency_candidates(&source, current, map_dependency_candidate, dependency_endpoints)
+            .await
+            .unwrap();
+
+        assert!(result.truncated);
+        assert_eq!(result.items.len(), super::MAX_DEPENDENCY_CANDIDATES);
+        assert_eq!(source.requested_endpoints.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

@@ -61,6 +61,76 @@ describe("usePrStore", () => {
     expect(store.list).toEqual([]);
   });
 
+  it("切换仓库后立即清除旧仓库的 PR 列表", async () => {
+    const oldItem: PrSummary = {
+      number: 3989,
+      title: "其他仓库 PR",
+      author: { id: 1, login: "old", name: "Old", avatar_url: "" },
+      state: "open",
+      created_at: "",
+      updated_at: "",
+      labels: [],
+    };
+    const newRequest = deferred<Paginated<PrSummary>>();
+    vi.mocked(prList)
+      .mockResolvedValueOnce({ items: [oldItem], page: 1, total_pages: 1, total_count: 1 })
+      .mockReturnValueOnce(newRequest.promise);
+    const store = usePrStore();
+    await store.fetchPrList("github", "other", "repo");
+
+    const pending = store.fetchPrList("github", "ultraworkers", "claw-code");
+
+    expect(store.list).toEqual([]);
+    expect(store.totalPages).toBe(1);
+    newRequest.resolve({ items: [], page: 1, total_pages: 1, total_count: 0 });
+    await pending;
+  });
+
+  it("详情上下文变化且请求返回 404 时清除旧详情并显示明确提示", async () => {
+    const oldDetail: PrDetail = {
+      summary: {
+        number: 3989,
+        title: "其他仓库 PR",
+        author: { id: 1, login: "old", name: "Old", avatar_url: "" },
+        state: "open",
+        created_at: "",
+        updated_at: "",
+        labels: [],
+      },
+      body: "",
+      source_branch: "feature",
+      target_branch: "main",
+      mergeable: true,
+      head_sha: "old-sha",
+      base_sha: "base-sha",
+      draft: false,
+      reviewers: [],
+      assignees: [],
+      milestone: null,
+      metadata_permissions: {
+        can_edit_title_body: true,
+        can_toggle_draft: true,
+        can_manage_reviewers: true,
+        can_manage_assignees: true,
+        can_manage_labels: true,
+        can_manage_milestone: true,
+      },
+    };
+    vi.mocked(prDetail)
+      .mockResolvedValueOnce(oldDetail)
+      .mockRejectedValueOnce(new Error("GitHub API 404 Not Found"));
+    const store = usePrStore();
+    await store.fetchPrDetail("github", "other", "repo", 3989);
+
+    const loaded = await store.fetchPrDetail("github", "ultraworkers", "claw-code", 3989);
+
+    expect(loaded).toBe(false);
+    expect(store.currentPr).toBeNull();
+    expect(store.error).toBe(
+      "找不到 ultraworkers/claw-code #3989，该 PR / MR 可能不存在，或当前 Token 无权访问。",
+    );
+  });
+
   it("合并部分成功时仍刷新详情并返回失败 Issue", async () => {
     const outcome = {
       merge: { merged: true, message: "merged", sha: "abc" },

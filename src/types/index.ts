@@ -148,6 +148,29 @@ export interface PrDetail {
   metadata_permissions: PrMetadataPermissions;
 }
 
+export interface PrDependencyNode {
+  number: number;
+  title: string;
+  state: PrState;
+  source_branch: string;
+  target_branch: string;
+}
+
+export interface PrDependencyEdge {
+  parent_number: number;
+  child_number: number;
+}
+
+export interface PrDependencyGraph {
+  current_number: number;
+  nodes: PrDependencyNode[];
+  edges: PrDependencyEdge[];
+  suggested_merge_order: number[];
+  blocking_parent_numbers: number[];
+  has_cycle: boolean;
+  truncated: boolean;
+}
+
 export interface PrMetadataUpdate {
   title: string;
   body: string;

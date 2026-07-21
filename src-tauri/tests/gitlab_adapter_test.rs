@@ -111,6 +111,48 @@ async fn test_gitlab_lists_branches_and_creates_draft_from_fork() {
 }
 
 #[tokio::test]
+async fn test_gitlab_lists_pr_dependency_candidates() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Fsubgroup%2Frepo/merge_requests/12"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "iid": 12,
+            "title": "Stack child",
+            "state": "opened",
+            "merged_at": null,
+            "source_branch": "feature-b",
+            "target_branch": "feature-a",
+            "source_project_id": 77,
+            "target_project_id": 77
+        })))
+        .mount(&mock_server)
+        .await;
+    for (filter, value) in [("target_branch", "feature-b"), ("source_branch", "feature-a")] {
+        Mock::given(method("GET"))
+            .and(path("/api/v4/projects/group%2Fsubgroup%2Frepo/merge_requests"))
+            .and(query_param("state", "all"))
+            .and(query_param(filter, value))
+            .and(query_param("per_page", "100"))
+            .and(query_param("page", "1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock_server)
+            .await;
+    }
+    let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let result =
+        adapter.list_pr_dependency_candidates("group/subgroup", "repo", 12).await.expect("dependency candidates");
+
+    assert!(!result.truncated);
+    assert_eq!(result.current.number, 12);
+    let candidates = result.items;
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].number, 12);
+    assert_eq!(candidates[0].source_repository, "gitlab-project:77");
+    assert_eq!(candidates[0].target_repository, "gitlab-project:77");
+}
+
+#[tokio::test]
 async fn test_gitlab_create_compare_marks_a_timed_out_preview_incomplete() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))

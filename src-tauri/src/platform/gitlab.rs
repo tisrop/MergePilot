@@ -543,7 +543,7 @@ impl GitLabAdapter {
 #[async_trait]
 impl super::JsonPageSource for GitLabAdapter {
     async fn fetch_json_page(&self, endpoint: &str, page: u32) -> Result<super::JsonPage, AppError> {
-        let url = format!("{endpoint}?per_page={}&page={page}", super::JSON_PAGE_SIZE);
+        let url = super::json_page_url(endpoint, page);
         let response = self
             .client
             .get(&url)
@@ -847,6 +847,66 @@ impl GitPlatform for GitLabAdapter {
             milestone: Self::metadata_milestone(&json["milestone"]),
             metadata_permissions,
         })
+    }
+
+    async fn list_pr_dependency_candidates(
+        &self,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+    ) -> Result<PrDependencyCandidates, AppError> {
+        let project_id = urlencoding(owner, repo);
+        let fallback_repository = format!("{owner}/{repo}");
+        let map_candidate = |mr: &Value| {
+            let number = mr["iid"].as_u64()?;
+            let source_branch = mr["source_branch"].as_str()?.trim().to_string();
+            let target_branch = mr["target_branch"].as_str()?.trim().to_string();
+            if source_branch.is_empty() || target_branch.is_empty() {
+                return None;
+            }
+            let source_repository = mr["source_project_id"]
+                .as_u64()
+                .map(|id| format!("gitlab-project:{id}"))
+                .unwrap_or_else(|| format!("gitlab-unknown-source:{number}"));
+            let target_repository = mr["target_project_id"]
+                .as_u64()
+                .map(|id| format!("gitlab-project:{id}"))
+                .unwrap_or_else(|| fallback_repository.clone());
+            let state = match (mr["state"].as_str().unwrap_or(""), mr["merged_at"].is_null()) {
+                ("merged", _) | (_, false) => PrState::Merged,
+                ("closed", _) => PrState::Closed,
+                _ => PrState::Open,
+            };
+            Some(PrDependencyCandidate {
+                number,
+                title: mr["title"].as_str().unwrap_or("").to_string(),
+                state,
+                source_branch,
+                target_branch,
+                source_repository,
+                target_repository,
+            })
+        };
+
+        let current_url = format!("{}/projects/{project_id}/merge_requests/{pr_number}", self.base_url);
+        let current_json = self.get_json::<Value>(&current_url).await?;
+        let current =
+            map_candidate(&current_json).ok_or_else(|| AppError::Api("当前 MR 缺少依赖分析所需的分支信息".into()))?;
+        super::walk_pr_dependency_candidates(self, current, map_candidate, |candidate| {
+            [
+                format!(
+                    "{}/projects/{project_id}/merge_requests?state=all&target_branch={}",
+                    self.base_url,
+                    urlencoding::encode(&candidate.source_branch)
+                ),
+                format!(
+                    "{}/projects/{project_id}/merge_requests?state=all&source_branch={}",
+                    self.base_url,
+                    urlencoding::encode(&candidate.target_branch)
+                ),
+            ]
+        })
+        .await
     }
 
     async fn list_branches(&self, owner: &str, repo: &str) -> Result<PrBranchOptions, AppError> {

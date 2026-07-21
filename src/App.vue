@@ -34,7 +34,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <RouterView />
+  <RouterView v-slot="{ Component, route: matchedRoute }">
+    <component
+      :is="Component"
+      :key="matchedRoute.name === 'pr-detail' ? matchedRoute.path : undefined"
+    />
+  </RouterView>
   <CommandPalette ref="commandPaletteRef" />
   <NotificationManager />
 </template>

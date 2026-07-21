@@ -2,7 +2,7 @@ use crate::models::*;
 use crate::patch::{standardize_patches, PATCH_SCHEMA_VERSION};
 use crate::platform::capabilities_for;
 use crate::state::AppState;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use tauri::State;
 
 use super::auth::build_platform;
@@ -215,6 +215,156 @@ fn extract_issue_refs(body: &str) -> Vec<u64> {
     issues
 }
 
+fn dependency_key(repository: &str, branch: &str) -> (String, String) {
+    (repository.trim().to_lowercase(), branch.trim().to_string())
+}
+
+fn build_pr_dependency_graph(
+    candidates: Vec<PrDependencyCandidate>,
+    current_number: u64,
+    current_fallback: Option<PrDependencyCandidate>,
+    truncated: bool,
+) -> Result<PrDependencyGraph, String> {
+    let mut candidates_by_number = BTreeMap::new();
+    for candidate in candidates {
+        if candidate.number == 0
+            || candidate.source_branch.trim().is_empty()
+            || candidate.target_branch.trim().is_empty()
+        {
+            continue;
+        }
+        candidates_by_number.entry(candidate.number).or_insert(candidate);
+    }
+    if let std::collections::btree_map::Entry::Vacant(entry) = candidates_by_number.entry(current_number) {
+        if let Some(candidate) = current_fallback.filter(|candidate| candidate.number == current_number) {
+            entry.insert(candidate);
+        } else {
+            return Err("当前 PR / MR 缺少依赖分析所需的基础信息，请刷新后重试".into());
+        }
+    }
+
+    let mut targets = HashMap::<(String, String), Vec<u64>>::new();
+    for candidate in candidates_by_number.values() {
+        targets
+            .entry(dependency_key(&candidate.target_repository, &candidate.target_branch))
+            .or_default()
+            .push(candidate.number);
+    }
+
+    let mut all_edges = BTreeSet::<(u64, u64)>::new();
+    for parent in candidates_by_number.values() {
+        let source = dependency_key(&parent.source_repository, &parent.source_branch);
+        for child_number in targets.get(&source).into_iter().flatten() {
+            if parent.number != *child_number {
+                all_edges.insert((parent.number, *child_number));
+            }
+        }
+    }
+
+    let mut parents = HashMap::<u64, Vec<u64>>::new();
+    let mut children = HashMap::<u64, Vec<u64>>::new();
+    for (parent, child) in &all_edges {
+        parents.entry(*child).or_default().push(*parent);
+        children.entry(*parent).or_default().push(*child);
+    }
+
+    let mut ancestors = HashSet::new();
+    let mut ancestor_queue = VecDeque::from([current_number]);
+    while let Some(number) = ancestor_queue.pop_front() {
+        for parent in parents.get(&number).into_iter().flatten() {
+            if *parent != current_number && ancestors.insert(*parent) {
+                ancestor_queue.push_back(*parent);
+            }
+        }
+    }
+
+    let mut visible = HashSet::from([current_number]);
+    visible.extend(ancestors.iter().copied());
+    let mut descendant_queue = VecDeque::from([current_number]);
+    while let Some(number) = descendant_queue.pop_front() {
+        for child in children.get(&number).into_iter().flatten() {
+            let is_open =
+                candidates_by_number.get(child).is_some_and(|candidate| matches!(candidate.state, PrState::Open));
+            if is_open && visible.insert(*child) {
+                descendant_queue.push_back(*child);
+            }
+        }
+    }
+
+    let edges = all_edges
+        .into_iter()
+        .filter(|(parent, child)| visible.contains(parent) && visible.contains(child))
+        .map(|(parent_number, child_number)| PrDependencyEdge { parent_number, child_number })
+        .collect::<Vec<_>>();
+
+    let mut indegree = visible.iter().map(|number| (*number, 0_usize)).collect::<HashMap<_, _>>();
+    for edge in &edges {
+        if let Some(value) = indegree.get_mut(&edge.child_number) {
+            *value += 1;
+        }
+    }
+    let mut ready =
+        indegree.iter().filter_map(|(number, degree)| (*degree == 0).then_some(*number)).collect::<BTreeSet<_>>();
+    let mut suggested_merge_order = Vec::with_capacity(visible.len());
+    while let Some(number) = ready.iter().next().copied() {
+        ready.remove(&number);
+        suggested_merge_order.push(number);
+        for child in children.get(&number).into_iter().flatten() {
+            if !visible.contains(child) {
+                continue;
+            }
+            if let Some(degree) = indegree.get_mut(child) {
+                *degree = degree.saturating_sub(1);
+                if *degree == 0 {
+                    ready.insert(*child);
+                }
+            }
+        }
+    }
+    let has_cycle = suggested_merge_order.len() != visible.len();
+    if has_cycle {
+        let ordered = suggested_merge_order.iter().copied().collect::<HashSet<_>>();
+        let remaining = visible.iter().filter(|number| !ordered.contains(number)).copied().collect::<BTreeSet<_>>();
+        suggested_merge_order.extend(remaining);
+    }
+
+    let current_is_open =
+        candidates_by_number.get(&current_number).is_some_and(|candidate| matches!(candidate.state, PrState::Open));
+    let blocking_parent_numbers = if current_is_open {
+        suggested_merge_order
+            .iter()
+            .filter(|number| ancestors.contains(number))
+            .filter(|number| {
+                candidates_by_number.get(number).is_some_and(|candidate| !matches!(candidate.state, PrState::Merged))
+            })
+            .copied()
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let nodes = suggested_merge_order
+        .iter()
+        .filter_map(|number| candidates_by_number.get(number))
+        .map(|candidate| PrDependencyNode {
+            number: candidate.number,
+            title: candidate.title.clone(),
+            state: candidate.state.clone(),
+            source_branch: candidate.source_branch.clone(),
+            target_branch: candidate.target_branch.clone(),
+        })
+        .collect();
+
+    Ok(PrDependencyGraph {
+        current_number,
+        nodes,
+        edges,
+        suggested_merge_order,
+        blocking_parent_numbers,
+        has_cycle,
+        truncated,
+    })
+}
+
 #[tauri::command]
 pub async fn pr_list(
     state: State<'_, AppState>,
@@ -247,6 +397,24 @@ pub async fn pr_detail(
 ) -> Result<PrDetail, String> {
     let p = build_platform(&platform, &state).map_err(|e| e.to_string())?;
     p.get_pull_request(&owner, &repo, number).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn pr_dependencies(
+    state: State<'_, AppState>,
+    platform: String,
+    owner: String,
+    repo: String,
+    number: u64,
+) -> Result<PrDependencyGraph, String> {
+    let owner = owner.trim();
+    let repo = repo.trim();
+    if owner.is_empty() || repo.is_empty() || number == 0 {
+        return Err("仓库和 PR / MR 编号不能为空".into());
+    }
+    let p = build_platform(&platform, &state).map_err(|error| error.to_string())?;
+    let candidates = p.list_pr_dependency_candidates(owner, repo, number).await.map_err(|error| error.to_string())?;
+    build_pr_dependency_graph(candidates.items, number, Some(candidates.current), candidates.truncated)
 }
 
 #[tauri::command]
@@ -613,12 +781,12 @@ pub async fn pr_reopen(
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_metadata_field_available, metadata_changed_fields, validate_compare_request,
+        build_pr_dependency_graph, ensure_metadata_field_available, metadata_changed_fields, validate_compare_request,
         validate_create_preview_request, validate_create_request, validate_metadata_update,
     };
     use crate::models::{
-        PrCreatePreviewRequest, PrCreateRequest, PrDetail, PrMetadataField, PrMetadataPermissions, PrMetadataUpdate,
-        PrMilestone, PrState, PrSummary, User,
+        PrCreatePreviewRequest, PrCreateRequest, PrDependencyCandidate, PrDetail, PrMetadataField,
+        PrMetadataPermissions, PrMetadataUpdate, PrMilestone, PrState, PrSummary, User,
     };
     use crate::platform::capabilities_for;
 
@@ -684,6 +852,150 @@ mod tests {
             assignees: vec![],
             labels: vec!["feature".into(), "FEATURE".into()],
         }
+    }
+
+    fn dependency_candidate(
+        number: u64,
+        source_branch: &str,
+        target_branch: &str,
+        state: PrState,
+    ) -> PrDependencyCandidate {
+        PrDependencyCandidate {
+            number,
+            title: format!("PR {number}"),
+            state,
+            source_branch: source_branch.into(),
+            target_branch: target_branch.into(),
+            source_repository: "team/repo".into(),
+            target_repository: "team/repo".into(),
+        }
+    }
+
+    #[test]
+    fn dependency_graph_builds_connected_stack_and_merge_order() {
+        let graph = build_pr_dependency_graph(
+            vec![
+                dependency_candidate(1, "feature-a", "main", PrState::Merged),
+                dependency_candidate(2, "feature-b", "feature-a", PrState::Open),
+                dependency_candidate(3, "feature-c", "feature-b", PrState::Open),
+                dependency_candidate(9, "unrelated", "main", PrState::Open),
+            ],
+            2,
+            None,
+            false,
+        )
+        .expect("dependency graph");
+
+        assert_eq!(graph.nodes.iter().map(|node| node.number).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert_eq!(graph.suggested_merge_order, vec![1, 2, 3]);
+        assert!(graph.blocking_parent_numbers.is_empty());
+        assert_eq!(graph.edges.len(), 2);
+        assert!(!graph.has_cycle);
+        assert!(!graph.truncated);
+    }
+
+    #[test]
+    fn dependency_graph_marks_unmerged_ancestors_and_cycles() {
+        let blocked = build_pr_dependency_graph(
+            vec![
+                dependency_candidate(1, "feature-a", "main", PrState::Open),
+                dependency_candidate(2, "feature-b", "feature-a", PrState::Open),
+            ],
+            2,
+            None,
+            false,
+        )
+        .expect("blocked dependency graph");
+        assert_eq!(blocked.blocking_parent_numbers, vec![1]);
+
+        let cycle = build_pr_dependency_graph(
+            vec![
+                dependency_candidate(1, "feature-a", "feature-b", PrState::Open),
+                dependency_candidate(2, "feature-b", "feature-a", PrState::Open),
+            ],
+            1,
+            None,
+            false,
+        )
+        .expect("cyclic dependency graph");
+        assert!(cycle.has_cycle);
+        assert_eq!(cycle.nodes.len(), 2);
+    }
+
+    #[test]
+    fn dependency_graph_keeps_closed_ancestors_but_hides_inactive_descendants_and_siblings() {
+        let graph = build_pr_dependency_graph(
+            vec![
+                dependency_candidate(1, "feature-a", "main", PrState::Closed),
+                dependency_candidate(2, "feature-b", "feature-a", PrState::Open),
+                dependency_candidate(3, "closed-child", "feature-b", PrState::Closed),
+                dependency_candidate(4, "open-child", "feature-b", PrState::Open),
+                dependency_candidate(5, "open-grandchild", "open-child", PrState::Open),
+                dependency_candidate(6, "closed-grandchild", "closed-child", PrState::Open),
+                dependency_candidate(7, "sibling", "feature-a", PrState::Open),
+                dependency_candidate(8, "merged-child", "feature-b", PrState::Merged),
+            ],
+            2,
+            None,
+            false,
+        )
+        .expect("filtered dependency graph");
+
+        assert_eq!(graph.nodes.iter().map(|node| node.number).collect::<Vec<_>>(), vec![1, 2, 4, 5]);
+        assert_eq!(graph.suggested_merge_order, vec![1, 2, 4, 5]);
+        assert_eq!(graph.blocking_parent_numbers, vec![1]);
+    }
+
+    #[test]
+    fn dependency_graph_does_not_mark_ancestors_as_blocking_when_current_item_is_closed() {
+        let graph = build_pr_dependency_graph(
+            vec![
+                dependency_candidate(1, "feature-a", "main", PrState::Closed),
+                dependency_candidate(2, "feature-b", "feature-a", PrState::Closed),
+                dependency_candidate(3, "feature-c", "feature-b", PrState::Open),
+            ],
+            2,
+            None,
+            false,
+        )
+        .expect("closed current dependency graph");
+
+        assert_eq!(graph.nodes.iter().map(|node| node.number).collect::<Vec<_>>(), vec![1, 2, 3]);
+        assert!(graph.blocking_parent_numbers.is_empty());
+    }
+
+    #[test]
+    fn dependency_graph_does_not_link_same_branch_across_repositories() {
+        let mut fork_parent = dependency_candidate(1, "feature-a", "main", PrState::Open);
+        fork_parent.source_repository = "contributor/repo".into();
+        let graph = build_pr_dependency_graph(
+            vec![fork_parent, dependency_candidate(2, "feature-b", "feature-a", PrState::Open)],
+            2,
+            None,
+            false,
+        )
+        .expect("repository-isolated dependency graph");
+
+        assert_eq!(graph.suggested_merge_order, vec![2]);
+        assert!(graph.edges.is_empty());
+    }
+
+    #[test]
+    fn dependency_graph_falls_back_to_the_current_pr_when_candidates_omit_it() {
+        let current = dependency_candidate(2, "feature-b", "feature-a", PrState::Open);
+
+        let graph = build_pr_dependency_graph(
+            vec![dependency_candidate(9, "unrelated", "main", PrState::Open)],
+            2,
+            Some(current),
+            false,
+        )
+        .expect("single-node fallback graph");
+
+        assert_eq!(graph.nodes.iter().map(|node| node.number).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(graph.suggested_merge_order, vec![2]);
+        assert!(graph.edges.is_empty());
+        assert!(graph.blocking_parent_numbers.is_empty());
     }
 
     #[test]

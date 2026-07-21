@@ -20,6 +20,7 @@ import ReviewList from "@/components/review/ReviewList.vue";
 import AiReviewPanel from "@/components/ai/AiReviewPanel.vue";
 import MergeReadinessPanel from "@/components/pr/MergeReadinessPanel.vue";
 import PrMetadataPanel from "@/components/pr/PrMetadataPanel.vue";
+import PrDependenciesPanel from "@/components/pr/PrDependenciesPanel.vue";
 import { APP_COMMAND_EVENT, type AppCommandDetail } from "@/types/commands";
 import type {
   AiSuggestion,
@@ -44,10 +45,11 @@ const owner = route.params.owner as string;
 const repo = route.params.repo as string;
 const number = Number(route.params.number);
 
-type PrDetailTab = "diff" | "reviews" | "ai";
+type PrDetailTab = "diff" | "dependencies" | "reviews" | "ai";
 
 const activeTab = ref<PrDetailTab>("diff");
 const aiPanelMounted = ref(false);
+const dependencyPanelMounted = ref(false);
 const locatingAiSuggestion = ref(false);
 const tabsRef = ref<HTMLElement | null>(null);
 let aiReviewScrollTop: number | null = null;
@@ -68,6 +70,7 @@ function scrollTabBarIntoView(): void {
 function selectTab(tab: PrDetailTab) {
   const returningToAiSuggestion = tab === "ai" && locatingAiSuggestion.value;
   activeTab.value = tab;
+  if (tab === "dependencies") dependencyPanelMounted.value = true;
   if (tab === "ai") {
     aiPanelMounted.value = true;
     locatingAiSuggestion.value = false;
@@ -388,12 +391,15 @@ onMounted(async () => {
       clearPrCreateWarnings(platform, owner, repo, number);
     });
   }
-  await Promise.all([
-    pr.fetchPrDetail(platform, owner, repo, number),
-    pr.fetchPrDiff(platform, owner, repo, number),
-    pr.fetchMergeReadiness(platform, owner, repo, number),
-    capabilityStore.load(platform).catch(() => null),
-  ]);
+  const capabilityRequest = capabilityStore.load(platform).catch(() => null);
+  await pr.fetchPrDetail(platform, owner, repo, number);
+  if (pr.currentPr?.summary.number === number) {
+    await Promise.all([
+      pr.fetchPrDiff(platform, owner, repo, number),
+      pr.fetchMergeReadiness(platform, owner, repo, number),
+    ]);
+  }
+  await capabilityRequest;
   if (!platformCapabilities.value?.merge_strategies.includes(selectedStrategy.value)) {
     selectedStrategy.value = platformCapabilities.value?.merge_strategies[0] ?? "merge";
   }
@@ -622,6 +628,28 @@ onUnmounted(() => window.removeEventListener(APP_COMMAND_EVENT, handleAppCommand
           </svg>
           Diff
         </button>
+        <button
+          :class="{ active: activeTab === 'dependencies' }"
+          @click="selectTab('dependencies')"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="6" cy="6" r="2" />
+            <circle cx="18" cy="18" r="2" />
+            <path d="M6 8v3a7 7 0 0 0 7 7h3" />
+            <path d="M18 16V8" />
+            <circle cx="18" cy="6" r="2" />
+          </svg>
+          依赖关系
+        </button>
         <button :class="{ active: activeTab === 'reviews' }" @click="selectTab('reviews')">
           <svg
             width="14"
@@ -687,6 +715,15 @@ onUnmounted(() => window.removeEventListener(APP_COMMAND_EVENT, handleAppCommand
             :pr-number="number"
             :unviewed-file-count="unviewedFileCount"
             :unresolved-thread-count="reviewThreadSummary?.unresolved ?? 0"
+          />
+        </div>
+        <div v-if="dependencyPanelMounted" v-show="activeTab === 'dependencies'">
+          <PrDependenciesPanel
+            :platform="platform"
+            :owner="owner"
+            :repo="repo"
+            :pr-number="number"
+            :revision="pr.currentPr.summary.updated_at"
           />
         </div>
         <div v-show="activeTab === 'reviews'">
