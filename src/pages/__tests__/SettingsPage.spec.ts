@@ -283,8 +283,11 @@ describe("SettingsPage 诊断信息", () => {
     expect(restartAfterUpdate).not.toHaveBeenCalled();
   });
 
-  it("下载失败后清理进度监听并允许重试", async () => {
-    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "update-current") });
+  it("下载中断后清理进度监听并允许重新确认后重试", async () => {
+    const requestIds = ["update-first", "update-retry"];
+    vi.stubGlobal("crypto", {
+      randomUUID: vi.fn(() => requestIds.shift() ?? "unexpected"),
+    });
     let progressCallback:
       | ((event: {
           request_id: string;
@@ -305,17 +308,25 @@ describe("SettingsPage 诊断信息", () => {
       published_at: null,
       update_mode: "installer",
     });
-    vi.mocked(downloadAndInstallUpdate).mockImplementation(async () => {
-      progressCallback?.({ request_id: "old", downloaded: 90, total: 100, phase: "downloading" });
-      progressCallback?.({
-        request_id: "update-current",
-        downloaded: 25,
-        total: 100,
-        phase: "downloading",
+    vi.mocked(downloadAndInstallUpdate)
+      .mockImplementationOnce(async () => {
+        progressCallback?.({
+          request_id: "update-first",
+          downloaded: 25,
+          total: 100,
+          phase: "downloading",
+        });
+        await Promise.resolve();
+        throw new Error("download interrupted");
+      })
+      .mockImplementationOnce(async () => {
+        progressCallback?.({
+          request_id: "update-retry",
+          downloaded: 100,
+          total: 100,
+          phase: "downloading",
+        });
       });
-      await Promise.resolve();
-      throw new Error("download failed");
-    });
     const wrapper = mountPage();
 
     await wrapper.get("button.check-update-button").trigger("click");
@@ -324,10 +335,20 @@ describe("SettingsPage 诊断信息", () => {
     await wrapper.get("button.install-update-button").trigger("click");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Error: download failed");
+    expect(wrapper.text()).toContain("Error: download interrupted");
     expect(wrapper.get<HTMLButtonElement>("button.install-update-button").element.disabled).toBe(
       false,
     );
+
+    await wrapper.get("button.install-update-button").trigger("click");
+    expect(wrapper.text()).toContain("安装前请保存工作");
+    await wrapper.get("button.install-update-button").trigger("click");
+    await flushPromises();
+
+    expect(downloadAndInstallUpdate).toHaveBeenNthCalledWith(1, "update-first", "0.4.0");
+    expect(downloadAndInstallUpdate).toHaveBeenNthCalledWith(2, "update-retry", "0.4.0");
+    expect(wrapper.text()).not.toContain("download interrupted");
+    expect(wrapper.text()).toContain("更新已安装，重启应用后生效");
   });
 
   it("离开设置页后继续安装并在返回时保留完成状态", async () => {

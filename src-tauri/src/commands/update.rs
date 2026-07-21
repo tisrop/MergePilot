@@ -28,12 +28,37 @@ pub enum UpdateMode {
     Portable,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct UpdateProgressEvent {
     pub request_id: String,
     pub downloaded: u64,
     pub total: Option<u64>,
     pub phase: &'static str,
+}
+
+struct UpdateProgressTracker {
+    request_id: String,
+    downloaded: u64,
+}
+
+impl UpdateProgressTracker {
+    fn new(request_id: String) -> Self {
+        Self { request_id, downloaded: 0 }
+    }
+
+    fn record_chunk(&mut self, chunk_size: usize, total: Option<u64>) -> UpdateProgressEvent {
+        self.downloaded = self.downloaded.saturating_add(chunk_size as u64);
+        UpdateProgressEvent {
+            request_id: self.request_id.clone(),
+            downloaded: self.downloaded,
+            total,
+            phase: "downloading",
+        }
+    }
+
+    fn installing(request_id: String) -> UpdateProgressEvent {
+        UpdateProgressEvent { request_id, downloaded: 0, total: None, phase: "installing" }
+    }
 }
 
 fn validate_update_request_id(request_id: &str) -> Result<(), String> {
@@ -220,34 +245,16 @@ pub async fn update_download_and_install(
     ensure_expected_update_version(&expected_version, &update.version)?;
 
     let progress_app = app.clone();
-    let progress_request_id = request_id.clone();
     let finish_app = app.clone();
     let finish_request_id = request_id.clone();
-    let mut downloaded = 0_u64;
+    let mut progress = UpdateProgressTracker::new(request_id);
     let bytes = update
         .download(
             move |chunk_size, total| {
-                downloaded = downloaded.saturating_add(chunk_size as u64);
-                let _ = progress_app.emit(
-                    "update-progress",
-                    UpdateProgressEvent {
-                        request_id: progress_request_id.clone(),
-                        downloaded,
-                        total,
-                        phase: "downloading",
-                    },
-                );
+                let _ = progress_app.emit("update-progress", progress.record_chunk(chunk_size, total));
             },
             move || {
-                let _ = finish_app.emit(
-                    "update-progress",
-                    UpdateProgressEvent {
-                        request_id: finish_request_id,
-                        downloaded: 0,
-                        total: None,
-                        phase: "installing",
-                    },
-                );
+                let _ = finish_app.emit("update-progress", UpdateProgressTracker::installing(finish_request_id));
             },
         )
         .await
@@ -340,5 +347,28 @@ mod tests {
         );
         assert_eq!(download_error(UpdaterError::Network("hidden".into())), "下载更新失败，请检查网络后重试");
         assert_eq!(install_error(UpdaterError::PackageInstallFailed), "安装更新失败，应用未重启，请稍后重试");
+    }
+
+    #[test]
+    fn tracks_chunked_download_progress_and_install_transition() {
+        let mut progress = UpdateProgressTracker::new("attempt-1".into());
+
+        assert_eq!(
+            progress.record_chunk(3, Some(10)),
+            UpdateProgressEvent {
+                request_id: "attempt-1".into(),
+                downloaded: 3,
+                total: Some(10),
+                phase: "downloading",
+            }
+        );
+        assert_eq!(progress.record_chunk(4, Some(10)).downloaded, 7);
+
+        progress.downloaded = u64::MAX - 1;
+        assert_eq!(progress.record_chunk(8, None).downloaded, u64::MAX);
+        assert_eq!(
+            UpdateProgressTracker::installing("attempt-1".into()),
+            UpdateProgressEvent { request_id: "attempt-1".into(), downloaded: 0, total: None, phase: "installing" }
+        );
     }
 }

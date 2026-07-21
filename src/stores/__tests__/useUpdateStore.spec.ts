@@ -7,7 +7,7 @@ import {
   listenToUpdateProgress,
   restartAfterUpdate,
 } from "@/api";
-import type { UpdateCheckResult } from "@/types";
+import type { UpdateCheckResult, UpdateProgressEvent } from "@/types";
 import { useUpdateStore } from "../useUpdateStore";
 
 const storage = new Map<string, string>();
@@ -143,6 +143,78 @@ describe("useUpdateStore", () => {
     expect(store.isUpdateInstalled).toBe(true);
     expect(downloadAndInstallUpdate).toHaveBeenCalledOnce();
     expect(unlisten).toHaveBeenCalledOnce();
+  });
+
+  it("下载中断后使用新请求安全重试并忽略旧进度事件", async () => {
+    const ids = ["update-first", "update-retry"];
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => ids.shift() ?? "unexpected") });
+    vi.mocked(checkForUpdates).mockResolvedValue({
+      current_version: "0.3.5",
+      available: true,
+      version: "0.4.0",
+      notes: null,
+      published_at: null,
+      update_mode: "installer",
+    });
+
+    const callbacks: Array<(event: UpdateProgressEvent) => void> = [];
+    const firstUnlisten = vi.fn();
+    const retryUnlisten = vi.fn();
+    vi.mocked(listenToUpdateProgress)
+      .mockImplementationOnce(async (callback) => {
+        callbacks.push(callback);
+        return firstUnlisten;
+      })
+      .mockImplementationOnce(async (callback) => {
+        callbacks.push(callback);
+        return retryUnlisten;
+      });
+    vi.mocked(downloadAndInstallUpdate)
+      .mockImplementationOnce(async () => {
+        callbacks[0]?.({
+          request_id: "update-first",
+          downloaded: 25,
+          total: 100,
+          phase: "downloading",
+        });
+        throw new Error("connection reset");
+      })
+      .mockImplementationOnce(async () => {
+        callbacks[1]?.({
+          request_id: "update-retry",
+          downloaded: 40,
+          total: 80,
+          phase: "downloading",
+        });
+        callbacks[0]?.({
+          request_id: "update-first",
+          downloaded: 90,
+          total: 100,
+          phase: "downloading",
+        });
+      });
+
+    const store = useUpdateStore();
+    await store.checkUpdate();
+    await store.installUpdate();
+
+    expect(store.updateError).toContain("connection reset");
+    expect(store.isInstallingUpdate).toBe(false);
+    expect(store.isUpdateInstalled).toBe(false);
+    expect(store.updatePhase).toBeNull();
+    expect(store.updateDownloaded).toBe(25);
+    expect(firstUnlisten).toHaveBeenCalledOnce();
+
+    await store.installUpdate();
+
+    expect(downloadAndInstallUpdate).toHaveBeenNthCalledWith(1, "update-first", "0.4.0");
+    expect(downloadAndInstallUpdate).toHaveBeenNthCalledWith(2, "update-retry", "0.4.0");
+    expect(store.updateError).toBe("");
+    expect(store.updateDownloaded).toBe(40);
+    expect(store.updateTotal).toBe(80);
+    expect(store.updatePhase).toBeNull();
+    expect(store.isUpdateInstalled).toBe(true);
+    expect(retryUnlisten).toHaveBeenCalledOnce();
   });
 
   it("Windows 便携版在浏览器打开 ZIP，且不注册下载进度监听", async () => {
