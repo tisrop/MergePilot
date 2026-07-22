@@ -228,12 +228,21 @@ const diffCommitOptions = computed(() => [
     label: `${shortCommitSha(commit.sha)} · ${commit.title || "无标题提交"}`,
   })) ?? []),
 ]);
-const displayedDiff = computed(() =>
-  selectedDiffCommitSha.value ? (commitPreview.value?.diff ?? null) : (preview.value?.diff ?? null),
+const displayedPreview = computed(() =>
+  selectedDiffCommitSha.value ? commitPreview.value : preview.value,
 );
-const displayedPreviewIncomplete = computed(
-  () => preview.value?.incomplete === true || commitPreview.value?.incomplete === true,
-);
+const displayedDiff = computed(() => displayedPreview.value?.diff ?? null);
+const displayedPreviewIncomplete = computed(() => displayedPreview.value?.incomplete === true);
+const displayedPreviewWarning = computed(() => {
+  const reasons = displayedPreview.value?.incomplete_reasons ?? [];
+  if (reasons.includes("pagination_failed")) {
+    return `后续分页加载失败，当前仅展示已获取的 Commit 和 Diff，不影响创建 ${requestType.value}。`;
+  }
+  if (reasons.includes("pagination_limit")) {
+    return `变更超过客户端分页安全上限，当前仅展示前 10,000 个 Commit，不影响创建 ${requestType.value}。`;
+  }
+  return `平台 API 仅返回了部分 Commit 或 Diff，不影响创建 ${requestType.value}。`;
+});
 
 function normalizedBranches(options: PrBranchOptions): string[] {
   return Array.from(
@@ -737,7 +746,7 @@ onUnmounted(() => {
 
         <div v-if="displayedPreviewIncomplete" class="preview-warning" role="alert">
           <strong>预览不完整</strong>
-          <span>平台 API 仅返回了部分 Commit 或 Diff，不影响创建 {{ requestType }}。</span>
+          <span>{{ displayedPreviewWarning }}</span>
         </div>
 
         <div class="preview-tabs" role="tablist" aria-label="创建预览">

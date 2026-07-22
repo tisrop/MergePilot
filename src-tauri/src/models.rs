@@ -332,12 +332,21 @@ pub struct PrCommitSummary {
     pub authored_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrCreatePreviewIncompleteReason {
+    PlatformLimit,
+    PaginationFailed,
+    PaginationLimit,
+}
+
 #[derive(Debug, Clone)]
 pub struct PrCreatePreviewData {
     pub commits: Vec<PrCommitSummary>,
     pub diff: String,
     pub files: Vec<PrFile>,
     pub incomplete: bool,
+    pub incomplete_reasons: Vec<PrCreatePreviewIncompleteReason>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -499,6 +508,7 @@ pub struct PrCreatePreview {
     pub commits: Vec<PrCommitSummary>,
     pub diff: DiffResult,
     pub incomplete: bool,
+    pub incomplete_reasons: Vec<PrCreatePreviewIncompleteReason>,
 }
 
 // ── Review ──

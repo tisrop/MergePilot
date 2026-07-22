@@ -212,6 +212,68 @@ async fn test_github_create_compare_marks_an_incomplete_preview() {
 }
 
 #[tokio::test]
+async fn test_github_create_compare_collects_all_commit_pages() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/compare/main...feature"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_commits": 2,
+            "commits": [{
+                "sha": "abc123",
+                "commit": {
+                    "message": "First commit",
+                    "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
+                }
+            }],
+            "files": [{
+                "filename": "src/main.rs",
+                "status": "modified",
+                "patch": "@@ -1 +1 @@\n-old\n+new"
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/repos/octocat/hello-world/compare/main...feature"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_commits": 2,
+            "commits": [{
+                "sha": "def456",
+                "commit": {
+                    "message": "Second commit",
+                    "author": { "name": "Bob", "date": "2026-07-19T11:00:00Z" }
+                }
+            }]
+        })))
+        .mount(&mock_server)
+        .await;
+    let adapter = GitHubAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+    let preview = adapter
+        .preview_pull_request(
+            "octocat",
+            "hello-world",
+            &PrCreatePreviewRequest {
+                source_owner: "octocat".into(),
+                source_repo: "hello-world".into(),
+                source_branch: "feature".into(),
+                target_branch: "main".into(),
+                commit_sha: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(preview.commits.iter().map(|commit| commit.sha.as_str()).collect::<Vec<_>>(), vec!["abc123", "def456"]);
+    assert_eq!(preview.files.len(), 1);
+    assert!(!preview.incomplete);
+}
+
+#[tokio::test]
 async fn test_github_lists_all_branch_pages() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))

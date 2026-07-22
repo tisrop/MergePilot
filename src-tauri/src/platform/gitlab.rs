@@ -1194,7 +1194,17 @@ impl GitPlatform for GitLabAdapter {
                     .unwrap_or("")
                     .to_string(),
             };
-            return Ok(PrCreatePreviewData { commits: vec![summary], diff, files, incomplete });
+            return Ok(PrCreatePreviewData {
+                commits: vec![summary],
+                diff,
+                files,
+                incomplete,
+                incomplete_reasons: if incomplete {
+                    vec![PrCreatePreviewIncompleteReason::PlatformLimit]
+                } else {
+                    vec![]
+                },
+            });
         }
         let from = urlencoding::encode(&request.target_branch);
         let to = urlencoding::encode(&request.source_branch);
@@ -1218,6 +1228,7 @@ impl GitPlatform for GitLabAdapter {
             json["diffs"].as_array().ok_or_else(|| AppError::Api("GitLab compare 响应缺少 diffs 字段".into()))?;
         let commits_json = json["commits"].as_array();
         let incomplete = json["compare_timeout"].as_bool() == Some(true)
+            || json["overflow"].as_bool() == Some(true)
             || changes.iter().any(|change| {
                 change["collapsed"].as_bool() == Some(true) || change["too_large"].as_bool() == Some(true)
             })
@@ -1264,7 +1275,13 @@ impl GitPlatform for GitLabAdapter {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(PrCreatePreviewData { commits, diff, files, incomplete })
+        Ok(PrCreatePreviewData {
+            commits,
+            diff,
+            files,
+            incomplete,
+            incomplete_reasons: if incomplete { vec![PrCreatePreviewIncompleteReason::PlatformLimit] } else { vec![] },
+        })
     }
 
     async fn update_pull_request_metadata(

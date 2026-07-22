@@ -393,6 +393,7 @@ export interface PrCreatePreview {
   commits: PrCommitSummary[];
   diff: DiffResult;
   incomplete: boolean;
+  incomplete_reasons: Array<"platform_limit" | "pagination_failed" | "pagination_limit">;
 }
 
 export type DiffSide = "left" | "right";

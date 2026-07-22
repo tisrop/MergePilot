@@ -513,6 +513,7 @@ pub async fn pr_create_preview(
     Ok(PrCreatePreview {
         commits: preview.commits,
         incomplete: preview.incomplete,
+        incomplete_reasons: preview.incomplete_reasons,
         diff: DiffResult {
             diff: preview.diff,
             files: preview.files,

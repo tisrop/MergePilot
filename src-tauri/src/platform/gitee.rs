@@ -705,6 +705,13 @@ impl super::JsonPageSource for GiteeAdapter {
 }
 
 #[async_trait]
+impl super::CreateComparePageSource for GiteeAdapter {
+    async fn fetch_create_compare_page(&self, endpoint: &str, page: u32) -> Result<Value, AppError> {
+        self.get_json(&super::json_page_url(endpoint, page)).await
+    }
+}
+
+#[async_trait]
 impl GitPlatform for GiteeAdapter {
     fn name(&self) -> &'static str {
         "gitee"
@@ -1137,7 +1144,13 @@ impl GitPlatform for GiteeAdapter {
                 author_name: commit["author"]["name"].as_str().unwrap_or("").to_string(),
                 authored_at: commit["author"]["date"].as_str().unwrap_or("").to_string(),
             };
-            return Ok(PrCreatePreviewData { commits: vec![summary], diff, files, incomplete: false });
+            return Ok(PrCreatePreviewData {
+                commits: vec![summary],
+                diff,
+                files,
+                incomplete: false,
+                incomplete_reasons: vec![],
+            });
         }
         let base = urlencoding::encode(&request.target_branch);
         let head_reference = if request.source_owner == owner && request.source_repo == repo {
@@ -1146,14 +1159,11 @@ impl GitPlatform for GiteeAdapter {
             format!("{}:{}", request.source_owner, request.source_branch)
         };
         let head = urlencoding::encode(&head_reference);
-        let url = format!("{}/repos/{}/{}/compare/{}...{}?per_page=100", self.base_url, owner, repo, base, head);
-        let json = self.get_json::<Value>(&url).await?;
-        let files_json = json["files"]
-            .as_array()
-            .or_else(|| json["changes"].as_array())
-            .ok_or_else(|| AppError::Api("Gitee compare 响应缺少 files/changes 字段".into()))?;
-        let commits_json = json["commits"].as_array();
-        let incomplete = super::create_compare_is_incomplete(&json, commits_json.map_or(0, Vec::len), files_json.len());
+        let endpoint = format!("{}/repos/{}/{}/compare/{}...{}", self.base_url, owner, repo, base, head);
+        let collection =
+            super::collect_create_compare_pages(self, &endpoint, "Gitee", "Gitee compare 响应缺少 files/changes 字段")
+                .await?;
+        let files_json = &collection.files;
         let files = files_json
             .iter()
             .map(|file| {
@@ -1181,33 +1191,35 @@ impl GitPlatform for GiteeAdapter {
             })
             .collect::<Vec<_>>();
         let diff = files_json.iter().map(Self::unified_diff).filter(|patch| !patch.is_empty()).collect();
-        let commits = commits_json
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|commit| {
-                        let sha = commit["sha"].as_str().or_else(|| commit["id"].as_str())?.to_string();
-                        let message =
-                            commit["commit"]["message"].as_str().or_else(|| commit["message"].as_str()).unwrap_or("");
-                        Some(PrCommitSummary {
-                            sha,
-                            title: message.lines().next().unwrap_or("").to_string(),
-                            author_name: commit["commit"]["author"]["name"]
-                                .as_str()
-                                .or_else(|| commit["author"]["name"].as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            authored_at: commit["commit"]["author"]["date"]
-                                .as_str()
-                                .or_else(|| commit["author"]["date"].as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                        })
-                    })
-                    .collect()
+        let commits = collection
+            .commits
+            .iter()
+            .filter_map(|commit| {
+                let sha = commit["sha"].as_str().or_else(|| commit["id"].as_str())?.to_string();
+                let message = commit["commit"]["message"].as_str().or_else(|| commit["message"].as_str()).unwrap_or("");
+                Some(PrCommitSummary {
+                    sha,
+                    title: message.lines().next().unwrap_or("").to_string(),
+                    author_name: commit["commit"]["author"]["name"]
+                        .as_str()
+                        .or_else(|| commit["author"]["name"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    authored_at: commit["commit"]["author"]["date"]
+                        .as_str()
+                        .or_else(|| commit["author"]["date"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                })
             })
-            .unwrap_or_default();
-        Ok(PrCreatePreviewData { commits, diff, files, incomplete })
+            .collect();
+        Ok(PrCreatePreviewData {
+            commits,
+            diff,
+            files,
+            incomplete: collection.incomplete,
+            incomplete_reasons: collection.incomplete_reasons,
+        })
     }
 
     async fn update_pull_request_metadata(

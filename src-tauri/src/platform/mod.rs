@@ -114,9 +114,177 @@ pub fn normalize_api_base(platform: &str, url: &str) -> String {
 
 const CREATE_COMPARE_COMMIT_PAGE_SIZE: usize = 100;
 const CREATE_COMPARE_FILE_LIMIT: usize = 300;
+const MAX_CREATE_COMPARE_PAGES: u32 = 100;
+
+pub(crate) struct CreateCompareCollection {
+    pub commits: Vec<serde_json::Value>,
+    pub files: Vec<serde_json::Value>,
+    pub incomplete: bool,
+    pub incomplete_reasons: Vec<PrCreatePreviewIncompleteReason>,
+}
+
+#[async_trait]
+pub(crate) trait CreateComparePageSource {
+    async fn fetch_create_compare_page(&self, endpoint: &str, page: u32) -> Result<serde_json::Value, AppError>;
+}
+
+fn compare_commit_identity(commit: &serde_json::Value) -> Option<&str> {
+    commit["sha"].as_str().or_else(|| commit["id"].as_str())
+}
+
+fn compare_file_identity(file: &serde_json::Value) -> Option<&str> {
+    file["filename"].as_str().or_else(|| file["new_path"].as_str()).or_else(|| file["old_path"].as_str())
+}
+
+fn compare_files(json: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    json["files"].as_array().or_else(|| json["changes"].as_array())
+}
+
+fn reported_compare_commit_count(json: &serde_json::Value) -> Option<u64> {
+    json["total_commits"].as_u64().into_iter().chain(json["ahead_by"].as_u64()).max()
+}
+
+fn add_compare_incomplete_reason(
+    reasons: &mut Vec<PrCreatePreviewIncompleteReason>,
+    reason: PrCreatePreviewIncompleteReason,
+) {
+    if !reasons.contains(&reason) {
+        reasons.push(reason);
+    }
+}
+
+fn compare_page_error_summary(error: &AppError) -> String {
+    match error {
+        AppError::Http(error) => {
+            if let Some(status) = error.status() {
+                format!("HTTP {}", status.as_u16())
+            } else if error.is_timeout() {
+                "请求超时".into()
+            } else if error.is_connect() {
+                "连接失败".into()
+            } else {
+                "HTTP 请求失败".into()
+            }
+        }
+        AppError::Json(_) => "响应 JSON 无效".into(),
+        AppError::Io(_) => "本地 IO 失败".into(),
+        AppError::NotAuthenticated(_) => "认证失效".into(),
+        AppError::Api(message) => [401_u16, 403, 404, 408, 409, 422, 429, 500, 502, 503, 504]
+            .into_iter()
+            .find(|status| {
+                let expected = status.to_string();
+                message.split(|character: char| !character.is_ascii_digit()).any(|part| part == expected)
+            })
+            .map(|status| format!("HTTP {status}"))
+            .unwrap_or_else(|| "平台 API 请求失败".into()),
+        AppError::UnsupportedStrategy(_) => "平台策略不支持".into(),
+        AppError::Ai(_) => "AI 请求失败".into(),
+        AppError::NotImplemented(_) => "平台能力不支持".into(),
+        AppError::Unknown(_) => "未知错误".into(),
+    }
+}
+
+pub(crate) async fn collect_create_compare_pages<S>(
+    source: &S,
+    endpoint: &str,
+    platform_name: &str,
+    missing_files_error: &str,
+) -> Result<CreateCompareCollection, AppError>
+where
+    S: CreateComparePageSource + Sync,
+{
+    let first = source.fetch_create_compare_page(endpoint, 1).await?;
+    let mut commits = first["commits"].as_array().cloned().unwrap_or_default();
+    let mut files = compare_files(&first).cloned().ok_or_else(|| AppError::Api(missing_files_error.to_string()))?;
+    let reported_commits = reported_compare_commit_count(&first);
+    let mut commit_ids = commits
+        .iter()
+        .filter_map(compare_commit_identity)
+        .map(str::to_string)
+        .collect::<std::collections::HashSet<_>>();
+    let mut file_ids =
+        files.iter().filter_map(compare_file_identity).map(str::to_string).collect::<std::collections::HashSet<_>>();
+    let mut page = 1_u32;
+    let mut page_commit_count = commits.len();
+    let mut incomplete_reasons = Vec::new();
+
+    loop {
+        let needs_next_page = reported_commits
+            .map(|total| (commits.len() as u64) < total)
+            .unwrap_or(page_commit_count >= CREATE_COMPARE_COMMIT_PAGE_SIZE);
+        if !needs_next_page {
+            break;
+        }
+        if page >= MAX_CREATE_COMPARE_PAGES {
+            add_compare_incomplete_reason(&mut incomplete_reasons, PrCreatePreviewIncompleteReason::PaginationLimit);
+            break;
+        }
+
+        page = page.saturating_add(1);
+        let next = match source.fetch_create_compare_page(endpoint, page).await {
+            Ok(next) => next,
+            Err(error) => {
+                eprintln!("{platform_name} Compare 补页失败（page={page}）：{}", compare_page_error_summary(&error));
+                add_compare_incomplete_reason(
+                    &mut incomplete_reasons,
+                    PrCreatePreviewIncompleteReason::PaginationFailed,
+                );
+                break;
+            }
+        };
+        let Some(page_commits) = next["commits"].as_array() else {
+            eprintln!("{platform_name} Compare 补页失败（page={page}）：响应缺少 commits 字段");
+            add_compare_incomplete_reason(&mut incomplete_reasons, PrCreatePreviewIncompleteReason::PaginationFailed);
+            break;
+        };
+        page_commit_count = page_commits.len();
+        let commit_count_before_page = commits.len();
+        for commit in page_commits {
+            let is_new = compare_commit_identity(commit).map(|id| commit_ids.insert(id.to_string())).unwrap_or(true);
+            if is_new {
+                commits.push(commit.clone());
+            }
+        }
+        if let Some(page_files) = compare_files(&next) {
+            for file in page_files {
+                let is_new = compare_file_identity(file).map(|id| file_ids.insert(id.to_string())).unwrap_or(true);
+                if is_new {
+                    files.push(file.clone());
+                }
+            }
+        }
+
+        // Some compatible APIs accept page parameters but keep returning page one.
+        if page_commit_count > 0 && commits.len() == commit_count_before_page {
+            add_compare_incomplete_reason(&mut incomplete_reasons, PrCreatePreviewIncompleteReason::PlatformLimit);
+            break;
+        }
+
+        if page_commit_count < CREATE_COMPARE_COMMIT_PAGE_SIZE {
+            if reported_commits.is_some_and(|total| (commits.len() as u64) < total) {
+                add_compare_incomplete_reason(&mut incomplete_reasons, PrCreatePreviewIncompleteReason::PlatformLimit);
+            }
+            break;
+        }
+    }
+
+    let pagination_stopped_early = incomplete_reasons.iter().any(|reason| {
+        matches!(
+            reason,
+            PrCreatePreviewIncompleteReason::PaginationFailed | PrCreatePreviewIncompleteReason::PaginationLimit
+        )
+    });
+    if !pagination_stopped_early && reported_commits.is_some_and(|total| (commits.len() as u64) < total) {
+        add_compare_incomplete_reason(&mut incomplete_reasons, PrCreatePreviewIncompleteReason::PlatformLimit);
+    }
+    if files.len() >= CREATE_COMPARE_FILE_LIMIT {
+        add_compare_incomplete_reason(&mut incomplete_reasons, PrCreatePreviewIncompleteReason::PlatformLimit);
+    }
+    Ok(CreateCompareCollection { commits, files, incomplete: !incomplete_reasons.is_empty(), incomplete_reasons })
+}
 
 pub(crate) fn create_compare_is_incomplete(json: &serde_json::Value, commit_count: usize, file_count: usize) -> bool {
-    let reported_commit_count = json["total_commits"].as_u64().into_iter().chain(json["ahead_by"].as_u64()).max();
+    let reported_commit_count = reported_compare_commit_count(json);
     let commits_incomplete = reported_commit_count
         .map(|total| total > commit_count as u64)
         .unwrap_or(commit_count >= CREATE_COMPARE_COMMIT_PAGE_SIZE);
@@ -565,14 +733,18 @@ pub trait GitPlatform: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, sync::Mutex};
+    use std::{
+        collections::VecDeque,
+        sync::{atomic::AtomicU32, atomic::Ordering, Mutex},
+    };
 
     use super::{
-        capabilities_for, collect_json_pages, collect_json_pages_limited, create_compare_is_incomplete, json_page_url,
-        next_page_from_link, normalize_api_base, walk_pr_dependency_candidates, AppError, JsonPage, JsonPageSource,
-        JSON_PAGE_SIZE,
+        capabilities_for, collect_create_compare_pages, collect_json_pages, collect_json_pages_limited,
+        compare_page_error_summary, create_compare_is_incomplete, json_page_url, next_page_from_link,
+        normalize_api_base, walk_pr_dependency_candidates, AppError, CreateComparePageSource, JsonPage, JsonPageSource,
+        CREATE_COMPARE_COMMIT_PAGE_SIZE, JSON_PAGE_SIZE, MAX_CREATE_COMPARE_PAGES,
     };
-    use crate::models::{PrDependencyCandidate, PrState};
+    use crate::models::{PrCreatePreviewIncompleteReason, PrDependencyCandidate, PrState};
 
     struct MockPageSource {
         pages: Mutex<VecDeque<JsonPage>>,
@@ -605,6 +777,45 @@ mod tests {
     impl JsonPageSource for UnboundedPageSource {
         async fn fetch_json_page(&self, _endpoint: &str, page: u32) -> Result<JsonPage, AppError> {
             Ok(JsonPage { items: Vec::new(), next_page: Some(page + 1), pagination_known: true })
+        }
+    }
+
+    struct MockCompareSource {
+        pages: Mutex<VecDeque<Result<serde_json::Value, AppError>>>,
+        requested_pages: Mutex<Vec<u32>>,
+    }
+
+    impl MockCompareSource {
+        fn new(pages: Vec<Result<serde_json::Value, AppError>>) -> Self {
+            Self { pages: Mutex::new(pages.into()), requested_pages: Mutex::new(Vec::new()) }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CreateComparePageSource for MockCompareSource {
+        async fn fetch_create_compare_page(&self, _endpoint: &str, page: u32) -> Result<serde_json::Value, AppError> {
+            self.requested_pages.lock().unwrap().push(page);
+            self.pages.lock().unwrap().pop_front().unwrap_or_else(|| Err(AppError::Api("测试分页响应不足".into())))
+        }
+    }
+
+    struct UnboundedCompareSource {
+        requested_pages: AtomicU32,
+    }
+
+    #[async_trait::async_trait]
+    impl CreateComparePageSource for UnboundedCompareSource {
+        async fn fetch_create_compare_page(&self, _endpoint: &str, page: u32) -> Result<serde_json::Value, AppError> {
+            self.requested_pages.fetch_add(1, Ordering::Relaxed);
+            let start = (page as usize - 1) * CREATE_COMPARE_COMMIT_PAGE_SIZE;
+            let commits = (start..start + CREATE_COMPARE_COMMIT_PAGE_SIZE)
+                .map(|id| serde_json::json!({ "sha": format!("commit-{id}") }))
+                .collect::<Vec<_>>();
+            Ok(serde_json::json!({
+                "total_commits": MAX_CREATE_COMPARE_PAGES as usize * CREATE_COMPARE_COMMIT_PAGE_SIZE + 1,
+                "commits": commits,
+                "files": if page == 1 { serde_json::json!([{ "filename": "src/main.rs" }]) } else { serde_json::json!([]) }
+            }))
         }
     }
 
@@ -702,6 +913,107 @@ mod tests {
     fn leaves_create_compare_complete_when_the_response_is_below_the_limits() {
         assert!(!create_compare_is_incomplete(&serde_json::json!({ "total_commits": 100 }), 100, 299));
         assert!(!create_compare_is_incomplete(&serde_json::json!({}), 2, 3));
+    }
+
+    #[tokio::test]
+    async fn collects_all_reported_compare_commit_pages_and_deduplicates_files() {
+        let source = MockCompareSource::new(vec![
+            Ok(serde_json::json!({
+                "total_commits": 2,
+                "commits": [{ "sha": "one" }],
+                "files": [{ "filename": "src/one.rs" }]
+            })),
+            Ok(serde_json::json!({
+                "commits": [{ "sha": "two" }],
+                "files": [{ "filename": "src/one.rs" }, { "filename": "src/two.rs" }]
+            })),
+        ]);
+
+        let result = collect_create_compare_pages(&source, "compare", "Test", "missing files").await.unwrap();
+
+        assert_eq!(result.commits.len(), 2);
+        assert_eq!(result.files.len(), 2);
+        assert!(!result.incomplete);
+        assert_eq!(*source.requested_pages.lock().unwrap(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn confirms_an_unreported_exact_page_boundary_with_an_empty_followup_page() {
+        let commits = (0..CREATE_COMPARE_COMMIT_PAGE_SIZE)
+            .map(|id| serde_json::json!({ "sha": format!("commit-{id}") }))
+            .collect::<Vec<_>>();
+        let source = MockCompareSource::new(vec![
+            Ok(serde_json::json!({
+                "commits": commits,
+                "files": [{ "filename": "src/main.rs" }]
+            })),
+            Ok(serde_json::json!({ "commits": [] })),
+        ]);
+
+        let result = collect_create_compare_pages(&source, "compare", "Test", "missing files").await.unwrap();
+
+        assert_eq!(result.commits.len(), CREATE_COMPARE_COMMIT_PAGE_SIZE);
+        assert!(!result.incomplete);
+        assert_eq!(*source.requested_pages.lock().unwrap(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn marks_compare_incomplete_when_a_supplemental_page_fails() {
+        let source = MockCompareSource::new(vec![
+            Ok(serde_json::json!({
+                "total_commits": 2,
+                "commits": [{ "sha": "one" }],
+                "files": [{ "filename": "src/one.rs" }]
+            })),
+            Err(AppError::Api("rate limited".into())),
+        ]);
+
+        let result = collect_create_compare_pages(&source, "compare", "Test", "missing files").await.unwrap();
+
+        assert_eq!(result.commits.len(), 1);
+        assert!(result.incomplete);
+        assert_eq!(result.incomplete_reasons, vec![PrCreatePreviewIncompleteReason::PaginationFailed]);
+    }
+
+    #[tokio::test]
+    async fn stops_when_a_compare_api_repeats_the_first_page() {
+        let page = serde_json::json!({
+            "total_commits": 2,
+            "commits": [{ "sha": "one" }],
+            "files": [{ "filename": "src/one.rs" }]
+        });
+        let source = MockCompareSource::new(vec![Ok(page.clone()), Ok(page)]);
+
+        let result = collect_create_compare_pages(&source, "compare", "Test", "missing files").await.unwrap();
+
+        assert_eq!(result.commits.len(), 1);
+        assert!(result.incomplete);
+        assert_eq!(result.incomplete_reasons, vec![PrCreatePreviewIncompleteReason::PlatformLimit]);
+        assert_eq!(*source.requested_pages.lock().unwrap(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn bounds_large_compare_pagination_and_marks_the_result_incomplete() {
+        let source = UnboundedCompareSource { requested_pages: AtomicU32::new(0) };
+
+        let result = collect_create_compare_pages(&source, "compare", "Test", "missing files").await.unwrap();
+
+        assert_eq!(result.commits.len(), MAX_CREATE_COMPARE_PAGES as usize * CREATE_COMPARE_COMMIT_PAGE_SIZE);
+        assert!(result.incomplete);
+        assert_eq!(result.incomplete_reasons, vec![PrCreatePreviewIncompleteReason::PaginationLimit]);
+        assert_eq!(source.requested_pages.load(Ordering::Relaxed), MAX_CREATE_COMPARE_PAGES);
+    }
+
+    #[test]
+    fn sanitizes_compare_page_errors_before_logging() {
+        let error =
+            AppError::Api("Gitee API 429 (https://gitee.example/api?access_token=secret-token): rate limited".into());
+
+        let summary = compare_page_error_summary(&error);
+
+        assert_eq!(summary, "HTTP 429");
+        assert!(!summary.contains("secret-token"));
+        assert!(!summary.contains("gitee.example"));
     }
 
     #[tokio::test]

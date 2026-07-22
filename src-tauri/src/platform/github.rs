@@ -912,6 +912,13 @@ impl super::JsonPageSource for GitHubAdapter {
 }
 
 #[async_trait]
+impl super::CreateComparePageSource for GitHubAdapter {
+    async fn fetch_create_compare_page(&self, endpoint: &str, page: u32) -> Result<Value, AppError> {
+        self.get_json(&super::json_page_url(endpoint, page)).await
+    }
+}
+
+#[async_trait]
 impl GitPlatform for GitHubAdapter {
     fn name(&self) -> &'static str {
         "github"
@@ -1416,7 +1423,13 @@ impl GitPlatform for GitHubAdapter {
                 author_name: commit["author"]["name"].as_str().unwrap_or("").to_string(),
                 authored_at: commit["author"]["date"].as_str().unwrap_or("").to_string(),
             };
-            return Ok(PrCreatePreviewData { commits: vec![summary], diff, files, incomplete: false });
+            return Ok(PrCreatePreviewData {
+                commits: vec![summary],
+                diff,
+                files,
+                incomplete: false,
+                incomplete_reasons: vec![],
+            });
         }
         let base = urlencoding::encode(&request.target_branch);
         let head_reference = if request.source_owner == owner && request.source_repo == repo {
@@ -1425,36 +1438,38 @@ impl GitPlatform for GitHubAdapter {
             format!("{}:{}", request.source_owner, request.source_branch)
         };
         let head = urlencoding::encode(&head_reference);
-        let url = format!("{}/repos/{}/{}/compare/{}...{}?per_page=100", self.base_url, owner, repo, base, head);
-        let json = self.get_json::<Value>(&url).await?;
-        let files_json =
-            json["files"].as_array().ok_or_else(|| AppError::Api("GitHub compare 响应缺少 files 字段".into()))?;
-        let commits_json = json["commits"].as_array();
-        let incomplete = super::create_compare_is_incomplete(&json, commits_json.map_or(0, Vec::len), files_json.len());
+        let endpoint = format!("{}/repos/{}/{}/compare/{}...{}", self.base_url, owner, repo, base, head);
+        let collection =
+            super::collect_create_compare_pages(self, &endpoint, "GitHub", "GitHub compare 响应缺少 files 字段")
+                .await?;
+        let files_json = &collection.files;
         let files = files_json.iter().map(Self::map_compare_file).collect();
         let diff = files_json.iter().map(Self::compare_unified_diff).filter(|patch| !patch.is_empty()).collect();
-        let commits = commits_json
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|commit| {
-                        let sha = commit["sha"].as_str()?.to_string();
-                        let message = commit["commit"]["message"].as_str().unwrap_or("");
-                        Some(PrCommitSummary {
-                            sha,
-                            title: message.lines().next().unwrap_or("").to_string(),
-                            author_name: commit["commit"]["author"]["name"]
-                                .as_str()
-                                .or_else(|| commit["author"]["login"].as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            authored_at: commit["commit"]["author"]["date"].as_str().unwrap_or("").to_string(),
-                        })
-                    })
-                    .collect()
+        let commits = collection
+            .commits
+            .iter()
+            .filter_map(|commit| {
+                let sha = commit["sha"].as_str()?.to_string();
+                let message = commit["commit"]["message"].as_str().unwrap_or("");
+                Some(PrCommitSummary {
+                    sha,
+                    title: message.lines().next().unwrap_or("").to_string(),
+                    author_name: commit["commit"]["author"]["name"]
+                        .as_str()
+                        .or_else(|| commit["author"]["login"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    authored_at: commit["commit"]["author"]["date"].as_str().unwrap_or("").to_string(),
+                })
             })
-            .unwrap_or_default();
-        Ok(PrCreatePreviewData { commits, diff, files, incomplete })
+            .collect();
+        Ok(PrCreatePreviewData {
+            commits,
+            diff,
+            files,
+            incomplete: collection.incomplete,
+            incomplete_reasons: collection.incomplete_reasons,
+        })
     }
 
     async fn update_pull_request_metadata(

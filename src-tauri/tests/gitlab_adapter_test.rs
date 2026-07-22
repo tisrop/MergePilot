@@ -429,6 +429,58 @@ async fn test_gitlab_create_compare_marks_a_timed_out_preview_incomplete() {
 }
 
 #[tokio::test]
+async fn test_gitlab_create_compare_marks_overflow_and_limited_diffs_incomplete() {
+    for (overflow, collapsed, too_large) in [(true, false, false), (false, true, false), (false, false, true)] {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v4/projects/group%2Frepo/repository/compare"))
+            .and(query_param("from", "main"))
+            .and(query_param("to", "feature"))
+            .and(query_param("straight", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "compare_timeout": false,
+                "compare_same_ref": false,
+                "overflow": overflow,
+                "commits": [{
+                    "id": "abc123",
+                    "title": "Large change",
+                    "author_name": "Alice",
+                    "authored_date": "2026-07-19T10:00:00Z"
+                }],
+                "diffs": [{
+                    "old_path": "src/main.rs",
+                    "new_path": "src/main.rs",
+                    "diff": "",
+                    "collapsed": collapsed,
+                    "too_large": too_large
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+        let adapter = GitLabAdapter::new(HttpClient::new(), "token".into()).with_base_url(mock_server.uri());
+
+        let preview = adapter
+            .preview_pull_request(
+                "group",
+                "repo",
+                &PrCreatePreviewRequest {
+                    source_owner: "group".into(),
+                    source_repo: "repo".into(),
+                    source_branch: "feature".into(),
+                    target_branch: "main".into(),
+                    commit_sha: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(preview.incomplete);
+        assert_eq!(preview.commits.len(), 1);
+        assert_eq!(preview.files.len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn test_gitlab_lists_all_branch_pages() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))

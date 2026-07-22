@@ -50,6 +50,7 @@ function createPreview(
 ): PrCreatePreview {
   return {
     incomplete,
+    incomplete_reasons: incomplete ? ["platform_limit"] : [],
     commits: [
       {
         sha,
@@ -547,6 +548,23 @@ describe("PrNewPage", () => {
     expect(prCreate).toHaveBeenCalledOnce();
   });
 
+  it("Compare 补页失败时展示可排障的降级提示且仍允许创建", async () => {
+    const incompletePreview = createPreview(
+      "Partial preview",
+      "partial-sha",
+      "src/partial.ts",
+      true,
+    );
+    incompletePreview.incomplete_reasons = ["pagination_failed"];
+    vi.mocked(prCreatePreview).mockResolvedValue(incompletePreview);
+    const { wrapper } = await mountPage();
+
+    expect(wrapper.get(".preview-warning").text()).toContain("后续分页加载失败");
+    expect(wrapper.get(".preview-warning").text()).toContain("不影响创建 PR");
+    await wrapper.get("input[placeholder='简要说明这次变更']").setValue("Large change");
+    expect(wrapper.get<HTMLButtonElement>("button[type='submit']").element.disabled).toBe(false);
+  });
+
   it("创建 PR 描述支持 Markdown 编辑和预览且提交原始文本", async () => {
     const { wrapper } = await mountPage();
     const markdown = "# 变更说明\n\n- 第一项\n- 第二项\n\n`code`";
@@ -605,6 +623,24 @@ describe("PrNewPage", () => {
     await wrapper.get(".dropdown-option[data-value='']").trigger("click");
     await flushPromises();
     expect(wrapper.getComponent(diffViewerStub).props("diff").files[0].filename).toBe("src/all.ts");
+  });
+
+  it("不完整提示只跟随当前选择的 Diff 范围", async () => {
+    vi.mocked(prCreatePreview).mockImplementation(async (_platform, _owner, _repo, request) =>
+      request.commit_sha
+        ? createPreview("Complete commit", request.commit_sha, "src/commit.ts")
+        : createPreview("Partial branch", "branch-sha", "src/all.ts", true),
+    );
+    const { wrapper } = await mountPage();
+
+    expect(wrapper.find(".preview-warning").exists()).toBe(true);
+    await wrapper.get('[role="tab"][aria-selected="false"]').trigger("click");
+    const scopeSelect = wrapper.get('[aria-label="Diff 范围"]');
+    await scopeSelect.trigger("click");
+    await wrapper.get(".dropdown-option[data-value='branch-sha']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".preview-warning").exists()).toBe(false);
   });
 
   it("切换分支后忽略迟到的旧预览请求", async () => {
