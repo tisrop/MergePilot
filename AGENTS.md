@@ -42,13 +42,13 @@ cd src-tauri && cargo test github_adapter -- --nocapture
 src/                 # Vue 3 前端（Composition API, <script setup lang="ts">）
   api/index.ts       # 唯一 IPC 入口
   types/index.ts     # 前端 TS 类型
-  stores/            # Pinia（Auth / Capability / PR / Repo / Inbox / UI / Update）
-  router/index.ts    # 8 条路由与登录恢复守卫
-  pages/             # 7 个页面组件（含跨平台 PR 收件箱）
-  components/        # ai/ diff/ inbox/ issue/ layout/ pr/ review/ shared/
+  stores/            # Pinia（Auth / Capability / PR / Repo / Inbox / Notification / Review / UI / Update）
+  router/index.ts    # 10 条路由记录与登录恢复守卫
+  pages/             # 8 个页面组件（含跨平台 PR 收件箱和 PR/MR 创建页）
+  components/        # ai/ command/ diff/ inbox/ issue/ layout/ notification/ pr/ review/ shared/
   main.ts            # 挂载 Pinia + Router；HMR 时阻止恢复到 /settings
 src-tauri/
-  src/lib.rs         # Tauri Builder：注册 37 个 IPC 命令，设置原生菜单与桌面插件
+  src/lib.rs         # Tauri Builder：注册 54 个 IPC 命令，设置原生菜单与桌面插件
   src/state.rs       # AppState + 可取消的 AI 任务注册表
   src/vault.rs       # TokenVault：Keyring 优先、AES-256-GCM 文件降级
   src/local_store.rs # SQLite 评论快照缓存
@@ -80,6 +80,10 @@ src-tauri/
   必须明确报错并提示刷新 Diff。
 - `review_inbox_list` 按平台查询“待我处理”或“我创建的”PR/MR；三个 adapter 必须保留各自的
   账号筛选语义，并返回统一的仓库上下文和分页模型。
+- `pr_create_preview` 与 `pr_create` 支持三平台 PR/MR 创建；预览不完整必须显式返回状态，但不得
+  将平台 Compare API 的截断变成合法大 PR/MR 的创建硬阻塞。Gitee 不支持 Draft，前后端都必须拒绝。
+- PR/MR 元数据更新必须同时检查静态平台能力、Token 运行时权限和远端更新时间；部分字段写入失败
+  必须保留成功结果并在详情页展示，不得把已创建的 PR/MR 伪装为整体失败。
 - 收件箱条目必须保留具体 `relationships`：GitHub/GitLab 区分 Reviewer、Assignee，Gitee 区分
   评审人、测试人；“我创建的”使用 Author。重复条目合并时不得丢失关系来源。
 - 普通 Open PR / MR 列表和收件箱必须复用统一状态摘要语义，区分总体合并状态、审批、CI/测试、
@@ -112,8 +116,14 @@ src-tauri/
 - 收件箱按平台独立维护 items/page/totalPages/loading/error/failedPage；跨平台合并按
   `platform + repository_full_name + number` 去重，并合并分类、关系来源和状态摘要；单平台失败不得
   清空其他平台数据。角色和合并状态筛选只作用于已加载条目，不得破坏平台分页与重试状态。
+- 收件箱阅读状态、活动标记、筛选偏好和低频刷新属于本地增强；持久化写入必须节流，平台限流
+  必须退避，通知权限撤销、轮询失败和发送失败不得静默。
+- PR/MR 创建页必须隔离路由平台、目标仓库、源仓库、分支与异步请求序列；仓库级入口不得混入
+  其他目标仓库，全局入口按需分页，不得串行预取全部仓库。
 - AI 流式事件只消费当前 `request_id`；新评审和组件卸载必须取消旧请求并解除监听；取消不是错误提示。
 - AI Panel 在详情页首次打开后保持挂载；切换页签、增量复审和建议操作不得丢失当前评审状态。
+- AI 评审历史、仓库级规则和统一草稿按平台、仓库、PR/MR 与 `head_sha` 隔离保存在本地；规则是
+  不可信用户输入，不得覆盖系统安全约束或触发远端操作。
 - AI 结果必须记录评审 `head_sha`；提交版本变化后标记为过期，禁止定位旧建议或提交旧草稿。
 - AI 建议定位使用显式请求/结果协议跳转到 Diff；路径需要兼容重命名前后名称，失败必须回到 AI
   页签并给出原因，不能把焦点留在无目标的 Diff。
