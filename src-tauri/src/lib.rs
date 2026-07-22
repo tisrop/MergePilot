@@ -18,6 +18,7 @@ use local_store::CommentSnapshotStore;
 use state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::Manager;
 use tauri_plugin_window_state::{StateFlags, WindowExt};
@@ -58,6 +59,21 @@ pub fn run() {
                 if let Err(error) = restored {
                     eprintln!("恢复窗口状态失败：{error}");
                 }
+
+                // The native window may finish applying the plugin state after setup. Recheck
+                // once on the main thread so an off-screen position is corrected after geometry settles.
+                let deferred_window = window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(100));
+                    let callback_window = deferred_window.clone();
+                    if let Err(error) = deferred_window.run_on_main_thread(move || {
+                        if let Err(error) = window_state::ensure_visible(&callback_window) {
+                            eprintln!("延迟窗口可见性校正失败：{error}");
+                        }
+                    }) {
+                        eprintln!("调度延迟窗口可见性校正失败：{error}");
+                    }
+                });
             }
             if setup_activation.mark_ready() {
                 single_instance::activate_main_window(app.handle());
