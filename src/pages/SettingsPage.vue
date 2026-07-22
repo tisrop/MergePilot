@@ -513,9 +513,13 @@ async function copySupportInfo() {
 .toggle-slider {
   position: absolute;
   inset: 0;
-  background: var(--color-border);
+  border: 1px solid var(--color-border);
+  background: var(--color-text-tertiary);
   border-radius: 24px;
-  transition: background var(--transition-fast);
+  box-shadow: inset 0 0 0 1px rgba(23, 32, 51, 0.06);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .toggle-slider::before {
@@ -523,15 +527,18 @@ async function copySupportInfo() {
   position: absolute;
   width: 18px;
   height: 18px;
-  left: 3px;
-  top: 3px;
-  background: #fff;
+  left: 2px;
+  top: 2px;
+  background: var(--color-surface);
   border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(23, 32, 51, 0.18);
   transition: transform var(--transition-fast);
 }
 
 .toggle input:checked + .toggle-slider {
+  border-color: var(--color-primary);
   background: var(--color-primary);
+  box-shadow: none;
 }
 
 .toggle input:checked + .toggle-slider::before {

@@ -337,7 +337,7 @@ function setEvent(type: NotificationEventType, event: Event): void {
 }
 
 .test-notification-button:hover:not(:disabled) {
-  border-color: var(--color-border-strong);
+  border-color: var(--color-border);
   background: var(--color-surface-hover);
 }
 
@@ -471,11 +471,15 @@ legend {
 
 .toggle-slider {
   position: absolute;
+  border: 1px solid var(--color-border);
   border-radius: 22px;
-  background: var(--color-border-strong);
+  background: var(--color-text-tertiary);
+  box-shadow: inset 0 0 0 1px rgba(23, 32, 51, 0.06);
   cursor: pointer;
   inset: 0;
-  transition: background var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .toggle-slider::before {
@@ -483,15 +487,18 @@ legend {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgba(23, 32, 51, 0.18);
   content: "";
-  left: 3px;
-  top: 3px;
+  left: 2px;
+  top: 2px;
   transition: transform var(--transition-fast);
 }
 
 .toggle input:checked + .toggle-slider {
+  border-color: var(--color-primary);
   background: var(--color-primary);
+  box-shadow: none;
 }
 
 .toggle input:checked + .toggle-slider::before {
