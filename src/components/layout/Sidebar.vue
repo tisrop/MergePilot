@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useRepoStore } from "@/stores/useRepoStore";
@@ -26,10 +26,19 @@ interface OwnerGroup {
   repos: RepoSummary[];
 }
 
+const repoSearch = ref("");
+const normalizedRepoSearch = computed(() => repoSearch.value.trim().toLocaleLowerCase());
+
 const repoGroups = computed(() => {
   const platform = auth.activePlatform;
   const groups = new Map<string, OwnerGroup>();
   for (const r of repo.repos) {
+    const searchableText = [r.name, r.full_name, r.owner, r.owner_display_name]
+      .join("\n")
+      .toLocaleLowerCase();
+    if (normalizedRepoSearch.value && !searchableText.includes(normalizedRepoSearch.value)) {
+      continue;
+    }
     const key = r.owner;
     if (!groups.has(key)) {
       groups.set(key, {
@@ -92,6 +101,13 @@ const compactRepoFullName = computed(() => {
   return `${routeOwner}/${routeRepo}`;
 });
 const compactRepoName = computed(() => compactRepoFullName.value?.split("/").at(-1) ?? null);
+
+watch(
+  () => auth.activePlatform,
+  () => {
+    repoSearch.value = "";
+  },
+);
 
 onMounted(async () => {
   const activePlatform = auth.activePlatform;
@@ -402,10 +418,23 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
           </svg>
         </button>
       </div>
+      <input
+        v-if="repo.repos.length > 0"
+        v-model="repoSearch"
+        class="repo-search"
+        type="search"
+        placeholder="搜索仓库"
+        aria-label="搜索仓库"
+        autocomplete="off"
+        spellcheck="false"
+      />
       <div v-if="repo.loading && repo.repos.length === 0" class="repo-list">
         <div class="loading-hint">加载中...</div>
       </div>
       <div v-else class="repo-list">
+        <div v-if="normalizedRepoSearch && repoGroups.length === 0" class="repo-search-empty">
+          已加载仓库中没有匹配项
+        </div>
         <template v-for="group in repoGroups" :key="group.owner">
           <div class="repo-group-header">
             <svg
@@ -493,33 +522,8 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
       </button>
     </div>
 
-    <div class="sidebar-footer">
-      <router-link
-        to="/settings"
-        class="settings-link"
-        aria-label="设置"
-        :title="isSidebarCollapsed ? '设置' : undefined"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="3" />
-          <path
-            d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.14.37.36.7.64.96.3.27.68.42 1.08.44H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z"
-          />
-        </svg>
-        <span class="nav-label">设置</span>
-      </router-link>
+    <div v-if="isSidebarCollapsed && !compactSidebar" class="sidebar-footer">
       <button
-        v-if="isSidebarCollapsed && !compactSidebar"
         class="sidebar-toggle"
         type="button"
         title="展开侧栏"
@@ -775,6 +779,30 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
   cursor: not-allowed;
 }
 
+.repo-search {
+  width: 100%;
+  height: 32px;
+  margin-bottom: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.repo-search::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.repo-search:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 0;
+  border-color: var(--color-focus);
+  box-shadow: var(--shadow-control-focus);
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -792,6 +820,13 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
   padding: var(--space-6) var(--space-2);
   font-size: 13px;
   color: var(--color-text-tertiary);
+}
+
+.repo-search-empty {
+  padding: var(--space-6) var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  text-align: center;
 }
 
 .repo-list {
@@ -910,8 +945,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
   gap: var(--space-2);
 }
 
-.sidebar-toggle,
-.settings-link {
+.sidebar-toggle {
   display: flex;
   width: 34px;
   height: 34px;
@@ -928,8 +962,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
     color var(--transition-fast);
 }
 
-.sidebar-toggle:hover,
-.settings-link:hover {
+.sidebar-toggle:hover {
   border-color: var(--color-border);
   background: var(--color-surface-hover);
   color: var(--color-text);
@@ -937,26 +970,13 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
 
 .sidebar-footer {
   display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
+  justify-content: flex-end;
   margin-top: auto;
-  padding: var(--space-2) var(--space-3) var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-3);
   border-top: 1px solid var(--color-border-light);
-}
-
-.settings-link {
-  width: auto;
-  flex: 1;
-  justify-content: flex-start;
-  gap: var(--space-2);
-  padding: 0 var(--space-3);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.settings-link.router-link-active {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
 }
 
 .compact-platform {
@@ -1064,21 +1084,6 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
 
 .sidebar.is-collapsed .repo-section {
   display: none;
-}
-
-.sidebar.is-collapsed .sidebar-footer {
-  flex: 0 0 auto;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: var(--space-2) var(--space-2) var(--space-3);
-}
-
-.sidebar.is-collapsed .settings-link {
-  width: 38px;
-  min-height: 38px;
-  flex: 0 0 auto;
-  justify-content: center;
-  padding: var(--space-2);
 }
 
 @media (max-width: 900px) {

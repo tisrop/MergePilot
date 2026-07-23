@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/useAuthStore";
 import { usePrStore } from "@/stores/usePrStore";
 import { useRepoStore } from "@/stores/useRepoStore";
 import { repoList } from "@/api";
+import type { RepoSummary } from "@/types";
 
 const storage = new Map<string, string>();
 
@@ -28,6 +29,27 @@ vi.mock("@/api", () => ({
   prReopen: vi.fn(),
 }));
 
+function repository(
+  id: number,
+  fullName: string,
+  ownerDisplayName: string = fullName.split("/")[0],
+): RepoSummary {
+  const [owner, ...nameParts] = fullName.split("/");
+  return {
+    id,
+    name: nameParts.join("/"),
+    full_name: fullName,
+    owner,
+    owner_type: "organization",
+    owner_display_name: ownerDisplayName,
+    description: "",
+    private: false,
+    fork: false,
+    parent_full_name: null,
+    parent_owner: null,
+  };
+}
+
 describe("Sidebar", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -42,7 +64,6 @@ describe("Sidebar", () => {
         { path: "/inbox", name: "review-inbox", component: { template: "<div />" } },
         { path: "/pr", name: "pr-list", component: { template: "<div />" } },
         { path: "/issue", name: "issue-list", component: { template: "<div />" } },
-        { path: "/settings", name: "settings", component: { template: "<div />" } },
       ],
     });
     await router.push("/pr");
@@ -65,7 +86,7 @@ describe("Sidebar", () => {
     expect(wrapper.get('[aria-label="拉取请求（PR）"]').attributes("title")).toBe("拉取请求（PR）");
     expect(wrapper.get('[aria-label="创建 PR"]').attributes("title")).toBe("创建 PR");
     expect(wrapper.get('[aria-label="Issues"]').attributes("title")).toBe("Issues");
-    expect(wrapper.get('[aria-label="设置"]').attributes("title")).toBe("设置");
+    expect(wrapper.find('[aria-label="设置"]').exists()).toBe(false);
     expect(wrapper.get(".compact-platform").attributes("aria-label")).toBe("当前平台：GitHub");
     expect(wrapper.get(".compact-repo-name").text()).toBe("MergeBeacon");
     expect(wrapper.get(".compact-repo").attributes("title")).toBe("当前仓库：tisrop/MergeBeacon");
@@ -135,6 +156,7 @@ describe("Sidebar", () => {
     expect(wrapper.get(".sidebar").classes()).not.toContain("is-collapsed");
     expect(wrapper.find(".repo-section").exists()).toBe(true);
     expect(wrapper.find(".compact-repo").exists()).toBe(false);
+    expect(wrapper.find('[aria-label="设置"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="展开侧栏"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="折叠侧栏"]').exists()).toBe(false);
   });
@@ -157,6 +179,84 @@ describe("Sidebar", () => {
 
     expect(wrapper.get(".loading-hint").text()).toBe("加载中...");
     expect(wrapper.find(".load-more-btn").exists()).toBe(false);
+  });
+
+  it("按仓库名称、完整路径和所有者筛选已加载仓库", async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/pr", name: "pr-list", component: { template: "<div />" } }],
+    });
+    await router.push("/pr");
+    await router.isReady();
+
+    const auth = useAuthStore();
+    auth.platforms.github.isLoggedIn = true;
+    auth.platforms.gitlab.isLoggedIn = true;
+    auth.platforms.gitee.isLoggedIn = true;
+    const repo = useRepoStore();
+    repo.reposCache.github = [
+      repository(1, "tisrop/MergeBeacon", "Tisrop Team"),
+      repository(2, "octocat/hello-world", "Octocat"),
+    ];
+    const wrapper = mount(Sidebar, { global: { plugins: [router] } });
+    const search = wrapper.get('input[aria-label="搜索仓库"]');
+
+    await search.setValue("MERGEBEACON");
+    expect(wrapper.findAll(".repo-item-name").map((item) => item.text())).toEqual(["MergeBeacon"]);
+
+    await search.setValue("octocat/hello");
+    expect(wrapper.findAll(".repo-item-name").map((item) => item.text())).toEqual(["hello-world"]);
+
+    await search.setValue("tisrop team");
+    expect(wrapper.findAll(".repo-item-name").map((item) => item.text())).toEqual(["MergeBeacon"]);
+  });
+
+  it("仓库搜索无匹配时显示空状态", async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/pr", name: "pr-list", component: { template: "<div />" } }],
+    });
+    await router.push("/pr");
+    await router.isReady();
+
+    const auth = useAuthStore();
+    auth.platforms.github.isLoggedIn = true;
+    auth.platforms.gitlab.isLoggedIn = true;
+    auth.platforms.gitee.isLoggedIn = true;
+    useRepoStore().reposCache.github = [repository(1, "tisrop/MergeBeacon")];
+    const wrapper = mount(Sidebar, { global: { plugins: [router] } });
+
+    await wrapper.get('input[aria-label="搜索仓库"]').setValue("missing");
+
+    expect(wrapper.find(".repo-item-name").exists()).toBe(false);
+    expect(wrapper.get(".repo-search-empty").text()).toBe("已加载仓库中没有匹配项");
+  });
+
+  it("切换平台时清空仓库搜索词", async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/pr", name: "pr-list", component: { template: "<div />" } }],
+    });
+    await router.push("/pr");
+    await router.isReady();
+
+    const auth = useAuthStore();
+    auth.platforms.github.isLoggedIn = true;
+    auth.platforms.gitlab.isLoggedIn = true;
+    auth.platforms.gitee.isLoggedIn = true;
+    const repo = useRepoStore();
+    repo.reposCache.github = [repository(1, "github/visible")];
+    repo.reposCache.gitlab = [repository(2, "gitlab/other")];
+    const wrapper = mount(Sidebar, { global: { plugins: [router] } });
+    await wrapper.get('input[aria-label="搜索仓库"]').setValue("visible");
+    const gitlabButton = wrapper
+      .findAll<HTMLButtonElement>(".platform-selector button")
+      .find((button) => button.text() === "GitLab");
+
+    await gitlabButton!.trigger("click");
+
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="搜索仓库"]').element.value).toBe("");
+    expect(wrapper.findAll(".repo-item-name").map((item) => item.text())).toEqual(["other"]);
   });
 
   it("紧凑模式固定收起侧栏且不修改 Diff 展开偏好", async () => {
