@@ -20,12 +20,16 @@ describe("IPC errors", () => {
   });
 
   it("preserves structured command error metadata", async () => {
-    invokeMock.mockRejectedValue({
+    const payload = {
       code: "rate_limited",
       message: "代码平台请求过于频繁，请稍后重试",
       retryable: true,
+      request_id: "err-0000018f12345678-0000000000000001",
       http_status: 429,
-    });
+    };
+    invokeMock.mockImplementation((command: string) =>
+      command === "error_log_record" ? Promise.resolve() : Promise.reject(payload),
+    );
 
     const promise = prDetail("github", "owner", "repo", 42);
 
@@ -34,8 +38,60 @@ describe("IPC errors", () => {
       code: "rate_limited",
       message: "代码平台请求过于频繁，请稍后重试",
       retryable: true,
+      requestId: "err-0000018f12345678-0000000000000001",
       httpStatus: 429,
     });
+    expect(invokeMock).toHaveBeenNthCalledWith(
+      2,
+      "error_log_record",
+      expect.objectContaining({
+        record: expect.objectContaining({
+          command: "pr_detail",
+          requestId: "err-0000018f12345678-0000000000000001",
+          code: "rate_limited",
+          retryable: true,
+          httpStatus: 429,
+        }),
+      }),
+    );
+    expect(invokeMock.mock.calls[1]?.[1]?.record).not.toHaveProperty("message");
+  });
+
+  it("keeps the original command error when local error logging fails", async () => {
+    invokeMock.mockRejectedValue({
+      code: "network",
+      message: "无法连接到远端服务，请检查网络",
+      retryable: true,
+    });
+
+    await expect(prDetail("github", "owner", "repo", 42)).rejects.toMatchObject({
+      code: "network",
+      message: "无法连接到远端服务，请检查网络",
+    });
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not wait for local error logging before rejecting", async () => {
+    let finishLogging: (() => void) | undefined;
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "error_log_record") {
+        return new Promise<void>((resolve) => {
+          finishLogging = resolve;
+        });
+      }
+      return Promise.reject({
+        code: "platform",
+        message: "代码平台请求失败",
+        retryable: false,
+      });
+    });
+
+    await expect(prDetail("github", "owner", "repo", 42)).rejects.toMatchObject({
+      code: "platform",
+      message: "代码平台请求失败",
+    });
+    expect(finishLogging).toBeTypeOf("function");
+    finishLogging?.();
   });
 
   it("keeps legacy string errors compatible with existing UI", async () => {

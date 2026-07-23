@@ -1,5 +1,6 @@
 use crate::ai::client::AiClient;
 use crate::error::{AppError, CommandError, CommandResult};
+use crate::error_log::ErrorLogStore;
 use crate::models::{AiConfig, AiReviewRequest, AiReviewResult, AiStreamEvent};
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
@@ -56,6 +57,7 @@ pub async fn ai_review(state: State<'_, AppState>, request: AiReviewRequest) -> 
 pub async fn ai_review_stream(
     app_handle: AppHandle,
     state: State<'_, AppState>,
+    error_logs: State<'_, ErrorLogStore>,
     request_id: String,
     request: AiReviewRequest,
 ) -> CommandResult<()> {
@@ -69,6 +71,7 @@ pub async fn ai_review_stream(
     let generation = registry.next_generation();
     let task_request_id = request_id.clone();
     let task_registry = registry.clone();
+    let task_error_logs = error_logs.inner().clone();
     let (start_tx, start_rx) = tokio::sync::oneshot::channel();
 
     let task = tokio::spawn(async move {
@@ -107,6 +110,20 @@ pub async fn ai_review_stream(
             }
             Err(error) => {
                 let error = CommandError::from(error);
+                let log_store = task_error_logs.clone();
+                let log_error = error.clone();
+                let log_failed = !matches!(
+                    tokio::task::spawn_blocking(move || log_store.record_command_error("ai_review_stream", &log_error))
+                        .await,
+                    Ok(Ok(()))
+                );
+                if log_failed {
+                    let event = serde_json::json!({
+                        "event": "error_log_write_failed",
+                        "command": "ai_review_stream",
+                    });
+                    eprintln!("{event}");
+                }
                 let _ = app_handle
                     .emit("ai-review-error", AiStreamEvent { request_id: task_request_id.clone(), payload: error });
             }

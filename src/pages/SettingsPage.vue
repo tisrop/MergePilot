@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
-import { copySupportInfo as copySupportInfoToClipboard, getAppVersion } from "@/api";
+import {
+  copyRecentErrorLogs as copyRecentErrorLogsToClipboard,
+  copySupportInfo as copySupportInfoToClipboard,
+  getAppVersion,
+} from "@/api";
 import { getErrorMessage } from "@/utils/error";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { useUpdateStore } from "@/stores/useUpdateStore";
@@ -38,6 +42,9 @@ const platformList: { value: Platform; label: string }[] = [
 const isCopyingSupportInfo = ref(false);
 const supportInfoStatus = ref("");
 const isSupportInfoError = ref(false);
+const isCopyingErrorLogs = ref(false);
+const errorLogStatus = ref("");
+const isErrorLogError = ref(false);
 const appVersion = ref("");
 const versionError = ref("");
 const isConfirmingInstall = ref(false);
@@ -123,6 +130,24 @@ async function copySupportInfo() {
     supportInfoStatus.value = `复制失败：${getErrorMessage(error, "诊断信息暂不可用")}`;
   } finally {
     isCopyingSupportInfo.value = false;
+  }
+}
+
+async function copyRecentErrorLogs() {
+  if (isCopyingErrorLogs.value) return;
+
+  isCopyingErrorLogs.value = true;
+  errorLogStatus.value = "";
+  isErrorLogError.value = false;
+  try {
+    const count = await copyRecentErrorLogsToClipboard();
+    errorLogStatus.value =
+      count > 0 ? `近期错误日志已复制（${count} 条）。` : "近期没有已记录的错误。";
+  } catch (error) {
+    isErrorLogError.value = true;
+    errorLogStatus.value = `复制失败：${getErrorMessage(error, "近期错误日志暂不可用")}`;
+  } finally {
+    isCopyingErrorLogs.value = false;
   }
 }
 </script>
@@ -379,20 +404,36 @@ async function copySupportInfo() {
               <path d="M12 11v5M12 8h.01" />
             </svg>
           </span>
-          <div>
+          <div class="section-heading-copy">
             <h3>诊断信息</h3>
             <p>复制经过脱敏的版本、系统和配置状态，用于反馈问题。</p>
           </div>
-          <button
-            type="button"
-            class="copy-support-button"
-            :disabled="isCopyingSupportInfo"
-            @click="copySupportInfo"
-          >
-            {{ isCopyingSupportInfo ? "正在复制..." : "复制诊断信息" }}
-          </button>
+          <div class="support-actions">
+            <button
+              type="button"
+              class="copy-support-button"
+              :disabled="isCopyingSupportInfo"
+              @click="copySupportInfo"
+            >
+              {{ isCopyingSupportInfo ? "正在复制..." : "复制诊断信息" }}
+            </button>
+            <button
+              type="button"
+              class="copy-support-button"
+              :disabled="isCopyingErrorLogs"
+              @click="copyRecentErrorLogs"
+            >
+              {{ isCopyingErrorLogs ? "正在复制..." : "复制近期错误日志" }}
+            </button>
+          </div>
         </div>
-        <p class="privacy-note">不包含 Token、API Key、仓库信息、代码内容或完整的自托管地址。</p>
+        <p class="privacy-note">
+          诊断信息包含版本、系统、凭证存储类型和配置状态；不包含 Token、API
+          Key、仓库信息、代码内容或完整的自托管地址。
+        </p>
+        <p class="privacy-note">
+          错误日志仅包含时间、命令、操作、错误关联标识、错误类别和状态码；不包含远端正文。
+        </p>
         <p
           v-if="supportInfoStatus"
           class="support-status"
@@ -401,6 +442,15 @@ async function copySupportInfo() {
           aria-live="polite"
         >
           {{ supportInfoStatus }}
+        </p>
+        <p
+          v-if="errorLogStatus"
+          class="support-status"
+          :class="{ error: isErrorLogError }"
+          role="status"
+          aria-live="polite"
+        >
+          {{ errorLogStatus }}
         </p>
       </section>
     </div>
@@ -563,6 +613,15 @@ async function copySupportInfo() {
   align-items: center;
 }
 
+.support-heading {
+  flex-wrap: wrap;
+}
+
+.section-heading-copy {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
 .section-icon.support {
   color: var(--color-text-secondary);
   background: var(--color-surface-hover);
@@ -584,6 +643,21 @@ async function copySupportInfo() {
   transition:
     border-color var(--transition-fast),
     background var(--transition-fast);
+}
+
+.support-actions {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.support-actions .copy-support-button {
+  flex: 0 0 auto;
+  margin-left: 0;
+  white-space: nowrap;
 }
 
 .copy-support-button:hover:not(:disabled),

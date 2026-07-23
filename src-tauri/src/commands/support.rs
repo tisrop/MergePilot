@@ -3,6 +3,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::error::{CommandError, CommandResult};
+use crate::error_log::{ErrorLogStore, DEFAULT_MAX_EXPORTED_RECORDS};
 use crate::local_store::CommentSnapshotStore;
 use crate::state::AppState;
 use crate::vault::CredentialStorage;
@@ -130,6 +131,17 @@ pub async fn copy_support_info(
     app.clipboard()
         .write_text(info.formatted)
         .map_err(|error| CommandError::from(format!("写入系统剪贴板失败：{error}")))
+}
+
+#[tauri::command]
+pub fn copy_recent_error_logs(app: AppHandle, error_logs: State<'_, ErrorLogStore>) -> CommandResult<usize> {
+    let (formatted, count) = error_logs
+        .formatted_recent_errors(DEFAULT_MAX_EXPORTED_RECORDS)
+        .map_err(|_| CommandError::from("近期错误日志暂不可用"))?;
+    app.clipboard()
+        .write_text(formatted)
+        .map_err(|error| CommandError::from(format!("写入系统剪贴板失败：{error}")))?;
+    Ok(count)
 }
 
 #[cfg(test)]

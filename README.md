@@ -250,7 +250,8 @@ UTF-8 字符边界安全截断，避免切断中文或 emoji。
 
 1. 打开 **设置 → 应用更新**，手动检查更新或启用每日自动检查。
 2. 安装版下载完成后确认重启；Windows 便携版会打开官方 ZIP 下载地址，需要退出应用后手动覆盖。
-3. 反馈问题时，在 **设置 → 诊断信息** 复制脱敏信息并粘贴到 Issue。
+3. 反馈问题时，在 **设置 → 诊断信息** 复制脱敏信息；需要排查近期失败时，可另行复制最近
+   100 条脱敏错误日志。
 
 ## 本地数据与安全
 
@@ -268,6 +269,9 @@ UTF-8 字符边界安全截断，避免切断中文或 emoji。
 - 登录 Token 只发送到所选代码托管平台；AI API Key 只发送到配置的 AI 端点。
 - 更新只接受配置中的官方更新源和 Minisign 公钥验证通过的元数据与安装包。
 - 诊断信息会隐藏自托管平台地址、非官方 AI 地址和凭证值。
+- 错误日志保存在系统应用数据目录的 `logs/mergebeacon-errors.jsonl`，单文件上限 512 KiB，
+  最多保留 3 个轮转归档。日志只记录时间、命令、操作、错误关联标识、错误类别和 HTTP 状态，
+  不记录 Token、API Key、仓库代码、远端正文或完整自托管地址。
 - macOS 应用标识符为 `com.mergebeacon`。
 
 请保护本机账号及配置文件权限，不要提交本地配置文件或在不可信设备上保存凭据。
@@ -303,6 +307,7 @@ mergebeacon/
 │   │   ├── single_instance.rs   # 单实例窗口激活协调
 │   │   ├── window_state.rs      # 窗口状态安全恢复
 │   │   ├── local_store.rs       # SQLite 评论快照缓存
+│   │   ├── error_log.rs         # 脱敏错误日志、大小限制与安全轮转
 │   │   ├── state.rs             # 共享状态与可取消 AI 任务注册表
 │   │   └── vault.rs             # Keyring 优先、加密文件降级的 TokenVault
 │   ├── tests/                   # GitHub / GitLab / Gitee WireMock 集成测试
@@ -349,11 +354,12 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-当前注册 54 个 Tauri Commands：
+当前注册 56 个 Tauri Commands：
 
 - 认证（5）：`auth_login`、`auth_logout`、`auth_check`、`auth_has_any_token`、`auth_has_token`
-- 诊断、更新与平台能力（7）：`support_info`、`copy_support_info`、`app_version`、`update_check`、
-  `update_download_and_install`、`update_restart`、`platform_capabilities`
+- 诊断、更新与平台能力（9）：`support_info`、`copy_support_info`、`copy_recent_error_logs`、
+  `error_log_record`、`app_version`、`update_check`、`update_download_and_install`、
+  `update_restart`、`platform_capabilities`
 - 仓库（1）：`repo_list`
 - 桌面通知（3）：`desktop_notification_permission_granted`、`desktop_notification_request_permission`、
   `desktop_notification_send`
@@ -384,7 +390,8 @@ cargo test
 - Windows 便携版不执行应用内覆盖安装，需要下载官方 ZIP 后退出应用并手动替换。
 - AI 返回内容仍需包含约定的单个完整 JSON 评审对象；不兼容该结构的模型可能导致解析失败。
 - Tauri 命令错误统一返回稳定错误码、中文消息、可重试状态和可选 HTTP 状态；前端统一转换为
-  `ApiError`。后端错误日志使用脱敏 JSON 行输出到标准错误流，暂不提供日志文件持久化或轮转。
+  `ApiError`。后端同时向标准错误流和受大小限制的本地 JSONL 文件记录脱敏错误元数据；设置页可复制
+  近期错误，日志写入失败不会覆盖原始命令错误。
 
 ## License
 

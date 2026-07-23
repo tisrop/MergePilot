@@ -48,11 +48,35 @@ import type {
 // Tauri IPC 封装 —— 所有后端调用统一入口
 // ============================================================
 
+const ERROR_LOG_RECORD_COMMAND = "error_log_record";
+let errorRequestSequence = 0;
+
+function createFallbackErrorRequestId(): string {
+  try {
+    return globalThis.crypto.randomUUID();
+  } catch {
+    errorRequestSequence = (errorRequestSequence + 1) % Number.MAX_SAFE_INTEGER;
+    return `error-${Date.now().toString(36)}-${errorRequestSequence.toString(36)}`;
+  }
+}
+
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return args === undefined ? await tauriInvoke<T>(command) : await tauriInvoke<T>(command, args);
   } catch (error) {
-    throw normalizeApiError(error);
+    const normalized = normalizeApiError(error);
+    if (command !== ERROR_LOG_RECORD_COMMAND) {
+      void tauriInvoke(ERROR_LOG_RECORD_COMMAND, {
+        record: {
+          command,
+          requestId: normalized.requestId ?? createFallbackErrorRequestId(),
+          code: normalized.code,
+          retryable: normalized.retryable,
+          httpStatus: normalized.httpStatus ?? null,
+        },
+      }).catch(() => undefined);
+    }
+    throw normalized;
   }
 }
 
@@ -154,6 +178,10 @@ export async function getSupportInfo(platform: Platform): Promise<SupportInfo> {
 
 export async function copySupportInfo(platform: Platform): Promise<void> {
   return invoke("copy_support_info", { platform });
+}
+
+export async function copyRecentErrorLogs(): Promise<number> {
+  return invoke("copy_recent_error_logs");
 }
 
 // ── Repo ──

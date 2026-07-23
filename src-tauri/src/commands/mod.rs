@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod auth;
 pub mod capabilities;
+pub mod error_log;
 pub mod inbox;
 pub mod issue;
 pub mod notification;

@@ -2,6 +2,7 @@ pub mod ai;
 mod commands;
 pub mod crypto;
 pub mod error;
+pub mod error_log;
 pub mod file_content;
 pub mod http_client;
 pub mod local_store;
@@ -17,7 +18,11 @@ mod state;
 pub mod vault;
 mod window_state;
 
-use commands::{ai as ai_cmds, auth, capabilities, inbox, issue, notification, pr, review, support, update};
+use commands::{
+    ai as ai_cmds, auth, capabilities, error_log as error_log_cmds, inbox, issue, notification, pr, review, support,
+    update,
+};
+use error_log::ErrorLogStore;
 use local_store::CommentSnapshotStore;
 use state::AppState;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,6 +61,7 @@ pub fn run() {
             let app_dir = app.path().app_data_dir().unwrap_or_default();
             let comment_store = CommentSnapshotStore::new(&app_dir.join("comment_cache.db"));
             app.manage(comment_store);
+            app.manage(ErrorLogStore::new(app.path().app_data_dir().ok()));
 
             if let Some(window) = app.get_webview_window("main") {
                 let restored = window
@@ -154,7 +160,9 @@ pub fn run() {
             // Support / platform capabilities
             support::support_info,
             support::copy_support_info,
+            support::copy_recent_error_logs,
             support::app_version,
+            error_log_cmds::error_log_record,
             update::update_check,
             update::update_download_and_install,
             update::update_restart,

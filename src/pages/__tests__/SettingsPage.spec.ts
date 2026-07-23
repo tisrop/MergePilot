@@ -3,6 +3,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   checkForUpdates,
+  copyRecentErrorLogs,
   copySupportInfo,
   downloadAndInstallUpdate,
   openExternalUrl,
@@ -23,6 +24,7 @@ vi.stubGlobal("localStorage", {
 });
 
 vi.mock("@/api", () => ({
+  copyRecentErrorLogs: vi.fn(),
   copySupportInfo: vi.fn(),
   getAppVersion: vi.fn(),
   checkForUpdates: vi.fn(),
@@ -51,6 +53,7 @@ describe("SettingsPage 诊断信息", () => {
     storage.set("mergebeacon:auto-update-check", "false");
     setActivePinia(createPinia());
     vi.mocked(copySupportInfo).mockReset();
+    vi.mocked(copyRecentErrorLogs).mockReset();
     vi.mocked(getAppVersion).mockResolvedValue("0.3.0");
     vi.mocked(checkForUpdates).mockReset();
     vi.mocked(downloadAndInstallUpdate).mockReset();
@@ -132,7 +135,12 @@ describe("SettingsPage 诊断信息", () => {
     expect(copySupportInfo).toHaveBeenCalledWith("gitlab");
     expect(wrapper.get(".support-status").text()).toContain("诊断信息已复制");
     expect(
-      wrapper.findAll(".privacy-note").some((node) => node.text().includes("不包含 Token")),
+      wrapper
+        .findAll(".privacy-note")
+        .some(
+          (node) =>
+            node.text().includes("诊断信息包含版本、系统") && node.text().includes("不包含 Token"),
+        ),
     ).toBe(true);
   });
 
@@ -162,6 +170,61 @@ describe("SettingsPage 诊断信息", () => {
     expect(copySupportInfo).toHaveBeenCalledOnce();
     expect(wrapper.get(".support-status.error").text()).toContain("诊断信息暂不可用");
   });
+
+  it("复制脱敏的近期错误日志并显示记录数量", async () => {
+    vi.mocked(copyRecentErrorLogs).mockResolvedValue(7);
+    const wrapper = mountPage();
+    const button = wrapper
+      .findAll("button.copy-support-button")
+      .find((node) => node.text() === "复制近期错误日志");
+
+    expect(button).toBeDefined();
+    await button!.trigger("click");
+    await flushPromises();
+
+    expect(copyRecentErrorLogs).toHaveBeenCalledOnce();
+    expect(wrapper.text()).toContain("近期错误日志已复制（7 条）");
+    expect(
+      wrapper
+        .findAll(".privacy-note")
+        .some(
+          (node) =>
+            node.text().includes("错误日志仅包含时间、命令") &&
+            node.text().includes("不包含远端正文"),
+        ),
+    ).toBe(true);
+  });
+
+  it("近期错误日志为空时显示明确的空状态", async () => {
+    vi.mocked(copyRecentErrorLogs).mockResolvedValue(0);
+    const wrapper = mountPage();
+    const button = wrapper
+      .findAll("button.copy-support-button")
+      .find((node) => node.text() === "复制近期错误日志");
+
+    await button!.trigger("click");
+    await flushPromises();
+
+    expect(copyRecentErrorLogs).toHaveBeenCalledOnce();
+    expect(wrapper.text()).toContain("近期没有已记录的错误");
+    expect(wrapper.text()).not.toContain("近期错误日志已复制（0 条）");
+  });
+
+  it("近期错误日志复制失败时恢复按钮并显示错误", async () => {
+    vi.mocked(copyRecentErrorLogs).mockRejectedValue(new Error("clipboard denied"));
+    const wrapper = mountPage();
+    const button = wrapper
+      .findAll<HTMLButtonElement>("button.copy-support-button")
+      .find((node) => node.text() === "复制近期错误日志");
+
+    await button!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("复制失败：Error: clipboard denied");
+    expect(button!.element.disabled).toBe(false);
+    expect(button!.text()).toBe("复制近期错误日志");
+  });
+
   it("显示当前版本并提示已是最新版本", async () => {
     vi.mocked(checkForUpdates).mockResolvedValue({
       current_version: "0.3.0",

@@ -17,9 +17,17 @@ const COMMAND_ERROR_CODES = new Set<CommandErrorCode>([
   "unknown",
 ]);
 
+function containsControlCharacters(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127;
+  });
+}
+
 export class ApiError extends Error {
   readonly code: CommandErrorCode;
   readonly retryable: boolean;
+  readonly requestId?: string;
   readonly httpStatus?: number;
 
   constructor(payload: CommandErrorPayload) {
@@ -27,6 +35,7 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.code = payload.code;
     this.retryable = payload.retryable;
+    this.requestId = payload.request_id;
     this.httpStatus = payload.http_status;
   }
 
@@ -44,6 +53,11 @@ function isCommandErrorPayload(value: unknown): value is CommandErrorPayload {
     typeof candidate.message === "string" &&
     candidate.message.trim().length > 0 &&
     typeof candidate.retryable === "boolean" &&
+    (candidate.request_id === undefined ||
+      (typeof candidate.request_id === "string" &&
+        candidate.request_id.length > 0 &&
+        candidate.request_id.length <= 128 &&
+        !containsControlCharacters(candidate.request_id))) &&
     (candidate.http_status === undefined ||
       (Number.isInteger(candidate.http_status) &&
         candidate.http_status >= 100 &&

@@ -22,6 +22,7 @@ export interface CommandErrorPayload {
   code: CommandErrorCode;
   message: string;
   retryable: boolean;
+  request_id?: string;
   http_status?: number;
 }
 

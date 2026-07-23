@@ -1,5 +1,9 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+
+static ERROR_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Error, Debug)]
 pub enum AppError {
@@ -41,7 +45,7 @@ impl From<reqwest::Error> for AppError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandErrorCode {
     Validation,
@@ -65,6 +69,7 @@ pub struct CommandError {
     pub code: CommandErrorCode,
     pub message: String,
     pub retryable: bool,
+    pub request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_status: Option<u16>,
 }
@@ -79,7 +84,7 @@ impl CommandError {
         http_status: Option<u16>,
         source: &'static str,
     ) -> Self {
-        let error = Self { code, message: message.into(), retryable, http_status };
+        let error = Self { code, message: message.into(), retryable, request_id: next_error_request_id(), http_status };
         error.log(source);
         error
     }
@@ -174,12 +179,20 @@ impl CommandError {
         let event = serde_json::json!({
             "event": "command_error",
             "source": source,
+            "request_id": self.request_id,
             "code": self.code,
             "retryable": self.retryable,
             "http_status": self.http_status,
         });
         eprintln!("{event}");
     }
+}
+
+fn next_error_request_id() -> String {
+    let timestamp =
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().try_into().unwrap_or(u64::MAX);
+    let sequence = ERROR_REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("err-{timestamp:016x}-{sequence:016x}")
 }
 
 impl std::fmt::Display for CommandError {
@@ -378,6 +391,9 @@ mod tests {
         assert_eq!(value["code"], "authentication");
         assert_eq!(value["message"], "当前平台尚未登录或登录凭据已失效");
         assert_eq!(value["retryable"], false);
+        assert!(value["request_id"]
+            .as_str()
+            .is_some_and(|request_id| { request_id.starts_with("err-") && request_id.len() == 37 }));
         assert!(value.get("http_status").is_none());
     }
 }
