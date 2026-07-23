@@ -614,6 +614,9 @@ onUnmounted(() => window.removeEventListener(APP_COMMAND_EVENT, handleAppCommand
     <div v-else-if="pr.currentPr" class="pr-detail">
       <PrMetadataPanel
         :detail="pr.currentPr"
+        :platform="platform"
+        :owner="owner"
+        :repo="repo"
         :capabilities="platformCapabilities ?? null"
         :saving="metadataSaving"
         :status-message="metadataStatus"
