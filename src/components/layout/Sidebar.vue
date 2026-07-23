@@ -484,7 +484,7 @@ function selectForkRepo(r: RepoSummary, useUpstream: boolean, platform: Platform
         <button @click="repo.retry(auth.activePlatform)">重试</button>
       </div>
       <button
-        v-else-if="repo.hasMore"
+        v-else-if="repo.hasMore && !repo.loading"
         class="load-more-btn"
         :disabled="repo.loadingMore"
         @click="repo.loadMore(auth.activePlatform)"

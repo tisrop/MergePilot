@@ -6,6 +6,7 @@ import Sidebar from "@/components/layout/Sidebar.vue";
 import { useAuthStore } from "@/stores/useAuthStore";
 import { usePrStore } from "@/stores/usePrStore";
 import { useRepoStore } from "@/stores/useRepoStore";
+import { repoList } from "@/api";
 
 const storage = new Map<string, string>();
 
@@ -136,6 +137,26 @@ describe("Sidebar", () => {
     expect(wrapper.find(".compact-repo").exists()).toBe(false);
     expect(wrapper.find('[aria-label="展开侧栏"]').exists()).toBe(false);
     expect(wrapper.find('[aria-label="折叠侧栏"]').exists()).toBe(false);
+  });
+
+  it("首次加载仓库时不显示加载更多", async () => {
+    vi.mocked(repoList).mockReturnValueOnce(new Promise(() => {}));
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/pr", name: "pr-list", component: { template: "<div />" } }],
+    });
+    await router.push("/pr");
+    await router.isReady();
+
+    const auth = useAuthStore();
+    auth.platforms.github.isLoggedIn = true;
+    auth.platforms.gitlab.isLoggedIn = true;
+    auth.platforms.gitee.isLoggedIn = true;
+    const wrapper = mount(Sidebar, { global: { plugins: [router] } });
+    await flushPromises();
+
+    expect(wrapper.get(".loading-hint").text()).toBe("加载中...");
+    expect(wrapper.find(".load-more-btn").exists()).toBe(false);
   });
 
   it("紧凑模式固定收起侧栏且不修改 Diff 展开偏好", async () => {
