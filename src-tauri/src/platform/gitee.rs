@@ -972,6 +972,8 @@ impl GitPlatform for GiteeAdapter {
             body: json["body"].as_str().unwrap_or("").to_string(),
             source_branch: json["head"]["ref"].as_str().unwrap_or("").to_string(),
             target_branch: json["base"]["ref"].as_str().unwrap_or("").to_string(),
+            base_repository_full_name: json["base"]["repo"]["full_name"].as_str().map(String::from),
+            head_repository_full_name: json["head"]["repo"]["full_name"].as_str().map(String::from),
             mergeable: json["mergeable"].as_bool(),
             head_sha: json["head"]["sha"].as_str().unwrap_or("").to_string(),
             base_sha: json["base"]["sha"].as_str().unwrap_or("").to_string(),

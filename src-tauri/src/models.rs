@@ -148,6 +148,8 @@ pub struct PrDetail {
     pub body: String,
     pub source_branch: String,
     pub target_branch: String,
+    pub base_repository_full_name: Option<String>,
+    pub head_repository_full_name: Option<String>,
     pub mergeable: Option<bool>,
     pub head_sha: String,
     pub base_sha: String,
@@ -375,6 +377,8 @@ pub struct PrFileContent {
     pub path: String,
     pub revision: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_base64: Option<String>,
     pub truncated: bool,
     pub binary: bool,
 }

@@ -13,6 +13,7 @@ import type {
   PatchLine,
   Platform,
   PrFile,
+  PrFileContent,
   ReviewThreadSummary,
   StandardPatchFile,
 } from "@/types";
@@ -34,6 +35,10 @@ const props = defineProps<{
   prNumber?: number;
   baseSha?: string;
   headSha?: string;
+  baseOwner?: string;
+  baseRepo?: string;
+  headOwner?: string;
+  headRepo?: string;
   locationRequest?: DiffLocationRequest | null;
   threadSummary?: ReviewThreadSummary | null;
   canSyncViewedFiles?: boolean;
@@ -101,6 +106,21 @@ interface LoadedFileContext {
   headLines: string[];
 }
 
+interface ImagePreviewTarget {
+  side: "base" | "head";
+  label: string;
+  owner: string;
+  repo: string;
+  path: string;
+  revision: string;
+  mimeType: string;
+}
+
+interface ImagePreviewPanel extends ImagePreviewTarget {
+  src: string | null;
+  error: string | null;
+}
+
 interface ContextExpansion {
   fromStart: number;
   fromEnd: number;
@@ -118,6 +138,17 @@ interface HighlightedLocation {
 }
 
 const CONTEXT_EXPANSION_STEP = 20;
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  svg: "image/svg+xml",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+};
 
 const containerRef = ref<HTMLElement | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
@@ -286,6 +317,179 @@ const selectedStandardPatch = computed(
       (patch) => patch.filename === selectedFilePath.value,
     ) ?? null,
 );
+
+const imageViewMode = ref<"source" | "preview">("preview");
+const imagePreviewPanels = ref<ImagePreviewPanel[]>([]);
+const imagePreviewLoading = ref(false);
+let imagePreviewRequestSequence = 0;
+
+function imageMimeType(path: string): string | null {
+  const extension = path.toLowerCase().split(".").at(-1) ?? "";
+  return IMAGE_MIME_TYPES[extension] ?? null;
+}
+
+const imagePreviewTargets = computed<ImagePreviewTarget[]>(() => {
+  const patch = selectedStandardPatch.value;
+  if (!patch || !props.platform) return [];
+
+  const targets: ImagePreviewTarget[] = [];
+  const baseOwner = props.baseOwner ?? props.owner;
+  const baseRepo = props.baseRepo ?? props.repo;
+  const baseMimeType = patch.old_path ? imageMimeType(patch.old_path) : null;
+  if (patch.old_path && props.baseSha && baseMimeType && baseOwner && baseRepo) {
+    targets.push({
+      side: "base",
+      label: "变更前",
+      owner: baseOwner,
+      repo: baseRepo,
+      path: patch.old_path,
+      revision: props.baseSha,
+      mimeType: baseMimeType,
+    });
+  }
+  const headOwner = props.headOwner ?? props.owner;
+  const headRepo = props.headRepo ?? props.repo;
+  const headMimeType = patch.new_path ? imageMimeType(patch.new_path) : null;
+  if (patch.new_path && props.headSha && headMimeType && headOwner && headRepo) {
+    targets.push({
+      side: "head",
+      label: "变更后",
+      owner: headOwner,
+      repo: headRepo,
+      path: patch.new_path,
+      revision: props.headSha,
+      mimeType: headMimeType,
+    });
+  }
+  return targets;
+});
+const canPreviewImage = computed(() => imagePreviewTargets.value.length > 0);
+const isShowingImagePreview = computed(
+  () => canPreviewImage.value && imageViewMode.value === "preview",
+);
+const imagePreviewIdentity = computed(() =>
+  [
+    props.platform ?? "",
+    props.owner ?? "",
+    props.repo ?? "",
+    props.baseOwner ?? "",
+    props.baseRepo ?? "",
+    props.headOwner ?? "",
+    props.headRepo ?? "",
+    selectedStandardPatch.value?.old_path ?? "",
+    selectedStandardPatch.value?.new_path ?? "",
+    props.baseSha ?? "",
+    props.headSha ?? "",
+  ].join("\0"),
+);
+
+function svgViewBoxDimensions(svg: Element): { width: number; height: number } | null {
+  const values = (svg.getAttribute("viewBox") ?? "")
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  const width = values[2];
+  const height = values[3];
+  return values.length === 4 &&
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width > 0 &&
+    height > 0
+    ? { width, height }
+    : null;
+}
+
+function hasFixedSvgDimension(value: string | null): boolean {
+  const dimension = value?.trim();
+  return dimension !== undefined && dimension !== "" && !dimension.endsWith("%");
+}
+
+function createSvgPreviewSource(content: string): string | null {
+  const document = new DOMParser().parseFromString(content, "image/svg+xml");
+  const svg = document.documentElement;
+  if (svg.localName !== "svg" || document.querySelector("parsererror")) {
+    return null;
+  }
+  const dimensions = svgViewBoxDimensions(svg);
+  if (
+    dimensions &&
+    (!hasFixedSvgDimension(svg.getAttribute("width")) ||
+      !hasFixedSvgDimension(svg.getAttribute("height")))
+  ) {
+    svg.setAttribute("width", String(dimensions.width));
+    svg.setAttribute("height", String(dimensions.height));
+  }
+
+  const normalizedContent = new XMLSerializer().serializeToString(document);
+  const bytes = new TextEncoder().encode(normalizedContent);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  // SVG stays in the browser's restricted image context and is never injected as markup.
+  return `data:image/svg+xml;base64,${btoa(binary)}`;
+}
+
+function createImagePreviewSource(file: PrFileContent, mimeType: string): string | null {
+  if (mimeType === "image/svg+xml") {
+    return file.content_base64
+      ? `data:image/svg+xml;base64,${file.content_base64}`
+      : createSvgPreviewSource(file.content);
+  }
+  return file.binary && file.content_base64
+    ? `data:${mimeType};base64,${file.content_base64}`
+    : null;
+}
+
+async function loadImagePreview(): Promise<void> {
+  const targets = imagePreviewTargets.value;
+  const identity = imagePreviewIdentity.value;
+  if (!canPreviewImage.value || !props.platform) return;
+  const platform = props.platform;
+
+  const requestSequence = ++imagePreviewRequestSequence;
+  imagePreviewLoading.value = true;
+  imagePreviewPanels.value = targets.map((target) => ({ ...target, src: null, error: null }));
+
+  const panels = await Promise.all(
+    targets.map(async (target): Promise<ImagePreviewPanel> => {
+      try {
+        const file = await prFileContent(
+          platform,
+          target.owner,
+          target.repo,
+          target.path,
+          target.revision,
+        );
+        if (file.truncated) {
+          return { ...target, src: null, error: "图片文件过大，无法渲染预览" };
+        }
+        const src = createImagePreviewSource(file, target.mimeType);
+        return src
+          ? { ...target, src, error: null }
+          : { ...target, src: null, error: "文件内容不是有效或受支持的图片" };
+      } catch (error) {
+        return { ...target, src: null, error: getErrorMessage(error, "图片预览加载失败") };
+      }
+    }),
+  );
+
+  if (requestSequence !== imagePreviewRequestSequence || identity !== imagePreviewIdentity.value)
+    return;
+  imagePreviewPanels.value = panels;
+  imagePreviewLoading.value = false;
+}
+
+function setImageViewMode(mode: "source" | "preview"): void {
+  imageViewMode.value = mode;
+}
+
+function handleImagePreviewError(side: ImagePreviewTarget["side"]): void {
+  imagePreviewPanels.value = imagePreviewPanels.value.map((panel) =>
+    panel.side === side ? { ...panel, src: null, error: "图片解码失败" } : panel,
+  );
+}
 
 function resolveLocationFile(
   path: string,
@@ -1138,6 +1342,17 @@ watch(
 );
 
 watch(
+  [imagePreviewIdentity, isShowingImagePreview],
+  ([, showingPreview]) => {
+    imagePreviewRequestSequence += 1;
+    imagePreviewPanels.value = [];
+    imagePreviewLoading.value = false;
+    if (showingPreview) void loadImagePreview();
+  },
+  { immediate: true },
+);
+
+watch(
   [diffHtml, selectedFilePath, selectedStandardPatch],
   async () => {
     await nextTick();
@@ -1439,6 +1654,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  imagePreviewRequestSequence += 1;
   stopNavigatorResize();
   diffResizeObserver?.disconnect();
   for (const scroller of visibleSideDiffScrollers()) {
@@ -1627,6 +1843,22 @@ onUnmounted(() => {
             <span class="additions">+{{ selectedFile.additions }}</span>
             <span class="deletions">-{{ selectedFile.deletions }}</span>
           </div>
+          <div v-if="canPreviewImage" class="image-view-toggle" aria-label="图片显示方式">
+            <button
+              type="button"
+              :aria-pressed="imageViewMode === 'source'"
+              @click="setImageViewMode('source')"
+            >
+              代码
+            </button>
+            <button
+              type="button"
+              :aria-pressed="imageViewMode === 'preview'"
+              @click="setImageViewMode('preview')"
+            >
+              预览
+            </button>
+          </div>
           <div v-if="reviewProgressContext && selectedFile" class="review-progress-actions">
             <span class="unviewed-summary">剩余 {{ unviewedFileCount }} 个未查看</span>
             <span
@@ -1675,7 +1907,10 @@ onUnmounted(() => {
               }}
             </button>
           </div>
-          <div v-if="hasControlledPatch && canExpandContext" class="context-toolbar-actions">
+          <div
+            v-if="hasControlledPatch && canExpandContext && !isShowingImagePreview"
+            class="context-toolbar-actions"
+          >
             <button
               v-if="hasExpandedContext"
               class="context-toolbar-button"
@@ -1697,7 +1932,11 @@ onUnmounted(() => {
           </div>
         </header>
 
-        <div class="diff-top-scrollbars" :class="{ independent: !isDiffSyncScrollEnabled }">
+        <div
+          v-if="!isShowingImagePreview"
+          class="diff-top-scrollbars"
+          :class="{ independent: !isDiffSyncScrollEnabled }"
+        >
           <div
             v-if="isDiffSyncScrollEnabled"
             ref="topScrollbarRef"
@@ -1744,7 +1983,12 @@ onUnmounted(() => {
             </div>
           </template>
         </div>
-        <div ref="diffScrollRef" class="diff-scroll-region" @wheel="handleDiffWheel">
+        <div
+          ref="diffScrollRef"
+          class="diff-scroll-region"
+          :class="{ 'image-preview-active': isShowingImagePreview }"
+          @wheel="handleDiffWheel"
+        >
           <div ref="containerRef" class="diff2html-container">
             <article
               v-if="selectedStandardPatch"
@@ -1762,12 +2006,61 @@ onUnmounted(() => {
                   <span class="deletions">-{{ selectedStandardPatch.deletions }}</span>
                 </span>
               </header>
-              <p v-if="contextError" class="context-load-error" role="alert">
+              <p
+                v-if="contextError && !isShowingImagePreview"
+                class="context-load-error"
+                role="alert"
+              >
                 {{ contextError }}
               </p>
 
               <div
-                v-if="selectedStandardPatch.content_kind === 'text' && controlledHunks.length > 0"
+                v-if="isShowingImagePreview"
+                class="image-preview-grid"
+                :class="{ 'single-panel': imagePreviewPanels.length === 1 }"
+                aria-live="polite"
+              >
+                <div
+                  v-if="!imagePreviewLoading && imagePreviewPanels.length === 0"
+                  class="image-preview-error image-preview-empty"
+                  role="alert"
+                >
+                  <span>图片预览未加载</span>
+                  <button type="button" @click="loadImagePreview">重新加载预览</button>
+                </div>
+                <section
+                  v-for="panel in imagePreviewPanels"
+                  :key="panel.side"
+                  class="image-preview-panel"
+                  :aria-label="`${panel.label}图片预览`"
+                >
+                  <header class="image-preview-header">
+                    <strong>{{ panel.label }}</strong>
+                    <span :title="panel.path">{{ panel.path }}</span>
+                  </header>
+                  <div class="image-preview-stage">
+                    <span v-if="imagePreviewLoading" class="image-preview-status"
+                      >加载预览中...</span
+                    >
+                    <div v-else-if="panel.error" class="image-preview-error" role="alert">
+                      <span>{{ panel.error }}</span>
+                      <button type="button" @click="loadImagePreview">重新加载预览</button>
+                    </div>
+                    <img
+                      v-else-if="panel.src"
+                      class="image-preview-image"
+                      :src="panel.src"
+                      :alt="`${panel.label}图片预览：${panel.path}`"
+                      @error="handleImagePreviewError(panel.side)"
+                    />
+                  </div>
+                </section>
+              </div>
+
+              <div
+                v-else-if="
+                  selectedStandardPatch.content_kind === 'text' && controlledHunks.length > 0
+                "
                 class="controlled-side-by-side"
               >
                 <div
@@ -2371,6 +2664,37 @@ onUnmounted(() => {
   font-size: 11px;
 }
 
+.image-view-toggle {
+  display: inline-grid;
+  flex-shrink: 0;
+  grid-template-columns: repeat(2, 1fr);
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.image-view-toggle button {
+  min-width: 48px;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.image-view-toggle button:hover {
+  color: var(--color-primary);
+}
+
+.image-view-toggle button[aria-pressed="true"] {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
 .review-progress-actions {
   display: inline-flex;
   flex-shrink: 0;
@@ -2441,6 +2765,14 @@ onUnmounted(() => {
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--color-surface);
+}
+
+.diff-scroll-region.image-preview-active {
+  scrollbar-width: none;
+}
+
+.diff-scroll-region.image-preview-active::-webkit-scrollbar {
+  display: none;
 }
 
 .diff2html-container {
@@ -2551,7 +2883,118 @@ onUnmounted(() => {
 .controlled-file-summary {
   display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
   gap: var(--space-2);
+}
+
+.image-preview-grid {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.image-preview-grid.single-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.image-preview-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.image-preview-panel + .image-preview-panel {
+  border-left: 1px solid var(--color-border);
+}
+
+.image-preview-header {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-surface-hover);
+  font-size: 11px;
+}
+
+.image-preview-header strong {
+  flex-shrink: 0;
+  color: var(--color-text);
+}
+
+.image-preview-header span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-preview-stage {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: clamp(180px, 32vh, 320px);
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.image-preview-image {
+  display: block;
+  width: auto;
+  height: auto;
+  flex: 0 1 auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background-color: var(--color-surface);
+  background-image: url("/transparency-grid.svg");
+  background-repeat: repeat;
+  background-size: 16px 16px;
+}
+
+.image-preview-status {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.image-preview-error {
+  display: flex;
+  max-width: 360px;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-danger);
+  font-size: 12px;
+  text-align: center;
+}
+
+.image-preview-empty {
+  min-height: 180px;
+  grid-column: 1 / -1;
+  place-self: center;
+}
+
+.image-preview-error button {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.image-preview-error button:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .controlled-side-by-side {

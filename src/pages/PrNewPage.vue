@@ -808,7 +808,18 @@ onUnmounted(() => {
               <span>{{ commitPreviewError }}</span>
               <button class="btn btn-sm" type="button" @click="loadCommitPreview">重试</button>
             </div>
-            <DiffViewer v-else-if="displayedDiff" :diff="displayedDiff" read-only />
+            <DiffViewer
+              v-else-if="displayedDiff"
+              :diff="displayedDiff"
+              :platform="creationPlatform"
+              :base-owner="targetRepository?.owner"
+              :base-repo="targetRepository?.repo"
+              :head-owner="sourceRepository?.owner"
+              :head-repo="sourceRepository?.repo"
+              :base-sha="selectedDiffCommitSha ? '' : targetBranch"
+              :head-sha="selectedDiffCommitSha || sourceBranch"
+              read-only
+            />
           </div>
         </template>
       </section>

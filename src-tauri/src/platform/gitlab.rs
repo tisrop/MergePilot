@@ -886,11 +886,20 @@ impl GitPlatform for GitLabAdapter {
         };
 
         let metadata_permissions = self.metadata_permissions(owner, repo, &summary.author.login).await;
+        let base_repository_full_name = Some(format!("{owner}/{repo}"));
+        let head_repository_full_name =
+            json["source_project"]["path_with_namespace"].as_str().map(String::from).or_else(|| {
+                let source_project_id = json["source_project_id"].as_u64()?;
+                let target_project_id = json["target_project_id"].as_u64()?;
+                (source_project_id == target_project_id).then(|| format!("{owner}/{repo}"))
+            });
         Ok(PrDetail {
             summary,
             body: json["description"].as_str().unwrap_or("").to_string(),
             source_branch: json["source_branch"].as_str().unwrap_or("").to_string(),
             target_branch: json["target_branch"].as_str().unwrap_or("").to_string(),
+            base_repository_full_name,
+            head_repository_full_name,
             mergeable: None,
             head_sha: json["sha"].as_str().or_else(|| json["diff_refs"]["head_sha"].as_str()).unwrap_or("").to_string(),
             base_sha: json["diff_refs"]["base_sha"].as_str().unwrap_or("").to_string(),

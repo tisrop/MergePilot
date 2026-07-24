@@ -447,6 +447,71 @@ impl GitHubAdapter {
         Ok(items)
     }
 
+    async fn search_pull_requests_by_state(
+        &self,
+        owner: &str,
+        repo: &str,
+        state: &PrState,
+        page: u32,
+        per_page: u32,
+    ) -> Result<Paginated<PrSummary>, AppError> {
+        const SEARCH_RESULT_LIMIT: u32 = 1_000;
+
+        let page = page.max(1);
+        let per_page = per_page.clamp(1, 100);
+        let state_qualifier = match state {
+            PrState::Merged => "is:merged",
+            PrState::Closed => "is:closed is:unmerged",
+            _ => return Err(AppError::Unknown("GitHub PR 搜索状态无效".into())),
+        };
+        let url = format!("{}/search/issues", self.base_url);
+        let query = format!("repo:{owner}/{repo} is:pr {state_qualifier}");
+        let response = self
+            .client
+            .raw_client()
+            .get(&url)
+            .header("Authorization", self.auth_header())
+            .header("User-Agent", "mergebeacon")
+            .header("Accept", "application/vnd.github.v3+json")
+            .query(&[("q", query.as_str()), ("sort", "updated"), ("order", "desc")])
+            .query(&[("page", page), ("per_page", per_page)])
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Api(format!("GitHub API {} ({}): {}", status, url, body)));
+        }
+
+        let json: Value = response.json().await?;
+        let total_count = json["total_count"].as_u64().unwrap_or(0).min(u64::from(SEARCH_RESULT_LIMIT)) as u32;
+        let result_state = if matches!(state, PrState::Merged) { PrState::Merged } else { PrState::Closed };
+        let items = json["items"]
+            .as_array()
+            .ok_or_else(|| AppError::Api("GitHub PR 搜索响应缺少 items".into()))?
+            .iter()
+            .map(|pr| PrSummary {
+                number: pr["number"].as_u64().unwrap_or(0),
+                title: pr["title"].as_str().unwrap_or("").to_string(),
+                author: Self::map_user(&pr["user"]),
+                state: result_state.clone(),
+                created_at: pr["created_at"].as_str().unwrap_or("").to_string(),
+                updated_at: pr["updated_at"].as_str().unwrap_or("").to_string(),
+                labels: pr["labels"]
+                    .as_array()
+                    .map(|labels| {
+                        labels.iter().filter_map(|label| label["name"].as_str().map(str::to_string)).collect()
+                    })
+                    .unwrap_or_default(),
+                status: None,
+            })
+            .collect();
+        let total_pages = total_count.div_ceil(per_page).max(1);
+
+        Ok(Paginated { items, page, total_pages, total_count })
+    }
+
     fn inbox_status(node: &Value) -> ReviewInboxStatusSummary {
         let draft = node["isDraft"].as_bool();
         let mergeable = node["mergeable"].as_str();
@@ -1007,6 +1072,10 @@ impl GitPlatform for GitHubAdapter {
         page: u32,
         per_page: u32,
     ) -> Result<Paginated<PrSummary>, AppError> {
+        if matches!(state, PrState::Closed | PrState::Merged) {
+            return self.search_pull_requests_by_state(owner, repo, state, page, per_page).await;
+        }
+
         // GitHub API only supports state=open|closed|all; "merged" is a subset of "closed"
         let api_state = match state {
             PrState::Merged => "closed",
@@ -1063,12 +1132,7 @@ impl GitPlatform for GitHubAdapter {
             })
             .collect();
 
-        // Filter by requested state (needed because GitHub groups merged into closed)
-        let mut prs: Vec<PrSummary> = match state {
-            PrState::Merged => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Merged)).collect(),
-            PrState::Closed => all_prs.into_iter().filter(|p| matches!(p.state, PrState::Closed)).collect(),
-            _ => all_prs,
-        };
+        let mut prs = all_prs;
 
         let requested_ids = prs
             .iter()
@@ -1205,6 +1269,8 @@ impl GitPlatform for GitHubAdapter {
             body: json["body"].as_str().unwrap_or("").to_string(),
             source_branch: json["head"]["ref"].as_str().unwrap_or("").to_string(),
             target_branch: json["base"]["ref"].as_str().unwrap_or("").to_string(),
+            base_repository_full_name: json["base"]["repo"]["full_name"].as_str().map(String::from),
+            head_repository_full_name: json["head"]["repo"]["full_name"].as_str().map(String::from),
             mergeable: json["mergeable"].as_bool(),
             head_sha: json["head"]["sha"].as_str().unwrap_or("").to_string(),
             base_sha: json["base"]["sha"].as_str().unwrap_or("").to_string(),

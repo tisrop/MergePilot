@@ -37,6 +37,13 @@ vi.mock("@/api", () => ({
 const diffViewerStub = {
   props: {
     diff: { type: Object, required: true },
+    platform: { type: String, default: "" },
+    baseOwner: { type: String, default: "" },
+    baseRepo: { type: String, default: "" },
+    headOwner: { type: String, default: "" },
+    headRepo: { type: String, default: "" },
+    baseSha: { type: String, default: "" },
+    headSha: { type: String, default: "" },
     readOnly: { type: Boolean, default: false },
   },
   template: '<div data-testid="diff-preview">{{ diff.files.length }} files</div>',
@@ -523,7 +530,17 @@ describe("PrNewPage", () => {
 
     await wrapper.get('[role="tab"][aria-selected="false"]').trigger("click");
     expect(wrapper.get('[data-testid="diff-preview"]').text()).toBe("1 files");
-    expect(wrapper.getComponent(diffViewerStub).props("readOnly")).toBe(true);
+    const diffViewer = wrapper.getComponent(diffViewerStub);
+    expect(diffViewer.props()).toMatchObject({
+      platform: "github",
+      baseOwner: "team",
+      baseRepo: "repo",
+      headOwner: "team",
+      headRepo: "repo",
+      baseSha: "main",
+      headSha: "feature",
+      readOnly: true,
+    });
   });
 
   it("预览被平台截断时显著警告但仍允许创建", async () => {

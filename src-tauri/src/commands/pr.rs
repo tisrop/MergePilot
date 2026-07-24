@@ -837,6 +837,8 @@ mod tests {
             body: "原始描述".into(),
             source_branch: "feature".into(),
             target_branch: "main".into(),
+            base_repository_full_name: None,
+            head_repository_full_name: None,
             mergeable: Some(true),
             head_sha: "head".into(),
             base_sha: "base".into(),

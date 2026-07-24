@@ -164,6 +164,8 @@ export interface PrDetail {
   body: string;
   source_branch: string;
   target_branch: string;
+  base_repository_full_name?: string | null;
+  head_repository_full_name?: string | null;
   mergeable: boolean | null;
   head_sha: string;
   base_sha: string;
@@ -304,6 +306,7 @@ export interface PrFileContent {
   path: string;
   revision: string;
   content: string;
+  content_base64?: string | null;
   truncated: boolean;
   binary: boolean;
 }

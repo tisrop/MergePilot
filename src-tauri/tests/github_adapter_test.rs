@@ -507,6 +507,70 @@ async fn test_github_list_prs() {
 }
 
 #[tokio::test]
+async fn test_github_lists_merged_prs_with_server_side_pagination() {
+    let mock_server = MockServer::start().await;
+    let items = (21..=40)
+        .map(|number| github_search_issue(number, &format!("Merged PR {number}"), "2026-07-23T00:00:00Z"))
+        .collect::<Vec<_>>();
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "repo:octocat/hello-world is:pr is:merged"))
+        .and(query_param("sort", "updated"))
+        .and(query_param("order", "desc"))
+        .and(query_param("page", "2"))
+        .and(query_param("per_page", "20"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 41,
+            "incomplete_results": false,
+            "items": items
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_pull_requests("octocat", "hello-world", &PrState::Merged, 2, 20)
+        .await
+        .expect("should list a full page of merged PRs");
+
+    assert_eq!(result.items.len(), 20);
+    assert!(result.items.iter().all(|item| matches!(item.state, PrState::Merged)));
+    assert_eq!(result.page, 2);
+    assert_eq!(result.total_pages, 3);
+    assert_eq!(result.total_count, 41);
+}
+
+#[tokio::test]
+async fn test_github_lists_closed_unmerged_prs_with_server_side_filter() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "repo:octocat/hello-world is:pr is:closed is:unmerged"))
+        .and(query_param("page", "1"))
+        .and(query_param("per_page", "10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1,
+            "incomplete_results": false,
+            "items": [github_search_issue(42, "Closed PR", "2026-07-23T00:00:00Z")]
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_pull_requests("octocat", "hello-world", &PrState::Closed, 1, 10)
+        .await
+        .expect("should list only closed unmerged PRs");
+
+    assert_eq!(result.items.len(), 1);
+    assert!(matches!(result.items[0].state, PrState::Closed));
+    assert_eq!(result.total_pages, 1);
+    assert_eq!(result.total_count, 1);
+}
+
+#[tokio::test]
 async fn test_github_lists_pr_dependency_candidates() {
     let mock_server = MockServer::start().await;
     let pull = |number: u64, source: &str, target: &str| {
@@ -1861,8 +1925,16 @@ async fn test_github_pr_detail_exposes_base_and_head_revisions() {
             "updated_at": "2026-07-16T00:00:00Z",
             "labels": [],
             "body": "",
-            "head": {"ref": "feature", "sha": "head-sha"},
-            "base": {"ref": "main", "sha": "base-sha"},
+            "head": {
+                "ref": "feature",
+                "sha": "head-sha",
+                "repo": {"full_name": "eryajf/dbx"}
+            },
+            "base": {
+                "ref": "main",
+                "sha": "base-sha",
+                "repo": {"full_name": "t8y2/dbx"}
+            },
             "mergeable": true,
             "draft": true,
             "requested_reviewers": [{"id": 2, "login": "reviewer", "name": "Reviewer", "avatar_url": ""}],
@@ -1877,6 +1949,8 @@ async fn test_github_pr_detail_exposes_base_and_head_revisions() {
 
     assert_eq!(detail.base_sha, "base-sha");
     assert_eq!(detail.head_sha, "head-sha");
+    assert_eq!(detail.base_repository_full_name.as_deref(), Some("t8y2/dbx"));
+    assert_eq!(detail.head_repository_full_name.as_deref(), Some("eryajf/dbx"));
     assert_eq!(detail.draft, Some(true));
     assert_eq!(detail.reviewers[0].login, "reviewer");
     assert_eq!(detail.assignees[0].login, "assignee");
@@ -2267,6 +2341,8 @@ async fn test_github_updates_pull_request_metadata() {
         body: "Old body".into(),
         source_branch: "feature".into(),
         target_branch: "main".into(),
+        base_repository_full_name: None,
+        head_repository_full_name: None,
         mergeable: Some(true),
         head_sha: "head".into(),
         base_sha: "base".into(),

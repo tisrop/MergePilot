@@ -229,6 +229,22 @@ describe("PrDetailPage 关闭权限", () => {
     expect(mocks.prStore.fetchMergeReadiness).toHaveBeenCalledWith("github", "owner", "repo", 42);
   });
 
+  it("将 fork PR 的 base 和 head 仓库分别传给 DiffViewer", () => {
+    mocks.prStore.currentPr = {
+      ...detail,
+      base_repository_full_name: "t8y2/dbx",
+      head_repository_full_name: "eryajf/dbx",
+    };
+    const wrapper = mountPage({
+      DiffViewer: {
+        props: ["baseOwner", "baseRepo", "headOwner", "headRepo"],
+        template: `<span data-testid="diff-repositories">{{ baseOwner }}/{{ baseRepo }}|{{ headOwner }}/{{ headRepo }}</span>`,
+      },
+    });
+
+    expect(wrapper.get('[data-testid="diff-repositories"]').text()).toBe("t8y2/dbx|eryajf/dbx");
+  });
+
   it("非作者且没有仓库写入权限时禁用关闭按钮", async () => {
     const wrapper = mountPage();
     const button = wrapper.get('[data-testid="close-pr-button"]');
