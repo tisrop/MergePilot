@@ -586,6 +586,7 @@ async fn test_gitlab_previews_a_single_commit() {
         .and(path("/api/v4/projects/contributor%2Frepo/repository/commits/abc123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "abc123",
+            "parent_ids": ["parent123"],
             "title": "Only this commit",
             "author_name": "Alice",
             "authored_date": "2026-07-19T10:00:00Z"
@@ -623,6 +624,7 @@ async fn test_gitlab_previews_a_single_commit() {
         .unwrap();
 
     assert_eq!(preview.commits[0].title, "Only this commit");
+    assert_eq!(preview.base_revision.as_deref(), Some("parent123"));
     assert_eq!(preview.files[0].filename, "src/commit.rs");
 }
 
@@ -862,6 +864,8 @@ async fn test_gitlab_pr_detail_exposes_base_and_head_revisions() {
             "description": "",
             "source_branch": "feature",
             "target_branch": "main",
+            "source_project_id": 7,
+            "target_project_id": 7,
             "sha": "head-sha",
             "diff_refs": {"base_sha": "base-sha", "head_sha": "head-sha"},
             "draft": true,
@@ -878,10 +882,93 @@ async fn test_gitlab_pr_detail_exposes_base_and_head_revisions() {
 
     assert_eq!(detail.head_sha, "head-sha");
     assert_eq!(detail.base_sha, "base-sha");
+    assert_eq!(detail.base_repository_full_name.as_deref(), Some("group/repo"));
+    assert_eq!(detail.head_repository_full_name.as_deref(), Some("group/repo"));
     assert_eq!(detail.draft, Some(true));
     assert_eq!(detail.reviewers[0].login, "reviewer");
     assert_eq!(detail.assignees[0].login, "assignee");
     assert_eq!(detail.milestone.as_ref().map(|value| value.title.as_str()), Some("0.6.0"));
+}
+
+#[tokio::test]
+async fn test_gitlab_fork_pr_detail_resolves_source_project_path() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/3"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "iid": 3,
+            "title": "Fork MR",
+            "author": gitlab_user(),
+            "state": "opened",
+            "merged_at": null,
+            "created_at": "2026-07-15T10:00:00Z",
+            "updated_at": "2026-07-15T10:00:00Z",
+            "labels": [],
+            "description": "",
+            "source_branch": "feature",
+            "target_branch": "main",
+            "source_project_id": 17,
+            "target_project_id": 7,
+            "sha": "head-sha",
+            "diff_refs": {"base_sha": "base-sha", "head_sha": "head-sha"}
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/17"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 17,
+            "path_with_namespace": "fork-group/fork-repo"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let detail = adapter.get_pull_request("group", "repo", 3).await.expect("should load fork merge request");
+
+    assert_eq!(detail.base_repository_full_name.as_deref(), Some("group/repo"));
+    assert_eq!(detail.head_repository_full_name.as_deref(), Some("fork-group/fork-repo"));
+}
+
+#[tokio::test]
+async fn test_gitlab_fork_pr_detail_preserves_detail_when_source_project_lookup_fails() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/group%2Frepo/merge_requests/3"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "iid": 3,
+            "title": "Fork MR",
+            "author": gitlab_user(),
+            "state": "opened",
+            "merged_at": null,
+            "created_at": "2026-07-15T10:00:00Z",
+            "updated_at": "2026-07-15T10:00:00Z",
+            "labels": [],
+            "description": "",
+            "source_branch": "feature",
+            "target_branch": "main",
+            "source_project_id": 17,
+            "target_project_id": 7,
+            "sha": "head-sha",
+            "diff_refs": {"base_sha": "base-sha", "head_sha": "head-sha"}
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v4/projects/17"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitLabAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let detail = adapter.get_pull_request("group", "repo", 3).await.expect("should preserve merge request detail");
+
+    assert_eq!(detail.base_repository_full_name.as_deref(), Some("group/repo"));
+    assert_eq!(detail.head_repository_full_name, None);
 }
 
 #[tokio::test]
@@ -1824,6 +1911,8 @@ async fn test_gitlab_updates_merge_request_metadata() {
         body: "Old body".into(),
         source_branch: "feature".into(),
         target_branch: "main".into(),
+        base_repository_full_name: None,
+        head_repository_full_name: None,
         mergeable: None,
         head_sha: "head".into(),
         base_sha: "base".into(),
@@ -1899,6 +1988,8 @@ async fn test_gitlab_clears_merge_request_milestone_with_zero_id() {
         body: "Body".into(),
         source_branch: "feature".into(),
         target_branch: "main".into(),
+        base_repository_full_name: None,
+        head_repository_full_name: None,
         mergeable: None,
         head_sha: "head".into(),
         base_sha: "base".into(),

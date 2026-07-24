@@ -70,6 +70,10 @@ interface ContextProps {
   prNumber?: number;
   baseSha?: string;
   headSha?: string;
+  baseOwner?: string;
+  baseRepo?: string;
+  headOwner?: string;
+  headRepo?: string;
   locationRequest?: DiffLocationRequest | null;
   canSyncViewedFiles?: boolean;
   readOnly?: boolean;
@@ -206,6 +210,10 @@ const contextProps: Required<ContextProps> = {
   prNumber: 42,
   baseSha: "base-sha",
   headSha: "head-sha",
+  baseOwner: "octo",
+  baseRepo: "demo",
+  headOwner: "octo",
+  headRepo: "demo",
   locationRequest: null,
   canSyncViewedFiles: false,
   readOnly: false,
@@ -476,6 +484,562 @@ describe("DiffViewer 受控标准 patch", () => {
 
     expect(wrapper.get(".controlled-file-message").text()).toContain("二进制文件");
     expect(wrapper.find(".diff-empty").exists()).toBe(false);
+  });
+
+  it("SVG 文件默认渲染安全的双侧图像预览，并可切换到代码 Diff", async () => {
+    const svgDiff: DiffResult = {
+      diff: "",
+      files: [
+        {
+          filename: "assets/diagram.svg",
+          status: "modified",
+          patch: "",
+          additions: 1,
+          deletions: 1,
+        },
+      ],
+      patch_schema_version: 1,
+      patches: [
+        {
+          filename: "assets/diagram.svg",
+          old_path: "assets/diagram.svg",
+          new_path: "assets/diagram.svg",
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          content_kind: "text",
+          patch: "",
+          message: null,
+          hunks: [
+            {
+              header: "@@ -1 +1 @@",
+              old_start: 1,
+              old_count: 1,
+              new_start: 1,
+              new_count: 1,
+              section_header: null,
+              lines: [
+                { kind: "deletion", content: '<rect fill="red" />', old_line: 1, new_line: null },
+                { kind: "addition", content: '<rect fill="blue" />', old_line: null, new_line: 1 },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (_platform: Platform, _owner: string, _repo: string, path: string, revision: string) =>
+        fileContent(
+          path,
+          revision,
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="${revision === "base-sha" ? "red" : "blue"}"/><script>alert(1)</script></svg>`,
+        ),
+    );
+    const wrapper = await mountViewer(svgDiff, contextProps);
+
+    expect(wrapper.findAll(".image-view-toggle button").map((button) => button.text())).toEqual([
+      "代码",
+      "预览",
+    ]);
+    expect(wrapper.findAll(".image-view-toggle button")[1].attributes("aria-pressed")).toBe("true");
+
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+    expect(prFileContentMock).toHaveBeenCalledWith(
+      "github",
+      "octo",
+      "demo",
+      "assets/diagram.svg",
+      "base-sha",
+    );
+    expect(prFileContentMock).toHaveBeenCalledWith(
+      "github",
+      "octo",
+      "demo",
+      "assets/diagram.svg",
+      "head-sha",
+    );
+    expect(wrapper.findAll(".image-preview-panel")).toHaveLength(2);
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+    expect(wrapper.get(".image-preview-image").element.parentElement?.className).toBe(
+      "image-preview-stage",
+    );
+    expect(wrapper.get(".image-preview-image").attributes("src")).toMatch(
+      /^data:image\/svg\+xml;base64,/,
+    );
+    expect(wrapper.find(".image-preview-stage script").exists()).toBe(false);
+    expect(wrapper.find(".diff-top-scrollbars").exists()).toBe(false);
+    expect(wrapper.find(".controlled-side-by-side").exists()).toBe(false);
+
+    await wrapper.findAll(".image-view-toggle button")[0].trigger("click");
+
+    expect(wrapper.find(".controlled-side-by-side").exists()).toBe(true);
+    expect(wrapper.find(".image-preview-grid").exists()).toBe(false);
+  });
+
+  it("新增的 fork SVG 使用 UTF-8 base64 渲染完整样式内容", async () => {
+    const qdrantSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 346.42 400">
+  <defs><style>.cls-1 { fill: #9e0d38; }</style></defs>
+  <polygon class="cls-1" points="173.21 0 0 100 173.21 400 346.42 100"/>
+</svg>`;
+    const addedSvgDiff: DiffResult = {
+      diff: "",
+      files: [
+        {
+          filename: "docs/public/icons/database/qdrant.svg",
+          status: "added",
+          patch: "",
+          additions: 5,
+          deletions: 0,
+        },
+      ],
+      patch_schema_version: 1,
+      patches: [
+        {
+          filename: "docs/public/icons/database/qdrant.svg",
+          old_path: null,
+          new_path: "docs/public/icons/database/qdrant.svg",
+          status: "added",
+          additions: 5,
+          deletions: 0,
+          content_kind: "text",
+          patch: "",
+          message: null,
+          hunks: [],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (_platform: Platform, _owner: string, _repo: string, path: string, revision: string) =>
+        fileContent(path, revision, qdrantSvg),
+    );
+
+    const wrapper = await mountViewer(addedSvgDiff, {
+      ...contextProps,
+      headOwner: "eryajf",
+      headRepo: "dbx",
+    });
+
+    expect(prFileContentMock).toHaveBeenCalledTimes(1);
+    expect(prFileContentMock).toHaveBeenCalledWith(
+      "github",
+      "eryajf",
+      "dbx",
+      "docs/public/icons/database/qdrant.svg",
+      "head-sha",
+    );
+    expect(wrapper.findAll(".image-preview-panel")).toHaveLength(1);
+    const source = wrapper.get(".image-preview-image").attributes("src");
+    expect(source).toMatch(/^data:image\/svg\+xml;base64,/);
+    const renderedSvg = atob(source!.replace("data:image/svg+xml;base64,", ""));
+    expect(renderedSvg).toContain('width="346.42"');
+    expect(renderedSvg).toContain('height="400"');
+    expect(renderedSvg).toContain(".cls-1");
+  });
+
+  it("从代码文件切换到新增 SVG 时触发图片加载且不出现空白预览", async () => {
+    const qdrantPath = "docs/public/icons/database/qdrant.svg";
+    const mixedDiff: DiffResult = {
+      ...standardizedDiff,
+      files: [
+        ...standardizedDiff.files,
+        {
+          filename: qdrantPath,
+          status: "added",
+          patch: "",
+          additions: 1,
+          deletions: 0,
+        },
+      ],
+      patches: [
+        ...standardizedDiff.patches,
+        {
+          filename: qdrantPath,
+          old_path: null,
+          new_path: qdrantPath,
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          content_kind: "text",
+          patch: "",
+          message: null,
+          hunks: [],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (_platform: Platform, _owner: string, _repo: string, path: string, revision: string) =>
+        fileContent(
+          path,
+          revision,
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"></svg>',
+        ),
+    );
+    const wrapper = await mountViewer(mixedDiff, {
+      ...contextProps,
+      headOwner: "eryajf",
+      headRepo: "dbx",
+    });
+
+    await wrapper.get(`[data-file-path="${standardizedDiff.files[0].filename}"]`).trigger("click");
+    expect(wrapper.find(".image-view-toggle").exists()).toBe(false);
+    await wrapper.get(`[data-file-path="${qdrantPath}"]`).trigger("click");
+    await flushPromises();
+
+    expect(prFileContentMock).toHaveBeenCalledWith(
+      "github",
+      "eryajf",
+      "dbx",
+      qdrantPath,
+      "head-sha",
+    );
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(1);
+    expect(wrapper.find(".image-preview-empty").exists()).toBe(false);
+  });
+
+  it("非 UTF-8 编码的 SVG 使用原始 base64 渲染", async () => {
+    const encodedSvgDiff: DiffResult = {
+      ...standardizedDiff,
+      files: [{ ...standardizedDiff.files[0], filename: "assets/encoded.svg" }],
+      patches: [
+        {
+          ...standardizedDiff.patches[0],
+          filename: "assets/encoded.svg",
+          old_path: "assets/encoded.svg",
+          new_path: "assets/encoded.svg",
+          content_kind: "binary",
+          hunks: [],
+          message: "二进制文件不提供文本 Diff",
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (
+        _platform: Platform,
+        _owner: string,
+        _repo: string,
+        path: string,
+        revision: string,
+      ) => ({
+        ...fileContent(path, revision, ""),
+        content_base64:
+          "//48AHMAdgBnACAAeABtAGwAbgBzAD0AIgBoAHQAdABwADoALwAvAHcAdwB3AC4AdwAzAC4AbwByAGcALwAyADAAMAAwAC8AcwB2AGcAIgAgAHYAaQBlAHcAQgBvAHgAPQAiADAAIAAwACAAMQAgADEAIgA+ADwALwBzAHYAZwA+AA==",
+        binary: true,
+      }),
+    );
+
+    const wrapper = await mountViewer(encodedSvgDiff, contextProps);
+
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+    expect(wrapper.get(".image-preview-image").attributes("src")).toBe(
+      "data:image/svg+xml;base64,//48AHMAdgBnACAAeABtAGwAbgBzAD0AIgBoAHQAdABwADoALwAvAHcAdwB3AC4AdwAzAC4AbwByAGcALwAyADAAMAAwAC8AcwB2AGcAIgAgAHYAaQBlAHcAQgBvAHgAPQAiADAAIAAwACAAMQAgADEAIgA+ADwALwBzAHYAZwA+AA==",
+    );
+    expect(wrapper.find(".image-preview-error").exists()).toBe(false);
+  });
+
+  it("PNG 等普通二进制图片默认渲染双侧预览", async () => {
+    const pngDiff: DiffResult = {
+      diff: "",
+      files: [
+        {
+          filename: "assets/screenshot.png",
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      patch_schema_version: 1,
+      patches: [
+        {
+          filename: "assets/screenshot.png",
+          old_path: "assets/screenshot.png",
+          new_path: "assets/screenshot.png",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          content_kind: "binary",
+          patch: "",
+          message: "二进制文件不提供文本 Diff",
+          hunks: [],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (
+        _platform: Platform,
+        _owner: string,
+        _repo: string,
+        path: string,
+        revision: string,
+      ) => ({
+        ...fileContent(path, revision, ""),
+        content_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+        binary: true,
+      }),
+    );
+
+    const wrapper = await mountViewer(pngDiff, {
+      ...contextProps,
+      baseOwner: "upstream",
+      baseRepo: "images",
+      headOwner: "fork",
+      headRepo: "images",
+    });
+
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+    expect(prFileContentMock).toHaveBeenCalledWith(
+      "github",
+      "upstream",
+      "images",
+      "assets/screenshot.png",
+      "base-sha",
+    );
+    expect(prFileContentMock).toHaveBeenCalledWith(
+      "github",
+      "fork",
+      "images",
+      "assets/screenshot.png",
+      "head-sha",
+    );
+    expect(wrapper.findAll(".image-preview-panel")).toHaveLength(2);
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+    expect(wrapper.get(".image-preview-image").attributes("src")).toBe(
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+    );
+    expect(wrapper.find(".controlled-file-message").exists()).toBe(false);
+  });
+
+  it("从文本文件第一次切换到图片时立即加载并展示预览", async () => {
+    const mixedDiff: DiffResult = {
+      ...standardizedDiff,
+      files: [
+        { ...standardizedDiff.files[0], filename: "aaa/source.ts" },
+        {
+          filename: "zzz/screenshot.png",
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      patches: [
+        {
+          ...standardizedDiff.patches[0],
+          filename: "aaa/source.ts",
+          old_path: "aaa/source.ts",
+          new_path: "aaa/source.ts",
+        },
+        {
+          filename: "zzz/screenshot.png",
+          old_path: "zzz/screenshot.png",
+          new_path: "zzz/screenshot.png",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          content_kind: "binary",
+          patch: "",
+          message: "二进制文件不提供文本 Diff",
+          hunks: [],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (
+        _platform: Platform,
+        _owner: string,
+        _repo: string,
+        path: string,
+        revision: string,
+      ) => ({
+        ...fileContent(path, revision, ""),
+        content_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+        binary: true,
+      }),
+    );
+    const wrapper = await mountViewer(mixedDiff, contextProps);
+
+    expect(wrapper.get(".selected-file-name").text()).toBe("aaa/source.ts");
+    expect(prFileContentMock).not.toHaveBeenCalled();
+
+    const imageRow = wrapper
+      .findAll(".tree-row[data-file-path]")
+      .find((row) => row.attributes("data-file-path") === "zzz/screenshot.png");
+    expect(imageRow).toBeDefined();
+    await imageRow!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".selected-file-name").text()).toBe("zzz/screenshot.png");
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+  });
+
+  it("图片请求未完成时切走再切回同一文件会启动新请求并展示预览", async () => {
+    const mixedDiff: DiffResult = {
+      ...standardizedDiff,
+      files: [
+        { ...standardizedDiff.files[0], filename: "aaa/source.ts" },
+        {
+          filename: "zzz/screenshot.png",
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      patches: [
+        {
+          ...standardizedDiff.patches[0],
+          filename: "aaa/source.ts",
+          old_path: "aaa/source.ts",
+          new_path: "aaa/source.ts",
+        },
+        {
+          filename: "zzz/screenshot.png",
+          old_path: "zzz/screenshot.png",
+          new_path: "zzz/screenshot.png",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          content_kind: "binary",
+          patch: "",
+          message: "二进制文件不提供文本 Diff",
+          hunks: [],
+        },
+      ],
+    };
+    const pending: Array<(content: PrFileContent) => void> = [];
+    prFileContentMock.mockImplementation(
+      (_platform: Platform, _owner: string, _repo: string, _path: string, _revision: string) =>
+        new Promise<PrFileContent>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const wrapper = await mountViewer(mixedDiff, contextProps);
+    const rowFor = (path: string) =>
+      wrapper
+        .findAll(".tree-row[data-file-path]")
+        .find((row) => row.attributes("data-file-path") === path)!;
+
+    await rowFor("zzz/screenshot.png").trigger("click");
+    await flushPromises();
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+
+    await rowFor("aaa/source.ts").trigger("click");
+    await rowFor("zzz/screenshot.png").trigger("click");
+    await flushPromises();
+    expect(prFileContentMock).toHaveBeenCalledTimes(4);
+
+    for (const resolve of pending.slice(2)) {
+      resolve({
+        ...fileContent("zzz/screenshot.png", "head-sha", ""),
+        content_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+        binary: true,
+      });
+    }
+    await flushPromises();
+
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+
+    for (const resolve of pending.slice(0, 2)) {
+      resolve({
+        ...fileContent("zzz/screenshot.png", "base-sha", ""),
+        content_base64: "b2xkLXJlcXVlc3Q=",
+        binary: true,
+      });
+    }
+    await flushPromises();
+
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+    expect(wrapper.get(".image-preview-image").attributes("src")).toContain(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+    );
+  });
+
+  it("组件挂载后首次收到图片 Diff 时立即展示预览", async () => {
+    const imageDiff: DiffResult = {
+      diff: "",
+      files: [
+        {
+          filename: "assets/screenshot.png",
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      patch_schema_version: 1,
+      patches: [
+        {
+          filename: "assets/screenshot.png",
+          old_path: "assets/screenshot.png",
+          new_path: "assets/screenshot.png",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          content_kind: "binary",
+          patch: "",
+          message: "二进制文件不提供文本 Diff",
+          hunks: [],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (
+        _platform: Platform,
+        _owner: string,
+        _repo: string,
+        path: string,
+        revision: string,
+      ) => ({
+        ...fileContent(path, revision, ""),
+        content_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+        binary: true,
+      }),
+    );
+    const wrapper = mount(DiffViewer, { props: { diff: null, ...contextProps } });
+
+    await wrapper.setProps({ diff: imageDiff });
+    await flushPromises();
+
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+  });
+
+  it("SVG 内容被截断时显示可重试错误并保留代码 Diff", async () => {
+    const svgDiff: DiffResult = {
+      ...standardizedDiff,
+      files: [{ ...standardizedDiff.files[0], filename: "assets/large.svg" }],
+      patches: [
+        {
+          ...standardizedDiff.patches[0],
+          filename: "assets/large.svg",
+          old_path: "assets/large.svg",
+          new_path: "assets/large.svg",
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (
+        _platform: Platform,
+        _owner: string,
+        _repo: string,
+        path: string,
+        revision: string,
+      ) => ({
+        ...fileContent(path, revision, ""),
+        truncated: true,
+      }),
+    );
+    const wrapper = await mountViewer(svgDiff, contextProps);
+
+    expect(wrapper.findAll(".image-preview-error")).toHaveLength(2);
+    expect(wrapper.get(".image-preview-error").text()).toContain("图片文件过大");
+    expect(wrapper.find(".image-preview-image").exists()).toBe(false);
+
+    await wrapper.findAll(".image-view-toggle button")[0].trigger("click");
+
+    expect(wrapper.find(".controlled-side-by-side").exists()).toBe(true);
   });
 
   it("纯重命名没有文本 hunk 时不显示上下文展开操作", async () => {

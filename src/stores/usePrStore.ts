@@ -34,6 +34,8 @@ export const usePrStore = defineStore("pr", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const totalPages = ref(1);
+  const listTotalCount = ref(0);
+  const listTruncated = ref(false);
   const perPage = ref<number>(20);
   const filters = ref<{ state: PrState; page: number }>({
     state: "open",
@@ -70,6 +72,8 @@ export const usePrStore = defineStore("pr", () => {
     readinessError.value = null;
     error.value = null;
     totalPages.value = 1;
+    listTotalCount.value = 0;
+    listTruncated.value = false;
     stateCounts.value = { open: 0, closed: 0, merged: 0, all: 0 };
   }
 
@@ -96,6 +100,8 @@ export const usePrStore = defineStore("pr", () => {
     if (listContextKey !== contextKey) {
       list.value = [];
       totalPages.value = 1;
+      listTotalCount.value = 0;
+      listTruncated.value = false;
     }
     listContextKey = contextKey;
     loading.value = true;
@@ -112,11 +118,15 @@ export const usePrStore = defineStore("pr", () => {
       if (sequence !== listRequestSequence) return;
       list.value = result.items;
       totalPages.value = result.total_pages;
+      listTotalCount.value = result.total_count;
+      listTruncated.value = result.truncated === true;
     } catch (e) {
       if (sequence !== listRequestSequence) return;
       error.value = typeof e === "string" ? e : String(e);
       list.value = [];
       totalPages.value = 1;
+      listTotalCount.value = 0;
+      listTruncated.value = false;
     } finally {
       if (sequence === listRequestSequence) loading.value = false;
     }
@@ -303,6 +313,8 @@ export const usePrStore = defineStore("pr", () => {
     loading,
     error,
     totalPages,
+    listTotalCount,
+    listTruncated,
     perPage,
     pageSizes: PAGE_SIZES,
     filters,

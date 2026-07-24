@@ -175,6 +175,12 @@ impl CommandError {
         }
     }
 
+    fn is_github_rate_limit(status: Option<u16>, message: &str) -> bool {
+        status == Some(403)
+            && message.contains("github api")
+            && (message.contains("rate limit") || message.contains("限流") || message.contains("请求过于频繁"))
+    }
+
     fn log(&self, source: &'static str) {
         let event = serde_json::json!({
             "event": "command_error",
@@ -229,7 +235,18 @@ impl From<AppError> for CommandError {
                 "authentication",
             ),
             AppError::Api(message) => {
-                if let Some(status) = Self::status_from_message(&message) {
+                let lower = message.to_ascii_lowercase();
+                let status = Self::status_from_message(&message);
+                if Self::is_github_rate_limit(status, &lower) {
+                    return Self::new(
+                        CommandErrorCode::RateLimited,
+                        "GitHub 请求过于频繁，请稍后重试",
+                        true,
+                        status,
+                        "platform_api",
+                    );
+                }
+                if let Some(status) = status {
                     Self::from_http_status(status, "platform_api")
                 } else {
                     Self::new(
@@ -333,6 +350,35 @@ mod tests {
         assert_eq!(error.message, "代码平台请求过于频繁，请稍后重试");
         assert!(!error.message.contains("secret"));
         assert!(!error.message.contains("github.com"));
+    }
+
+    #[test]
+    fn classifies_github_primary_and_secondary_rate_limits_as_retryable() {
+        let primary = CommandError::from(AppError::Api(
+            "GitHub API 403 (https://api.github.com/search/issues): API rate limit exceeded".into(),
+        ));
+        let secondary = CommandError::from(AppError::Api(
+            "GitHub API 403 (https://api.github.com/repos/o/r/pulls): You have exceeded a secondary rate limit".into(),
+        ));
+
+        for error in [primary, secondary] {
+            assert_eq!(error.code, CommandErrorCode::RateLimited);
+            assert!(error.retryable);
+            assert_eq!(error.http_status, Some(403));
+            assert_eq!(error.message, "GitHub 请求过于频繁，请稍后重试");
+        }
+    }
+
+    #[test]
+    fn keeps_ordinary_github_forbidden_responses_as_permission_errors() {
+        let error = CommandError::from(AppError::Api(
+            "GitHub API 403 (https://api.github.com/repos/o/r/pulls): Resource not accessible by token".into(),
+        ));
+
+        assert_eq!(error.code, CommandErrorCode::PermissionDenied);
+        assert!(!error.retryable);
+        assert_eq!(error.http_status, Some(403));
+        assert_eq!(error.message, "当前 Token 没有执行此操作的权限");
     }
 
     #[test]

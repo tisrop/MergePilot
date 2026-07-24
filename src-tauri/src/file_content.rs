@@ -31,6 +31,7 @@ pub fn decode_response(platform: &str, path: &str, revision: &str, json: &Value)
             path: path.to_string(),
             revision: revision.to_string(),
             content: String::new(),
+            content_base64: None,
             truncated: true,
             binary: false,
         });
@@ -50,6 +51,7 @@ pub fn decode_response(platform: &str, path: &str, revision: &str, json: &Value)
             path: path.to_string(),
             revision: revision.to_string(),
             content: String::new(),
+            content_base64: None,
             truncated: true,
             binary: false,
         });
@@ -60,6 +62,7 @@ pub fn decode_response(platform: &str, path: &str, revision: &str, json: &Value)
             path: path.to_string(),
             revision: revision.to_string(),
             content: String::new(),
+            content_base64: None,
             truncated: true,
             binary: false,
         });
@@ -73,6 +76,7 @@ pub fn decode_response(platform: &str, path: &str, revision: &str, json: &Value)
             path: path.to_string(),
             revision: revision.to_string(),
             content: String::new(),
+            content_base64: None,
             truncated: true,
             binary: false,
         });
@@ -83,13 +87,15 @@ pub fn decode_response(platform: &str, path: &str, revision: &str, json: &Value)
             path: path.to_string(),
             revision: revision.to_string(),
             content,
+            content_base64: None,
             truncated: false,
             binary: false,
         }),
-        Err(_) => Ok(PrFileContent {
+        Err(error) => Ok(PrFileContent {
             path: path.to_string(),
             revision: revision.to_string(),
             content: String::new(),
+            content_base64: Some(base64::engine::general_purpose::STANDARD.encode(error.into_bytes())),
             truncated: false,
             binary: true,
         }),
@@ -136,6 +142,7 @@ mod tests {
 
         assert!(result.binary);
         assert!(result.content.is_empty());
+        assert_eq!(result.content_base64.as_deref(), Some("/wAB"));
     }
 
     #[test]

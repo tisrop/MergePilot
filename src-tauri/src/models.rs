@@ -148,6 +148,8 @@ pub struct PrDetail {
     pub body: String,
     pub source_branch: String,
     pub target_branch: String,
+    pub base_repository_full_name: Option<String>,
+    pub head_repository_full_name: Option<String>,
     pub mergeable: Option<bool>,
     pub head_sha: String,
     pub base_sha: String,
@@ -343,6 +345,7 @@ pub enum PrCreatePreviewIncompleteReason {
 #[derive(Debug, Clone)]
 pub struct PrCreatePreviewData {
     pub commits: Vec<PrCommitSummary>,
+    pub base_revision: Option<String>,
     pub diff: String,
     pub files: Vec<PrFile>,
     pub incomplete: bool,
@@ -375,6 +378,8 @@ pub struct PrFileContent {
     pub path: String,
     pub revision: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_base64: Option<String>,
     pub truncated: bool,
     pub binary: bool,
 }
@@ -506,6 +511,7 @@ pub struct DiffResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrCreatePreview {
     pub commits: Vec<PrCommitSummary>,
+    pub base_revision: Option<String>,
     pub diff: DiffResult,
     pub incomplete: bool,
     pub incomplete_reasons: Vec<PrCreatePreviewIncompleteReason>,
@@ -655,6 +661,8 @@ pub struct Paginated<T> {
     pub page: u32,
     pub total_pages: u32,
     pub total_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
 }
 
 // ── AI ──

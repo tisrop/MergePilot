@@ -808,7 +808,7 @@ impl GitPlatform for GiteeAdapter {
         // Fetch better display names for orgs/enterprises when namespace.name == path
         self.resolve_namespace_display_names(&mut repos).await;
 
-        Ok(Paginated { items: repos, page, total_pages: last_page, total_count })
+        Ok(Paginated { items: repos, page, total_pages: last_page, total_count, truncated: None })
     }
 
     async fn list_pull_requests(
@@ -890,7 +890,7 @@ impl GitPlatform for GiteeAdapter {
             last_page * per_page
         };
 
-        Ok(Paginated { items: prs, page, total_pages: last_page, total_count })
+        Ok(Paginated { items: prs, page, total_pages: last_page, total_count, truncated: None })
     }
 
     async fn list_review_inbox(
@@ -923,7 +923,7 @@ impl GitPlatform for GiteeAdapter {
         let start = page.saturating_sub(1).saturating_mul(per_page) as usize;
         let page_items = items.into_iter().skip(start).take(per_page as usize).collect();
 
-        Ok(Paginated { items: page_items, page, total_pages, total_count })
+        Ok(Paginated { items: page_items, page, total_pages, total_count, truncated: None })
     }
 
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError> {
@@ -972,6 +972,8 @@ impl GitPlatform for GiteeAdapter {
             body: json["body"].as_str().unwrap_or("").to_string(),
             source_branch: json["head"]["ref"].as_str().unwrap_or("").to_string(),
             target_branch: json["base"]["ref"].as_str().unwrap_or("").to_string(),
+            base_repository_full_name: json["base"]["repo"]["full_name"].as_str().map(String::from),
+            head_repository_full_name: json["head"]["repo"]["full_name"].as_str().map(String::from),
             mergeable: json["mergeable"].as_bool(),
             head_sha: json["head"]["sha"].as_str().unwrap_or("").to_string(),
             base_sha: json["base"]["sha"].as_str().unwrap_or("").to_string(),
@@ -1146,6 +1148,11 @@ impl GitPlatform for GiteeAdapter {
             };
             return Ok(PrCreatePreviewData {
                 commits: vec![summary],
+                base_revision: json["parents"]
+                    .as_array()
+                    .and_then(|parents| parents.first())
+                    .and_then(|parent| parent["sha"].as_str().or_else(|| parent["id"].as_str()))
+                    .map(String::from),
                 diff,
                 files,
                 incomplete: false,
@@ -1215,6 +1222,7 @@ impl GitPlatform for GiteeAdapter {
             .collect();
         Ok(PrCreatePreviewData {
             commits,
+            base_revision: None,
             diff,
             files,
             incomplete: collection.incomplete,
@@ -1870,7 +1878,7 @@ impl GitPlatform for GiteeAdapter {
             })
             .collect();
 
-        Ok(Paginated { items: issues, page, total_pages: last_page, total_count: 0 })
+        Ok(Paginated { items: issues, page, total_pages: last_page, total_count: 0, truncated: None })
     }
 
     async fn create_issue(

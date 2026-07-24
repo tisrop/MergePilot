@@ -395,6 +395,7 @@ async fn test_gitee_previews_a_single_commit() {
         .and(path("/api/v5/repos/contributor/repo/commits/abc123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "sha": "abc123",
+            "parents": [{"sha": "parent123"}],
             "commit": {
                 "message": "Only this commit\n\nDetails",
                 "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
@@ -427,6 +428,7 @@ async fn test_gitee_previews_a_single_commit() {
         .unwrap();
 
     assert_eq!(preview.commits[0].title, "Only this commit");
+    assert_eq!(preview.base_revision.as_deref(), Some("parent123"));
     assert_eq!(preview.files[0].filename, "src/commit.rs");
 }
 
@@ -1909,6 +1911,8 @@ async fn test_gitee_updates_pull_request_metadata_without_unsupported_fields() {
         body: "Old body".into(),
         source_branch: "feature".into(),
         target_branch: "main".into(),
+        base_repository_full_name: None,
+        head_repository_full_name: None,
         mergeable: None,
         head_sha: "head".into(),
         base_sha: "base".into(),
@@ -1993,6 +1997,8 @@ async fn test_gitee_reports_reviewer_success_when_pull_patch_fails() {
         body: "Body".into(),
         source_branch: "feature".into(),
         target_branch: "main".into(),
+        base_repository_full_name: None,
+        head_repository_full_name: None,
         mergeable: None,
         head_sha: "head".into(),
         base_sha: "base".into(),
@@ -2050,6 +2056,8 @@ async fn test_gitee_clears_pull_request_milestone_with_zero_number() {
         body: "Body".into(),
         source_branch: "feature".into(),
         target_branch: "main".into(),
+        base_repository_full_name: None,
+        head_repository_full_name: None,
         mergeable: None,
         head_sha: "head".into(),
         base_sha: "base".into(),

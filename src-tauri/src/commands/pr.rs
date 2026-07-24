@@ -514,6 +514,7 @@ pub async fn pr_create_preview(
     let patches = standardize_patches(&preview.diff, &preview.files);
     Ok(PrCreatePreview {
         commits: preview.commits,
+        base_revision: preview.base_revision,
         incomplete: preview.incomplete,
         incomplete_reasons: preview.incomplete_reasons,
         diff: DiffResult {
@@ -837,6 +838,8 @@ mod tests {
             body: "原始描述".into(),
             source_branch: "feature".into(),
             target_branch: "main".into(),
+            base_repository_full_name: None,
+            head_repository_full_name: None,
             mergeable: Some(true),
             head_sha: "head".into(),
             base_sha: "base".into(),

@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
+import { prLabels, prParticipantSuggestions } from "@/api";
+import AppMultiSelect from "@/components/shared/AppMultiSelect.vue";
 import MarkdownRenderer from "@/components/shared/MarkdownRenderer.vue";
 import type {
+  Platform,
   PlatformCapabilities,
   PrDetail,
+  PrLabel,
   PrMetadataPermissions,
   PrMetadataUpdate,
+  User,
 } from "@/types";
+import { getErrorMessage } from "@/utils/error";
 
 const props = defineProps<{
   detail: PrDetail;
+  platform: Platform;
+  owner: string;
+  repo: string;
   capabilities: PlatformCapabilities | null;
   saving: boolean;
   statusMessage?: string;
@@ -24,11 +33,18 @@ const editing = ref(false);
 const title = ref("");
 const body = ref("");
 const draft = ref(false);
-const reviewers = ref("");
-const assignees = ref("");
-const labels = ref("");
+const reviewers = ref<string[]>([]);
+const assignees = ref<string[]>([]);
+const labels = ref<string[]>([]);
 const milestone = ref("");
 const validationError = ref("");
+const availableParticipants = ref<User[]>([]);
+const availableLabels = ref<PrLabel[]>([]);
+const participantsLoading = ref(false);
+const labelsLoading = ref(false);
+const participantsError = ref("");
+const labelsError = ref("");
+let optionsSequence = 0;
 
 const permissions = computed<PrMetadataPermissions>(() => props.detail.metadata_permissions);
 const canUse = (supported: boolean | undefined, permission: boolean | null): boolean =>
@@ -73,6 +89,73 @@ const categoryLabels = computed(() =>
     : { labels: "Labels", milestone: "Milestone" },
 );
 
+function labelColor(value: string | null): string | undefined {
+  const color = value?.trim();
+  if (!color || !/^#?[0-9a-f]{6}$/i.test(color)) return undefined;
+  return color.startsWith("#") ? color : `#${color}`;
+}
+
+const participantOptions = computed(() => {
+  const options = new Map<
+    string,
+    {
+      value: string;
+      label: string;
+      description?: string | null;
+      avatarUrl?: string | null;
+    }
+  >();
+  for (const participant of [
+    ...props.detail.reviewers,
+    ...props.detail.assignees,
+    ...availableParticipants.value,
+  ]) {
+    const login = participant.login.trim();
+    const key = login.toLocaleLowerCase();
+    if (!login || options.has(key)) continue;
+    options.set(key, {
+      value: login,
+      label: login,
+      description: participant.name && participant.name !== login ? participant.name : null,
+      avatarUrl: participant.avatar_url,
+    });
+  }
+  return [...options.values()];
+});
+
+const labelOptions = computed(() => {
+  const options = new Map<
+    string,
+    {
+      value: string;
+      label: string;
+      color?: string;
+      description?: string | null;
+    }
+  >();
+  for (const label of [
+    ...props.detail.summary.labels.map((name) => ({ name, color: null, description: null })),
+    ...availableLabels.value,
+  ]) {
+    const name = label.name.trim();
+    const key = name.toLocaleLowerCase();
+    if (!name) continue;
+    const existing = options.get(key);
+    if (existing) {
+      existing.color ||= labelColor(label.color);
+      existing.description ||= label.description;
+      continue;
+    }
+    options.set(key, {
+      value: name,
+      label: name,
+      color: labelColor(label.color),
+      description: label.description,
+    });
+  }
+  return [...options.values()];
+});
+
 const hasEditableField = computed(
   () =>
     canEditTitleBody.value ||
@@ -99,37 +182,93 @@ const hasUnknownPermission = computed(() =>
   ].some((value) => value == null),
 );
 
-function joinUsers(users: PrDetail["reviewers"]): string {
-  return users
-    .map((user) => user.login)
-    .filter(Boolean)
-    .join(", ");
-}
-
 function resetForm(): void {
   title.value = props.detail.summary.title;
   body.value = props.detail.body;
   draft.value = props.detail.draft ?? false;
-  reviewers.value = joinUsers(props.detail.reviewers);
-  assignees.value = joinUsers(props.detail.assignees);
-  labels.value = props.detail.summary.labels.join(", ");
+  reviewers.value = props.detail.reviewers.map((user) => user.login).filter(Boolean);
+  assignees.value = props.detail.assignees.map((user) => user.login).filter(Boolean);
+  labels.value = [...props.detail.summary.labels];
   milestone.value = props.detail.milestone?.title ?? "";
   validationError.value = "";
 }
 
+function invalidateOptions(): void {
+  optionsSequence += 1;
+  participantsLoading.value = false;
+  labelsLoading.value = false;
+}
+
 watch(
-  () => props.detail,
+  () => [props.detail, props.platform, props.owner, props.repo] as const,
   () => {
+    invalidateOptions();
     resetForm();
+    availableParticipants.value = [];
+    availableLabels.value = [];
     editing.value = false;
   },
   { immediate: true },
 );
 
-function parseList(value: string): string[] {
+async function loadParticipantOptions(sequence: number): Promise<void> {
+  if (!canManageReviewers.value && !canManageAssignees.value) return;
+  participantsLoading.value = true;
+  try {
+    const result = await prParticipantSuggestions(props.platform, props.owner, props.repo);
+    if (sequence !== optionsSequence) return;
+    const seen = new Set<string>();
+    availableParticipants.value = result.filter((participant) => {
+      const login = participant.login.trim();
+      const key = login.toLocaleLowerCase();
+      if (!login || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  } catch (cause) {
+    if (sequence === optionsSequence) {
+      participantsError.value = getErrorMessage(cause, "无法读取目标仓库成员");
+    }
+  } finally {
+    if (sequence === optionsSequence) participantsLoading.value = false;
+  }
+}
+
+async function loadLabelOptions(sequence: number): Promise<void> {
+  if (!canManageLabels.value) return;
+  labelsLoading.value = true;
+  try {
+    const result = await prLabels(props.platform, props.owner, props.repo);
+    if (sequence !== optionsSequence) return;
+    const seen = new Set<string>();
+    availableLabels.value = result.filter((label) => {
+      const name = label.name.trim();
+      const key = name.toLocaleLowerCase();
+      if (!name || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  } catch (cause) {
+    if (sequence === optionsSequence) {
+      labelsError.value = getErrorMessage(cause, "无法读取目标仓库标签");
+    }
+  } finally {
+    if (sequence === optionsSequence) labelsLoading.value = false;
+  }
+}
+
+function loadOptions(): void {
+  const sequence = ++optionsSequence;
+  availableParticipants.value = [];
+  availableLabels.value = [];
+  participantsError.value = "";
+  labelsError.value = "";
+  void Promise.all([loadParticipantOptions(sequence), loadLabelOptions(sequence)]);
+}
+
+function normalizeSelection(value: string[]): string[] {
   const seen = new Set<string>();
   return value
-    .split(/[,\n]/)
     .map((item) => item.trim())
     .filter((item) => {
       const key = item.toLocaleLowerCase();
@@ -142,9 +281,11 @@ function parseList(value: string): string[] {
 function startEditing(): void {
   resetForm();
   editing.value = true;
+  loadOptions();
 }
 
 function cancelEditing(): void {
+  invalidateOptions();
   resetForm();
   editing.value = false;
 }
@@ -165,18 +306,20 @@ function submit(): void {
         : props.detail.draft
       : null,
     reviewers: canManageReviewers.value
-      ? parseList(reviewers.value)
+      ? normalizeSelection(reviewers.value)
       : props.detail.reviewers.map((user) => user.login),
     assignees: canManageAssignees.value
-      ? parseList(assignees.value)
+      ? normalizeSelection(assignees.value)
       : props.detail.assignees.map((user) => user.login),
-    labels: canManageLabels.value ? parseList(labels.value) : props.detail.summary.labels,
+    labels: canManageLabels.value ? normalizeSelection(labels.value) : props.detail.summary.labels,
     milestone: canManageMilestone.value
       ? milestone.value.trim() || null
       : (props.detail.milestone?.title ?? null),
     expected_updated_at: props.detail.summary.updated_at,
   });
 }
+
+onUnmounted(invalidateOptions);
 </script>
 
 <template>
@@ -265,32 +408,44 @@ function submit(): void {
       </label>
       <label v-if="capabilities?.supports_pr_reviewer_management" class="field">
         <span>{{ participantLabels.reviewers }}</span>
-        <input
+        <AppMultiSelect
           v-model="reviewers"
+          :options="participantOptions"
+          :placeholder="participantsLoading ? '加载中…' : `选择${participantLabels.reviewers}`"
+          :search-placeholder="`搜索${participantLabels.reviewers}`"
+          empty-text="仓库暂无成员"
+          empty-search-text="没有匹配成员"
+          :aria-label="participantLabels.reviewers"
+          :disabled="!canManageReviewers || saving || participantsLoading"
           data-testid="metadata-reviewers"
-          type="text"
-          :disabled="!canManageReviewers || saving"
-          placeholder="登录名，多个使用逗号分隔"
         />
       </label>
       <label v-if="capabilities?.supports_pr_assignee_management" class="field">
         <span>{{ participantLabels.assignees }}</span>
-        <input
+        <AppMultiSelect
           v-model="assignees"
+          :options="participantOptions"
+          :placeholder="participantsLoading ? '加载中…' : `选择${participantLabels.assignees}`"
+          :search-placeholder="`搜索${participantLabels.assignees}`"
+          empty-text="仓库暂无成员"
+          empty-search-text="没有匹配成员"
+          :aria-label="participantLabels.assignees"
+          :disabled="!canManageAssignees || saving || participantsLoading"
           data-testid="metadata-assignees"
-          type="text"
-          :disabled="!canManageAssignees || saving"
-          placeholder="登录名，多个使用逗号分隔"
         />
       </label>
       <label v-if="capabilities?.supports_pr_label_management" class="field">
         <span>{{ categoryLabels.labels }}</span>
-        <input
+        <AppMultiSelect
           v-model="labels"
+          :options="labelOptions"
+          :placeholder="labelsLoading ? '加载中…' : '选择标签'"
+          search-placeholder="搜索标签"
+          empty-text="仓库暂无标签"
+          empty-search-text="没有匹配标签"
+          :aria-label="categoryLabels.labels"
+          :disabled="!canManageLabels || saving || labelsLoading"
           data-testid="metadata-labels"
-          type="text"
-          :disabled="!canManageLabels || saving"
-          placeholder="标签名称，多个使用逗号分隔"
         />
       </label>
       <label v-if="capabilities?.supports_pr_milestone_management" class="field">
@@ -306,6 +461,20 @@ function submit(): void {
       <p v-if="hasUnknownPermission" class="permission-note">
         部分权限无法预先确认；保存时会由平台 API 使用当前 Token 再次校验。
       </p>
+      <div v-if="participantsError || labelsError" class="options-error" role="alert">
+        <p class="error-msg">
+          {{ [participantsError, labelsError].filter(Boolean).join("；") }}
+        </p>
+        <button
+          class="btn btn-sm btn-outline"
+          type="button"
+          :disabled="saving || participantsLoading || labelsLoading"
+          data-testid="metadata-options-retry"
+          @click="loadOptions"
+        >
+          重新加载候选项
+        </button>
+      </div>
       <p v-if="validationError" class="error-msg" role="alert">{{ validationError }}</p>
       <div class="metadata-form-actions">
         <button class="btn btn-sm" type="button" :disabled="saving" @click="cancelEditing">
@@ -486,9 +655,21 @@ function submit(): void {
 .field-wide,
 .draft-control,
 .permission-note,
+.options-error,
 .metadata-form-actions,
 .metadata-form > .error-msg {
   grid-column: 1 / -1;
+}
+
+.options-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.options-error .error-msg {
+  margin: 0;
 }
 
 .field input,

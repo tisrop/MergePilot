@@ -37,6 +37,13 @@ vi.mock("@/api", () => ({
 const diffViewerStub = {
   props: {
     diff: { type: Object, required: true },
+    platform: { type: String, default: "" },
+    baseOwner: { type: String, default: "" },
+    baseRepo: { type: String, default: "" },
+    headOwner: { type: String, default: "" },
+    headRepo: { type: String, default: "" },
+    baseSha: { type: String, default: "" },
+    headSha: { type: String, default: "" },
     readOnly: { type: Boolean, default: false },
   },
   template: '<div data-testid="diff-preview">{{ diff.files.length }} files</div>',
@@ -49,6 +56,7 @@ function createPreview(
   incomplete = false,
 ): PrCreatePreview {
   return {
+    base_revision: null,
     incomplete,
     incomplete_reasons: incomplete ? ["platform_limit"] : [],
     commits: [
@@ -523,7 +531,17 @@ describe("PrNewPage", () => {
 
     await wrapper.get('[role="tab"][aria-selected="false"]').trigger("click");
     expect(wrapper.get('[data-testid="diff-preview"]').text()).toBe("1 files");
-    expect(wrapper.getComponent(diffViewerStub).props("readOnly")).toBe(true);
+    const diffViewer = wrapper.getComponent(diffViewerStub);
+    expect(diffViewer.props()).toMatchObject({
+      platform: "github",
+      baseOwner: "team",
+      baseRepo: "repo",
+      headOwner: "team",
+      headRepo: "repo",
+      baseSha: "main",
+      headSha: "feature",
+      readOnly: true,
+    });
   });
 
   it("预览被平台截断时显著警告但仍允许创建", async () => {
@@ -594,11 +612,13 @@ describe("PrNewPage", () => {
   });
 
   it("Diff 可以按提交切换，并支持恢复全部提交视图", async () => {
-    vi.mocked(prCreatePreview).mockImplementation(async (_platform, _owner, _repo, request) =>
-      request.commit_sha
+    vi.mocked(prCreatePreview).mockImplementation(async (_platform, _owner, _repo, request) => {
+      const result = request.commit_sha
         ? createPreview("Commit-only", request.commit_sha, "src/commit.ts", true)
-        : createPreview("All commits", "branch-sha", "src/all.ts"),
-    );
+        : createPreview("All commits", "branch-sha", "src/all.ts");
+      if (request.commit_sha) result.base_revision = "parent-sha";
+      return result;
+    });
     const { wrapper } = await mountPage();
 
     await wrapper.get('[role="tab"][aria-selected="false"]').trigger("click");
@@ -617,12 +637,39 @@ describe("PrNewPage", () => {
     expect(wrapper.getComponent(diffViewerStub).props("diff").files[0].filename).toBe(
       "src/commit.ts",
     );
+    expect(wrapper.getComponent(diffViewerStub).props()).toMatchObject({
+      baseOwner: "team",
+      baseRepo: "repo",
+      baseSha: "parent-sha",
+      headSha: "branch-sha",
+    });
     expect(wrapper.get(".preview-warning").text()).toContain("预览不完整");
 
     await scopeSelect.trigger("click");
     await wrapper.get(".dropdown-option[data-value='']").trigger("click");
     await flushPromises();
     expect(wrapper.getComponent(diffViewerStub).props("diff").files[0].filename).toBe("src/all.ts");
+  });
+
+  it("根提交没有父 revision 时明确提示仅显示变更后图片", async () => {
+    vi.mocked(prCreatePreview).mockImplementation(async (_platform, _owner, _repo, request) =>
+      request.commit_sha
+        ? createPreview("Root commit", request.commit_sha, "assets/root.svg")
+        : createPreview("All commits", "root-sha", "assets/root.svg"),
+    );
+    const { wrapper } = await mountPage();
+
+    await wrapper.get('[role="tab"][aria-selected="false"]').trigger("click");
+    const scopeSelect = wrapper.get('[aria-label="Diff 范围"]');
+    await scopeSelect.trigger("click");
+    await wrapper.get(".dropdown-option[data-value='root-sha']").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".preview-scope-note").text()).toContain("仅显示变更后图片");
+    expect(wrapper.getComponent(diffViewerStub).props()).toMatchObject({
+      baseSha: "",
+      headSha: "root-sha",
+    });
   });
 
   it("不完整提示只跟随当前选择的 Diff 范围", async () => {
