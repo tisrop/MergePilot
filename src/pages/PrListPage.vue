@@ -15,6 +15,17 @@ const auth = useAuthStore();
 const repo = useRepoStore();
 const pr = usePrStore();
 const createLabel = computed(() => (auth.activePlatform === "gitlab" ? "创建 MR" : "创建 PR"));
+const truncatedListNotice = computed(() => {
+  if (!pr.listTruncated) return "";
+  if (auth.activePlatform === "github") {
+    const total = pr.listTotalCount.toLocaleString("zh-CN");
+    return `共 ${total} 条已关闭或已合并 Pull Request，仅可浏览前 1,000 条。`;
+  }
+  if (auth.activePlatform === "gitlab") {
+    return "GitLab 当前仅返回部分 Merge Request，更多历史记录暂不可分页查看。";
+  }
+  return "Gitee 当前仅返回部分 Pull Request，更多历史记录暂不可分页查看。";
+});
 
 async function fetchPrs() {
   if (!auth.isLoggedIn || !repo.activeRepo) return;
@@ -197,6 +208,9 @@ function onSelectPr(prNumber: number) {
     </div>
 
     <div v-else class="pr-list">
+      <p v-if="pr.listTruncated" class="search-limit-notice" role="status">
+        {{ truncatedListNotice }}
+      </p>
       <PrCard
         v-for="item in pr.list"
         :key="item.number"
@@ -385,6 +399,16 @@ function onSelectPr(prNumber: number) {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+.search-limit-notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-light);
+  color: var(--color-warning);
+  font-size: 12px;
 }
 
 .pagination {

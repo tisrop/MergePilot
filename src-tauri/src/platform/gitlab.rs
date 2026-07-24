@@ -41,6 +41,35 @@ impl GitLabAdapter {
         Ok(resp.json().await?)
     }
 
+    fn warn_source_project_resolution_failed(source_project_id: u64, error: &AppError) {
+        let (error_kind, http_status) = match error {
+            AppError::Http(error) => {
+                let kind = if error.is_timeout() {
+                    "timeout"
+                } else if error.is_connect() {
+                    "network"
+                } else {
+                    "http"
+                };
+                (kind, error.status().map(|status| status.as_u16()))
+            }
+            AppError::Json(_) => ("invalid_response", None),
+            AppError::NotAuthenticated(_) => ("authentication", None),
+            AppError::Api(_) => ("platform_api", None),
+            AppError::Io(_) => ("io", None),
+            AppError::UnsupportedStrategy(_) | AppError::NotImplemented(_) => ("unsupported", None),
+            AppError::Ai(_) | AppError::Unknown(_) => ("unknown", None),
+        };
+        let event = serde_json::json!({
+            "event": "gitlab_source_project_resolution_failed",
+            "platform": "gitlab",
+            "source_project_id": source_project_id,
+            "error_kind": error_kind,
+            "http_status": http_status,
+        });
+        eprintln!("{event}");
+    }
+
     async fn list_commit_diffs(&self, project: &str, sha: &str) -> Result<(Vec<Value>, bool), AppError> {
         const PAGE_SIZE: usize = 100;
 
@@ -718,7 +747,7 @@ impl GitPlatform for GitLabAdapter {
             })
             .collect();
 
-        Ok(Paginated { items: repos, page, total_pages, total_count })
+        Ok(Paginated { items: repos, page, total_pages, total_count, truncated: None })
     }
 
     async fn list_pull_requests(
@@ -792,7 +821,7 @@ impl GitPlatform for GitLabAdapter {
             })
             .collect();
 
-        Ok(Paginated { items: mrs, page, total_pages, total_count })
+        Ok(Paginated { items: mrs, page, total_pages, total_count, truncated: None })
     }
 
     async fn list_review_inbox(
@@ -859,7 +888,7 @@ impl GitPlatform for GitLabAdapter {
         let start = page.saturating_sub(1).saturating_mul(per_page) as usize;
         let page_items = items.into_iter().skip(start).take(per_page as usize).collect();
 
-        Ok(Paginated { items: page_items, page, total_pages, total_count })
+        Ok(Paginated { items: page_items, page, total_pages, total_count, truncated: None })
     }
 
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError> {
@@ -885,14 +914,26 @@ impl GitPlatform for GitLabAdapter {
             status: None,
         };
 
-        let metadata_permissions = self.metadata_permissions(owner, repo, &summary.author.login).await;
         let base_repository_full_name = Some(format!("{owner}/{repo}"));
-        let head_repository_full_name =
-            json["source_project"]["path_with_namespace"].as_str().map(String::from).or_else(|| {
-                let source_project_id = json["source_project_id"].as_u64()?;
-                let target_project_id = json["target_project_id"].as_u64()?;
-                (source_project_id == target_project_id).then(|| format!("{owner}/{repo}"))
-            });
+        let source_project_id = json["source_project_id"].as_u64();
+        let target_project_id = json["target_project_id"].as_u64();
+        let head_repository_full_name = if let Some(path) = json["source_project"]["path_with_namespace"].as_str() {
+            Some(path.to_string())
+        } else if source_project_id.is_some() && source_project_id == target_project_id {
+            Some(format!("{owner}/{repo}"))
+        } else if let Some(source_project_id) = source_project_id {
+            let source_url = format!("{}/projects/{}", self.base_url, source_project_id);
+            match self.get_json::<Value>(&source_url).await {
+                Ok(project) => project["path_with_namespace"].as_str().map(String::from),
+                Err(error) => {
+                    Self::warn_source_project_resolution_failed(source_project_id, &error);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let metadata_permissions = self.metadata_permissions(owner, repo, &summary.author.login).await;
         Ok(PrDetail {
             summary,
             body: json["description"].as_str().unwrap_or("").to_string(),
@@ -1205,6 +1246,11 @@ impl GitPlatform for GitLabAdapter {
             };
             return Ok(PrCreatePreviewData {
                 commits: vec![summary],
+                base_revision: commit["parent_ids"]
+                    .as_array()
+                    .and_then(|parents| parents.first())
+                    .and_then(Value::as_str)
+                    .map(String::from),
                 diff,
                 files,
                 incomplete,
@@ -1286,6 +1332,7 @@ impl GitPlatform for GitLabAdapter {
             .unwrap_or_default();
         Ok(PrCreatePreviewData {
             commits,
+            base_revision: None,
             diff,
             files,
             incomplete,
@@ -1985,7 +2032,7 @@ impl GitPlatform for GitLabAdapter {
             })
             .collect();
 
-        Ok(Paginated { items: issues, page, total_pages: 1, total_count: 0 })
+        Ok(Paginated { items: issues, page, total_pages: 1, total_count: 0, truncated: None })
     }
 
     async fn create_issue(

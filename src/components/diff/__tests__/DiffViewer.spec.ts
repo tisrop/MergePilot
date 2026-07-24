@@ -810,6 +810,202 @@ describe("DiffViewer 受控标准 patch", () => {
     expect(wrapper.find(".controlled-file-message").exists()).toBe(false);
   });
 
+  it("从文本文件第一次切换到图片时立即加载并展示预览", async () => {
+    const mixedDiff: DiffResult = {
+      ...standardizedDiff,
+      files: [
+        { ...standardizedDiff.files[0], filename: "aaa/source.ts" },
+        {
+          filename: "zzz/screenshot.png",
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      patches: [
+        {
+          ...standardizedDiff.patches[0],
+          filename: "aaa/source.ts",
+          old_path: "aaa/source.ts",
+          new_path: "aaa/source.ts",
+        },
+        {
+          filename: "zzz/screenshot.png",
+          old_path: "zzz/screenshot.png",
+          new_path: "zzz/screenshot.png",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          content_kind: "binary",
+          patch: "",
+          message: "二进制文件不提供文本 Diff",
+          hunks: [],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (
+        _platform: Platform,
+        _owner: string,
+        _repo: string,
+        path: string,
+        revision: string,
+      ) => ({
+        ...fileContent(path, revision, ""),
+        content_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+        binary: true,
+      }),
+    );
+    const wrapper = await mountViewer(mixedDiff, contextProps);
+
+    expect(wrapper.get(".selected-file-name").text()).toBe("aaa/source.ts");
+    expect(prFileContentMock).not.toHaveBeenCalled();
+
+    const imageRow = wrapper
+      .findAll(".tree-row[data-file-path]")
+      .find((row) => row.attributes("data-file-path") === "zzz/screenshot.png");
+    expect(imageRow).toBeDefined();
+    await imageRow!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get(".selected-file-name").text()).toBe("zzz/screenshot.png");
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+  });
+
+  it("图片请求未完成时切走再切回同一文件会启动新请求并展示预览", async () => {
+    const mixedDiff: DiffResult = {
+      ...standardizedDiff,
+      files: [
+        { ...standardizedDiff.files[0], filename: "aaa/source.ts" },
+        {
+          filename: "zzz/screenshot.png",
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      patches: [
+        {
+          ...standardizedDiff.patches[0],
+          filename: "aaa/source.ts",
+          old_path: "aaa/source.ts",
+          new_path: "aaa/source.ts",
+        },
+        {
+          filename: "zzz/screenshot.png",
+          old_path: "zzz/screenshot.png",
+          new_path: "zzz/screenshot.png",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          content_kind: "binary",
+          patch: "",
+          message: "二进制文件不提供文本 Diff",
+          hunks: [],
+        },
+      ],
+    };
+    const pending: Array<(content: PrFileContent) => void> = [];
+    prFileContentMock.mockImplementation(
+      (_platform: Platform, _owner: string, _repo: string, _path: string, _revision: string) =>
+        new Promise<PrFileContent>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const wrapper = await mountViewer(mixedDiff, contextProps);
+    const rowFor = (path: string) =>
+      wrapper
+        .findAll(".tree-row[data-file-path]")
+        .find((row) => row.attributes("data-file-path") === path)!;
+
+    await rowFor("zzz/screenshot.png").trigger("click");
+    await flushPromises();
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+
+    await rowFor("aaa/source.ts").trigger("click");
+    await rowFor("zzz/screenshot.png").trigger("click");
+    await flushPromises();
+    expect(prFileContentMock).toHaveBeenCalledTimes(4);
+
+    for (const resolve of pending.slice(2)) {
+      resolve({
+        ...fileContent("zzz/screenshot.png", "head-sha", ""),
+        content_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+        binary: true,
+      });
+    }
+    await flushPromises();
+
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+
+    for (const resolve of pending.slice(0, 2)) {
+      resolve({
+        ...fileContent("zzz/screenshot.png", "base-sha", ""),
+        content_base64: "b2xkLXJlcXVlc3Q=",
+        binary: true,
+      });
+    }
+    await flushPromises();
+
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+    expect(wrapper.get(".image-preview-image").attributes("src")).toContain(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+    );
+  });
+
+  it("组件挂载后首次收到图片 Diff 时立即展示预览", async () => {
+    const imageDiff: DiffResult = {
+      diff: "",
+      files: [
+        {
+          filename: "assets/screenshot.png",
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      patch_schema_version: 1,
+      patches: [
+        {
+          filename: "assets/screenshot.png",
+          old_path: "assets/screenshot.png",
+          new_path: "assets/screenshot.png",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          content_kind: "binary",
+          patch: "",
+          message: "二进制文件不提供文本 Diff",
+          hunks: [],
+        },
+      ],
+    };
+    prFileContentMock.mockImplementation(
+      async (
+        _platform: Platform,
+        _owner: string,
+        _repo: string,
+        path: string,
+        revision: string,
+      ) => ({
+        ...fileContent(path, revision, ""),
+        content_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+        binary: true,
+      }),
+    );
+    const wrapper = mount(DiffViewer, { props: { diff: null, ...contextProps } });
+
+    await wrapper.setProps({ diff: imageDiff });
+    await flushPromises();
+
+    expect(prFileContentMock).toHaveBeenCalledTimes(2);
+    expect(wrapper.findAll(".image-preview-image")).toHaveLength(2);
+  });
+
   it("SVG 内容被截断时显示可重试错误并保留代码 Diff", async () => {
     const svgDiff: DiffResult = {
       ...standardizedDiff,

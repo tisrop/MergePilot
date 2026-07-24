@@ -485,7 +485,9 @@ impl GitHubAdapter {
         }
 
         let json: Value = response.json().await?;
-        let total_count = json["total_count"].as_u64().unwrap_or(0).min(u64::from(SEARCH_RESULT_LIMIT)) as u32;
+        let reported_total_count = json["total_count"].as_u64().unwrap_or(0);
+        let searchable_count = reported_total_count.min(u64::from(SEARCH_RESULT_LIMIT)) as u32;
+        let total_count = reported_total_count.min(u64::from(u32::MAX)) as u32;
         let result_state = if matches!(state, PrState::Merged) { PrState::Merged } else { PrState::Closed };
         let items = json["items"]
             .as_array()
@@ -507,9 +509,15 @@ impl GitHubAdapter {
                 status: None,
             })
             .collect();
-        let total_pages = total_count.div_ceil(per_page).max(1);
+        let total_pages = searchable_count.div_ceil(per_page).max(1);
 
-        Ok(Paginated { items, page, total_pages, total_count })
+        Ok(Paginated {
+            items,
+            page,
+            total_pages,
+            total_count,
+            truncated: (reported_total_count > u64::from(SEARCH_RESULT_LIMIT)).then_some(true),
+        })
     }
 
     fn inbox_status(node: &Value) -> ReviewInboxStatusSummary {
@@ -1061,7 +1069,7 @@ impl GitPlatform for GitHubAdapter {
         // Fetch org display names from API
         self.resolve_org_display_names(&mut repos).await;
 
-        Ok(Paginated { items: repos, page, total_pages, total_count })
+        Ok(Paginated { items: repos, page, total_pages, total_count, truncated: None })
     }
 
     async fn list_pull_requests(
@@ -1155,7 +1163,7 @@ impl GitPlatform for GitHubAdapter {
             last_page * per_page
         };
 
-        Ok(Paginated { items: prs, page, total_pages: last_page, total_count })
+        Ok(Paginated { items: prs, page, total_pages: last_page, total_count, truncated: None })
     }
 
     async fn list_review_inbox(
@@ -1242,7 +1250,7 @@ impl GitPlatform for GitHubAdapter {
             }
         }
 
-        Ok(Paginated { items: page_items, page, total_pages, total_count })
+        Ok(Paginated { items: page_items, page, total_pages, total_count, truncated: None })
     }
 
     async fn get_pull_request(&self, owner: &str, repo: &str, pr_number: u64) -> Result<PrDetail, AppError> {
@@ -1491,6 +1499,11 @@ impl GitPlatform for GitHubAdapter {
             };
             return Ok(PrCreatePreviewData {
                 commits: vec![summary],
+                base_revision: json["parents"]
+                    .as_array()
+                    .and_then(|parents| parents.first())
+                    .and_then(|parent| parent["sha"].as_str())
+                    .map(String::from),
                 diff,
                 files,
                 incomplete: false,
@@ -1531,6 +1544,7 @@ impl GitPlatform for GitHubAdapter {
             .collect();
         Ok(PrCreatePreviewData {
             commits,
+            base_revision: None,
             diff,
             files,
             incomplete: collection.incomplete,
@@ -2371,7 +2385,7 @@ impl GitPlatform for GitHubAdapter {
             })
             .collect();
 
-        Ok(Paginated { items: issues, page, total_pages: 1, total_count: 0 })
+        Ok(Paginated { items: issues, page, total_pages: 1, total_count: 0, truncated: None })
     }
 
     async fn create_issue(

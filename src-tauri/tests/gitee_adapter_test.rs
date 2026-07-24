@@ -395,6 +395,7 @@ async fn test_gitee_previews_a_single_commit() {
         .and(path("/api/v5/repos/contributor/repo/commits/abc123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "sha": "abc123",
+            "parents": [{"sha": "parent123"}],
             "commit": {
                 "message": "Only this commit\n\nDetails",
                 "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
@@ -427,6 +428,7 @@ async fn test_gitee_previews_a_single_commit() {
         .unwrap();
 
     assert_eq!(preview.commits[0].title, "Only this commit");
+    assert_eq!(preview.base_revision.as_deref(), Some("parent123"));
     assert_eq!(preview.files[0].filename, "src/commit.rs");
 }
 

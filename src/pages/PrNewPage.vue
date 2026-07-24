@@ -232,6 +232,12 @@ const displayedPreview = computed(() =>
   selectedDiffCommitSha.value ? commitPreview.value : preview.value,
 );
 const displayedDiff = computed(() => displayedPreview.value?.diff ?? null);
+const displayedBaseRevision = computed(() =>
+  selectedDiffCommitSha.value ? (commitPreview.value?.base_revision ?? "") : targetBranch.value,
+);
+const isCommitWithoutBase = computed(() =>
+  Boolean(selectedDiffCommitSha.value && commitPreview.value && !commitPreview.value.base_revision),
+);
 const displayedPreviewIncomplete = computed(() => displayedPreview.value?.incomplete === true);
 const displayedPreviewWarning = computed(() => {
   const reasons = displayedPreview.value?.incomplete_reasons ?? [];
@@ -808,18 +814,24 @@ onUnmounted(() => {
               <span>{{ commitPreviewError }}</span>
               <button class="btn btn-sm" type="button" @click="loadCommitPreview">重试</button>
             </div>
-            <DiffViewer
-              v-else-if="displayedDiff"
-              :diff="displayedDiff"
-              :platform="creationPlatform"
-              :base-owner="targetRepository?.owner"
-              :base-repo="targetRepository?.repo"
-              :head-owner="sourceRepository?.owner"
-              :head-repo="sourceRepository?.repo"
-              :base-sha="selectedDiffCommitSha ? '' : targetBranch"
-              :head-sha="selectedDiffCommitSha || sourceBranch"
-              read-only
-            />
+            <template v-else-if="displayedDiff">
+              <p v-if="isCommitWithoutBase" class="preview-scope-note">
+                该提交没有可用的父提交，仅显示变更后图片。
+              </p>
+              <DiffViewer
+                :diff="displayedDiff"
+                :platform="creationPlatform"
+                :base-owner="
+                  selectedDiffCommitSha ? sourceRepository?.owner : targetRepository?.owner
+                "
+                :base-repo="selectedDiffCommitSha ? sourceRepository?.repo : targetRepository?.repo"
+                :head-owner="sourceRepository?.owner"
+                :head-repo="sourceRepository?.repo"
+                :base-sha="displayedBaseRevision"
+                :head-sha="selectedDiffCommitSha || sourceBranch"
+                read-only
+              />
+            </template>
           </div>
         </template>
       </section>
@@ -1104,6 +1116,13 @@ onUnmounted(() => {
   gap: var(--space-3);
   padding: var(--space-3) 0;
   color: var(--color-danger);
+  font-size: 12px;
+}
+
+.preview-scope-note {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 

@@ -66,9 +66,11 @@ function repositoryCoordinates(fullName: string | null | undefined): RepositoryC
 const baseRepository = computed(
   () => repositoryCoordinates(pr.currentPr?.base_repository_full_name) ?? { owner, repo },
 );
-const headRepository = computed(
-  () => repositoryCoordinates(pr.currentPr?.head_repository_full_name) ?? { owner, repo },
-);
+const headRepository = computed<RepositoryCoordinates | null>(() => {
+  const fullName = pr.currentPr?.head_repository_full_name;
+  if (fullName === undefined) return { owner, repo };
+  return repositoryCoordinates(fullName);
+});
 
 type PrDetailTab = "diff" | "dependencies" | "reviews" | "ai";
 
@@ -733,8 +735,8 @@ onUnmounted(() => window.removeEventListener(APP_COMMAND_EVENT, handleAppCommand
             :head-sha="pr.currentPr?.head_sha ?? ''"
             :base-owner="baseRepository.owner"
             :base-repo="baseRepository.repo"
-            :head-owner="headRepository.owner"
-            :head-repo="headRepository.repo"
+            :head-owner="headRepository?.owner"
+            :head-repo="headRepository?.repo"
             :location-request="diffLocationRequest"
             :thread-summary="reviewThreadSummary"
             :can-sync-viewed-files="

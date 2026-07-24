@@ -322,6 +322,7 @@ const imageViewMode = ref<"source" | "preview">("preview");
 const imagePreviewPanels = ref<ImagePreviewPanel[]>([]);
 const imagePreviewLoading = ref(false);
 let imagePreviewRequestSequence = 0;
+let imagePreviewLoadingRequest: { identity: string; sequence: number } | null = null;
 
 function imageMimeType(path: string): string | null {
   const extension = path.toLowerCase().split(".").at(-1) ?? "";
@@ -446,39 +447,47 @@ async function loadImagePreview(): Promise<void> {
   const targets = imagePreviewTargets.value;
   const identity = imagePreviewIdentity.value;
   if (!canPreviewImage.value || !props.platform) return;
+  if (imagePreviewLoadingRequest?.identity === identity) return;
   const platform = props.platform;
 
   const requestSequence = ++imagePreviewRequestSequence;
+  imagePreviewLoadingRequest = { identity, sequence: requestSequence };
   imagePreviewLoading.value = true;
   imagePreviewPanels.value = targets.map((target) => ({ ...target, src: null, error: null }));
 
-  const panels = await Promise.all(
-    targets.map(async (target): Promise<ImagePreviewPanel> => {
-      try {
-        const file = await prFileContent(
-          platform,
-          target.owner,
-          target.repo,
-          target.path,
-          target.revision,
-        );
-        if (file.truncated) {
-          return { ...target, src: null, error: "图片文件过大，无法渲染预览" };
+  try {
+    const panels = await Promise.all(
+      targets.map(async (target): Promise<ImagePreviewPanel> => {
+        try {
+          const file = await prFileContent(
+            platform,
+            target.owner,
+            target.repo,
+            target.path,
+            target.revision,
+          );
+          if (file.truncated) {
+            return { ...target, src: null, error: "图片文件过大，无法渲染预览" };
+          }
+          const src = createImagePreviewSource(file, target.mimeType);
+          return src
+            ? { ...target, src, error: null }
+            : { ...target, src: null, error: "文件内容不是有效或受支持的图片" };
+        } catch (error) {
+          return { ...target, src: null, error: getErrorMessage(error, "图片预览加载失败") };
         }
-        const src = createImagePreviewSource(file, target.mimeType);
-        return src
-          ? { ...target, src, error: null }
-          : { ...target, src: null, error: "文件内容不是有效或受支持的图片" };
-      } catch (error) {
-        return { ...target, src: null, error: getErrorMessage(error, "图片预览加载失败") };
-      }
-    }),
-  );
+      }),
+    );
 
-  if (requestSequence !== imagePreviewRequestSequence || identity !== imagePreviewIdentity.value)
-    return;
-  imagePreviewPanels.value = panels;
-  imagePreviewLoading.value = false;
+    if (requestSequence !== imagePreviewRequestSequence || identity !== imagePreviewIdentity.value)
+      return;
+    imagePreviewPanels.value = panels;
+    imagePreviewLoading.value = false;
+  } finally {
+    if (imagePreviewLoadingRequest?.sequence === requestSequence) {
+      imagePreviewLoadingRequest = null;
+    }
+  }
 }
 
 function setImageViewMode(mode: "source" | "preview"): void {
@@ -1051,6 +1060,10 @@ async function selectFile(path: string) {
   if (selectedFilePath.value === path) return;
   selectedFilePath.value = path;
   await nextTick();
+  // The desktop WebView can commit the file selection before the image-preview watcher runs.
+  // Start the first preview from the selection path as a fallback; the loading guard prevents
+  // this from duplicating the watcher request.
+  if (isShowingImagePreview.value && !imagePreviewLoading.value) void loadImagePreview();
   if (diffScrollRef.value) diffScrollRef.value.scrollTop = 0;
   setSideDiffScrollLeft(0);
   if (topScrollbarRef.value) topScrollbarRef.value.scrollLeft = 0;
@@ -1343,13 +1356,18 @@ watch(
 
 watch(
   [imagePreviewIdentity, isShowingImagePreview],
-  ([, showingPreview]) => {
+  async ([identity, showingPreview]) => {
     imagePreviewRequestSequence += 1;
+    imagePreviewLoadingRequest = null;
     imagePreviewPanels.value = [];
     imagePreviewLoading.value = false;
-    if (showingPreview) void loadImagePreview();
+    if (!showingPreview) return;
+    await nextTick();
+    if (identity === imagePreviewIdentity.value && isShowingImagePreview.value) {
+      void loadImagePreview();
+    }
   },
-  { immediate: true },
+  { immediate: true, flush: "post" },
 );
 
 watch(
@@ -2955,8 +2973,16 @@ onUnmounted(() => {
   max-height: 100%;
   object-fit: contain;
   background-color: var(--color-surface);
-  background-image: url("/transparency-grid.svg");
-  background-repeat: repeat;
+  background-image:
+    linear-gradient(45deg, var(--color-surface-hover) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--color-surface-hover) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--color-surface-hover) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--color-surface-hover) 75%);
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
   background-size: 16px 16px;
 }
 

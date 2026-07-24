@@ -245,6 +245,38 @@ describe("PrDetailPage 关闭权限", () => {
     expect(wrapper.get('[data-testid="diff-repositories"]').text()).toBe("t8y2/dbx|eryajf/dbx");
   });
 
+  it("源仓库不可解析时不将 DiffViewer 的 head 回退到目标仓库", () => {
+    mocks.prStore.currentPr = {
+      ...detail,
+      base_repository_full_name: "t8y2/dbx",
+      head_repository_full_name: null,
+    };
+    const wrapper = mountPage({
+      DiffViewer: {
+        props: ["baseOwner", "baseRepo", "headOwner", "headRepo"],
+        template: `<span data-testid="diff-repositories">{{ baseOwner }}/{{ baseRepo }}|{{ headOwner ?? "none" }}/{{ headRepo ?? "none" }}</span>`,
+      },
+    });
+
+    expect(wrapper.get('[data-testid="diff-repositories"]').text()).toBe("t8y2/dbx|none/none");
+  });
+
+  it("源仓库路径格式非法时不将 DiffViewer 的 head 回退到目标仓库", () => {
+    mocks.prStore.currentPr = {
+      ...detail,
+      base_repository_full_name: "t8y2/dbx",
+      head_repository_full_name: "invalid-repository",
+    };
+    const wrapper = mountPage({
+      DiffViewer: {
+        props: ["baseOwner", "baseRepo", "headOwner", "headRepo"],
+        template: `<span data-testid="diff-repositories">{{ baseOwner }}/{{ baseRepo }}|{{ headOwner ?? "none" }}/{{ headRepo ?? "none" }}</span>`,
+      },
+    });
+
+    expect(wrapper.get('[data-testid="diff-repositories"]').text()).toBe("t8y2/dbx|none/none");
+  });
+
   it("非作者且没有仓库写入权限时禁用关闭按钮", async () => {
     const wrapper = mountPage();
     const button = wrapper.get('[data-testid="close-pr-button"]');

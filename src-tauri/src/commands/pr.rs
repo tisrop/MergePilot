@@ -514,6 +514,7 @@ pub async fn pr_create_preview(
     let patches = standardize_patches(&preview.diff, &preview.files);
     Ok(PrCreatePreview {
         commits: preview.commits,
+        base_revision: preview.base_revision,
         incomplete: preview.incomplete,
         incomplete_reasons: preview.incomplete_reasons,
         diff: DiffResult {

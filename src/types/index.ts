@@ -418,6 +418,7 @@ export interface DiffResult {
 
 export interface PrCreatePreview {
   commits: PrCommitSummary[];
+  base_revision: string | null;
   diff: DiffResult;
   incomplete: boolean;
   incomplete_reasons: Array<"platform_limit" | "pagination_failed" | "pagination_limit">;
@@ -531,6 +532,7 @@ export interface Paginated<T> {
   page: number;
   total_pages: number;
   total_count: number;
+  truncated?: boolean | null;
 }
 
 // ── 仓库 ──

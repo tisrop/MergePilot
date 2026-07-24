@@ -61,6 +61,25 @@ describe("usePrStore", () => {
     expect(store.list).toEqual([]);
   });
 
+  it("保留 GitHub Search 截断状态供列表页提示", async () => {
+    vi.mocked(prList).mockResolvedValueOnce({
+      items: [],
+      page: 1,
+      total_pages: 10,
+      total_count: 1001,
+      truncated: true,
+    });
+    const store = usePrStore();
+
+    await store.fetchPrList("github", "owner", "repo");
+
+    expect(store.listTruncated).toBe(true);
+    expect(store.listTotalCount).toBe(1001);
+    store.clearContext();
+    expect(store.listTruncated).toBe(false);
+    expect(store.listTotalCount).toBe(0);
+  });
+
   it("切换仓库后立即清除旧仓库的 PR 列表", async () => {
     const oldItem: PrSummary = {
       number: 3989,
@@ -82,6 +101,7 @@ describe("usePrStore", () => {
 
     expect(store.list).toEqual([]);
     expect(store.totalPages).toBe(1);
+    expect(store.listTotalCount).toBe(0);
     newRequest.resolve({ items: [], page: 1, total_pages: 1, total_count: 0 });
     await pending;
   });

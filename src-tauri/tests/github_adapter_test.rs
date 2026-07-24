@@ -391,6 +391,7 @@ async fn test_github_previews_a_single_commit() {
         .and(path("/repos/contributor/hello-world/commits/abc123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "sha": "abc123",
+            "parents": [{"sha": "parent123"}],
             "commit": {
                 "message": "Only this commit\n\nDetails",
                 "author": { "name": "Alice", "date": "2026-07-19T10:00:00Z" }
@@ -423,6 +424,7 @@ async fn test_github_previews_a_single_commit() {
         .unwrap();
 
     assert_eq!(preview.commits[0].title, "Only this commit");
+    assert_eq!(preview.base_revision.as_deref(), Some("parent123"));
     assert_eq!(preview.files[0].filename, "src/commit.rs");
 }
 
@@ -539,6 +541,35 @@ async fn test_github_lists_merged_prs_with_server_side_pagination() {
     assert_eq!(result.page, 2);
     assert_eq!(result.total_pages, 3);
     assert_eq!(result.total_count, 41);
+    assert_eq!(result.truncated, None);
+}
+
+#[tokio::test]
+async fn test_github_search_prs_marks_results_beyond_one_thousand_as_truncated() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/search/issues"))
+        .and(query_param("q", "repo:octocat/hello-world is:pr is:merged"))
+        .and(query_param("page", "1"))
+        .and(query_param("per_page", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total_count": 1001,
+            "incomplete_results": false,
+            "items": []
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let adapter = GitHubAdapter::new(HttpClient::new(), "test-token".to_string()).with_base_url(mock_server.uri());
+    let result = adapter
+        .list_pull_requests("octocat", "hello-world", &PrState::Merged, 1, 100)
+        .await
+        .expect("should return the searchable range");
+
+    assert_eq!(result.total_count, 1001);
+    assert_eq!(result.total_pages, 10);
+    assert_eq!(result.truncated, Some(true));
 }
 
 #[tokio::test]
